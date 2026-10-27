@@ -99,8 +99,11 @@ def test_bad_tokens_are_token_invalid(client, make_user, token):  # EC4, EC5, EC
     _assert_401(client.get(AUTHENTICATED, headers={"Authorization": f"Bearer {token}"}), "TOKEN_INVALID")
 
 
-def test_non_integer_subject_is_token_invalid(client, db):  # EC7
-    token = _token(sub="not-a-number")
+@pytest.mark.parametrize("sub", ["1", "42", "not-a-uuid", ""], ids=["old-int", "old-int-2", "garbage", "empty"])
+def test_non_uuid_subject_is_token_invalid(client, make_user, sub):  # EC7, E1, E2
+    make_user()  # a real user exists; an old integer-id token still must not resolve to anyone
+
+    token = _token(sub=sub)
 
     _assert_401(client.get(AUTHENTICATED, headers={"Authorization": f"Bearer {token}"}), "TOKEN_INVALID")
 
@@ -129,7 +132,7 @@ def test_valid_token_resolves_the_user(client, make_user, auth_header):  # AC4 h
     r = client.get(AUTHENTICATED, headers=auth_header(user))
 
     assert r.status_code == 200
-    assert r.json() == {"id": user.id}
+    assert r.json() == {"id": str(user.id)}
 
 
 # --- Authorization (require_roles / require_permissions) ---

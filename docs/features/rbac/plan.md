@@ -107,6 +107,7 @@ Token helpers live in `core/tokens.py`, separate from password hashing in `core/
 | graphify | skipped: no `graphify-out/` in this repo |
 
 ## Implementation Deviations (recorded during /implement)
+- Superseded by `docs/features/uuid-primary-keys/`: user ids are UUIDv7, not integers. Where this plan says "parse sub as int" or integer ids, read UUID.
 - Post-implementation rename (user request): feature-module files are prefixed with their folder name (`auth/auth_controller.py`, `users/users_route.py`, ...). Bare names elsewhere in this plan (`constants.py`, `dependencies.py`, ...) refer to these prefixed files. Token helpers moved from `core/security.py` to `core/tokens.py`.
 - Step 6 pulled forward the `/api/v1` mount and `POST /login` from Step 8, because Step 6's seam is the versioned login endpoint.
 - Pagination bounds live in `modules/users/constants.py`, not auth's constants: they belong to the users feature.

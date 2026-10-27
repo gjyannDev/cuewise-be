@@ -35,7 +35,7 @@ Authenticated users get one JWT from `POST /api/v1/auth/login`; protected routes
 - `User` gains a `role` (string enum: `admin`, `user`; default `user`) and `is_active` (default true), added through a new Alembic migration. Existing rows get `role=user`, `is_active=true`.
 - `POST /api/v1/auth/login` accepts email + password and returns `{access_token, token_type: "bearer"}`.
   - Wrong email, wrong password and inactive account all return the same `INVALID_CREDENTIALS` 401 with the same message.
-- Token is a signed JWT with claims `sub` (user id), `role`, `iat`, `exp`, `iss`, `aud`; lifetime from config (default 60 min).
+- Token is a signed JWT with claims `sub` (the user's UUID as a string), `role`, `iat`, `exp`, `iss`, `aud`; lifetime from config (default 60 min).
 - Decoding validates signature, algorithm (pinned), `exp`, `iss`, `aud`; failures map to `TOKEN_EXPIRED` or `TOKEN_INVALID`.
 - A `get_current_user` dependency: reads the bearer token, decodes it, loads the user from the DB on every request, and rejects a missing or inactive user.
 - Permissions are defined in code in `app/modules/auth/constants.py`: a `Permission` string enum and a `ROLE_PERMISSIONS` map (role -> set of permissions). This is the single place to edit when permissions change; no DB tables. Initial set:
@@ -46,7 +46,7 @@ Authenticated users get one JWT from `POST /api/v1/auth/login`; protected routes
 - Both guards are FastAPI dependencies attached per route (`Depends(...)`), not middleware: middleware cannot know a route's requirements, and dependencies appear in OpenAPI. Use `require_permissions` for feature access and `require_roles` for coarse role gates; a route may use either or both. Existing `RequestContextMiddleware` is unchanged.
 - Role -> permissions resolution goes through one function, `permissions_for(role)`, which is the only code that reads `ROLE_PERMISSIONS`. `require_permissions` and `/auth/me` both call it, so moving permissions into DB tables later changes only that function.
 - `GET /api/v1/auth/me` returns the current user (`id`, `email`, `role`, `permissions`); requires `users:read_self`.
-- `GET /api/v1/users` requires `users:read` (so effectively admin-only), lives in its own `users` module, and is paginated: `limit` (default 20, max 100), `offset` (default 0), ordered by `id` ascending. The response is an envelope `{items, total, limit, offset}`; each item has `id`, `email`, `role`, `is_active`.
+- `GET /api/v1/users` requires `users:read` (so effectively admin-only), lives in its own `users` module, and is paginated: `limit` (default 20, max 100), `offset` (default 0), ordered by `id` ascending (UUIDv7, so creation order). The response is an envelope `{items, total, limit, offset}`; each item has `id`, `email`, `role`, `is_active`.
 - `RegisterIn` does not accept a `role`; new users are always `user`.
 - Existing `POST /auth/register` moves to `/api/v1/auth/register`; existing tests that call `/auth/register` are updated. `/health` stays at the root.
 - A CLI script (run with `uv run python -m ...`) creates an admin by email or promotes an existing user to admin, reading the password securely if creating.
@@ -82,7 +82,7 @@ Format: condition -> expected outcome.
 - **EC4:** Token with a modified payload or wrong signature -> 401 `TOKEN_INVALID`.
 - **EC5:** Token signed with a different algorithm (e.g. `alg: none`) -> 401 `TOKEN_INVALID`.
 - **EC6:** Token with wrong `iss` or `aud` -> 401 `TOKEN_INVALID`.
-- **EC7:** Valid token whose `sub` is not an integer or refers to a deleted user -> 401 `TOKEN_INVALID`.
+- **EC7:** Valid token whose `sub` is not a UUID (including tokens issued with old integer ids) or refers to a deleted user -> 401 `TOKEN_INVALID`.
 - **EC8:** Valid token for a user later set `is_active=false` -> 401 `TOKEN_INVALID`.
 - **EC9:** Login with an unknown email -> 401 `INVALID_CREDENTIALS`, same message as a wrong password.
 - **EC10:** Login with a correct password for an inactive user -> 401 `INVALID_CREDENTIALS`, same message as a wrong password.

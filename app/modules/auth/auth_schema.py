@@ -1,4 +1,5 @@
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -29,12 +30,12 @@ class TokenOut(BaseModel):
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     email: EmailStr
 
 
 class MeOut(BaseModel):
-    id: int
+    id: UUID
     email: EmailStr
     role: str
     permissions: list[Permission]

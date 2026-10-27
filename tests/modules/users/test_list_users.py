@@ -17,7 +17,7 @@ def test_admin_gets_paginated_envelope(client, admin, auth_header):  # AC6
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"items", "total", "limit", "offset"}
-    assert body["items"] == [{"id": admin.id, "email": "admin@example.com", "role": "admin", "is_active": True}]
+    assert body["items"] == [{"id": str(admin.id), "email": "admin@example.com", "role": "admin", "is_active": True}]
     assert "argon2" not in r.text
 
 
@@ -46,7 +46,7 @@ def test_defaults_order_by_id_and_report_total(client, admin, make_user, auth_he
     ids = [item["id"] for item in body["items"]]
     assert len(ids) == 20
     assert ids == sorted(ids)
-    assert ids[0] == admin.id
+    assert ids[0] == str(admin.id)
 
 
 def test_limit_and_offset_select_the_requested_window(client, admin, make_user, auth_header):  # AC7
@@ -54,7 +54,7 @@ def test_limit_and_offset_select_the_requested_window(client, admin, make_user, 
 
     body = client.get(USERS, params={"limit": 2, "offset": 2}, headers=auth_header(admin)).json()
 
-    assert [item["id"] for item in body["items"]] == [others[1].id, others[2].id]
+    assert [item["id"] for item in body["items"]] == [str(others[1].id), str(others[2].id)]
     assert body["total"] == 6
 
 

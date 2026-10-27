@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from uuid import uuid7
 
 import jwt
 import pytest
@@ -21,10 +22,12 @@ def _sign(key=None, alg=None, **overrides):
     return jwt.encode(claims, key or settings.jwt_secret_key, algorithm=alg or settings.jwt_algorithm)
 
 
-def test_token_round_trips_all_claims():  # AC2
-    claims = decode_token(create_token(42, "admin"))
+def test_token_round_trips_all_claims():  # AC2, R3
+    user_id = uuid7()
 
-    assert claims["sub"] == "42"
+    claims = decode_token(create_token(user_id, "admin"))
+
+    assert claims["sub"] == str(user_id)
     assert claims["role"] == "admin"
     assert claims["iss"] == settings.jwt_issuer
     assert claims["aud"] == settings.jwt_audience
@@ -40,7 +43,7 @@ def test_expired_token_is_rejected_as_expired():  # EC3
 
 
 def test_tampered_payload_is_invalid():  # EC4
-    header, _payload, signature = create_token(1, "user").split(".")
+    header, _payload, signature = create_token(uuid7(), "user").split(".")
     forged_payload = jwt.utils.base64url_encode(b'{"sub":"1","role":"admin"}').decode()
 
     with pytest.raises(TokenInvalidError):

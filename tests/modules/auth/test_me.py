@@ -18,7 +18,7 @@ def test_me_returns_profile_with_resolved_permissions(client, make_user, auth_he
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"id", "email", "role", "permissions"}
-    assert body["id"] == user.id
+    assert body["id"] == str(user.id)
     assert body["email"] == "ana@example.com"
     assert body["role"] == role
     assert set(body["permissions"]) == permissions

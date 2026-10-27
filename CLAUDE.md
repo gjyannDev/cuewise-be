@@ -51,6 +51,7 @@ Rules:
 - **Separation of concerns**: one responsibility per file/function; HTTP, business logic, and persistence stay apart.
 - Match surrounding style, naming, and comment density. No speculative abstractions (YAGNI).
 - Type-hint everything; use `async` consistently (don't mix blocking I/O into async routes).
+- **IDs: every table's primary key (and every foreign key to it) is a UUID, never an auto-increment integer.** Use time-ordered UUIDv7 (`uuid.uuid7()` from the stdlib, Python 3.14+) generated in the app, never by the DB: every model inherits `UUIDPrimaryKeyMixin` from `app/db/mixins.py` instead of declaring its own `id`. Reasons: IDs in URLs/tokens can't be guessed or enumerated, and they stay unique across tables and environments. Routes, schemas and JWT `sub` carry the UUID as a string; never expose or accept integer IDs.
 
 ## Security
 - **Auth**: JWT (short-lived access tokens, validate `exp`, `iss`, `aud`, signature algorithm explicitly). Protect routes via `Depends(...)` auth dependencies; default-deny.

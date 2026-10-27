@@ -1,10 +1,12 @@
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class UserAdminOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     email: EmailStr
     role: str
     is_active: bool

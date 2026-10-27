@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import jwt
 
@@ -9,7 +10,7 @@ from app.core.errors import TokenExpiredError, TokenInvalidError
 _REQUIRED_CLAIMS = ["sub", "exp", "iat", "iss", "aud"]
 
 
-def create_token(user_id: int, role: str) -> str:
+def create_token(user_id: UUID, role: str) -> str:
     # role is informational for clients; authorization always re-reads it from the DB.
     now = datetime.now(UTC)
     claims = {

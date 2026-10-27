@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from typing import Literal
+from uuid import UUID
 
 from pydantic import EmailStr, TypeAdapter
 
@@ -36,7 +37,7 @@ class AuthController:
     def authenticate_token(self, token: str) -> User:
         claims = decode_token(token)
         try:
-            user_id = int(claims["sub"])
+            user_id = UUID(claims["sub"])
         except ValueError as exc:
             raise TokenInvalidError("Access token is invalid") from exc
         user = self.repo.get_by_id(user_id)
