@@ -30,7 +30,7 @@ def test_auth_error_sends_bearer_challenge_and_specific_code(client):  # AC2
 
 
 def test_validation_error_lists_each_broken_field(client):  # AC3
-    r = client.post("/auth/register", json={"email": "not-an-email", "password": "short"})
+    r = client.post("/api/v1/auth/register", json={"email": "not-an-email", "password": "short"})
 
     assert r.status_code == 422
     assert error_of(r)["code"] == "VALIDATION_ERROR"
@@ -41,7 +41,7 @@ def test_validation_error_lists_each_broken_field(client):  # AC3
 
 
 def test_validation_error_never_echoes_submitted_values(client):  # AC4
-    r = client.post("/auth/register", json={"email": "not-an-email", "password": "s3cr"})
+    r = client.post("/api/v1/auth/register", json={"email": "not-an-email", "password": "s3cr"})
 
     assert "s3cr" not in r.text
     assert "not-an-email" not in r.text
@@ -49,7 +49,7 @@ def test_validation_error_never_echoes_submitted_values(client):  # AC4
 
 def test_malformed_json_returns_readable_validation_error(client):  # EC3
     raw = '{"email": "leak@example.com", "password": '
-    r = client.post("/auth/register", content=raw, headers={"Content-Type": "application/json"})
+    r = client.post("/api/v1/auth/register", content=raw, headers={"Content-Type": "application/json"})
 
     assert r.status_code == 422
     assert error_of(r)["code"] == "VALIDATION_ERROR"
