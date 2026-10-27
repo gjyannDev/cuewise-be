@@ -1,5 +1,4 @@
-from fastapi import HTTPException, status
-
+from app.core.errors import ConflictError
 from app.core.security import hash_password
 
 from .model import User
@@ -13,5 +12,5 @@ class AuthController:
 
     def register(self, data: RegisterIn) -> User:
         if self.repo.get_by_email(data.email):
-            raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
+            raise ConflictError("Email already registered", {"field": "email"})
         return self.repo.create(data.email, hash_password(data.password))
