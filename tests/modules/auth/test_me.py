@@ -4,11 +4,15 @@ from app.main import app
 from app.modules.auth.auth_constants import Role
 
 ME = "/api/v1/auth/me"
+INTERVIEW_PERMISSIONS = {"interviews:create", "interviews:read_self"}
 
 
 @pytest.mark.parametrize(
     ("role", "permissions"),
-    [(Role.admin, {"users:read", "users:read_self"}), (Role.user, {"users:read_self"})],
+    [
+        (Role.admin, {"users:read", "users:read_self"} | INTERVIEW_PERMISSIONS),
+        (Role.user, {"users:read_self"} | INTERVIEW_PERMISSIONS),
+    ],
 )
 def test_me_returns_profile_with_resolved_permissions(client, make_user, auth_header, role, permissions):  # AC5, AC17
     user = make_user(email="ana@example.com", role=role)
