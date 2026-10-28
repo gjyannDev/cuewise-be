@@ -1,0 +1,27 @@
+[
+  {"id": "gen-beh-01", "text": "Tell me about yourself and what you are looking for in your next role.", "type": "behavioral", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-beh-02", "text": "Describe a time you disagreed with a teammate. How did you resolve it?", "type": "behavioral", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-beh-03", "text": "Tell me about a mistake you made at work or school and what you learned from it.", "type": "behavioral", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-beh-04", "text": "Describe a project you are proud of. What was your specific contribution?", "type": "behavioral", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-beh-05", "text": "How do you prioritize when you have several deadlines at the same time?", "type": "behavioral", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-beh-06", "text": "Tell me about a time you had to learn a new technology quickly.", "type": "behavioral", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-beh-07", "text": "Describe a time you mentored someone or helped a teammate grow.", "type": "behavioral", "roles": ["general"], "levels": ["mid", "senior"]},
+  {"id": "gen-beh-08", "text": "Tell me about a technical decision you pushed back on. What happened?", "type": "behavioral", "roles": ["general"], "levels": ["senior"]},
+
+  {"id": "gen-tech-01", "text": "Explain the difference between a process and a thread.", "type": "technical", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-tech-02", "text": "What happens, step by step, when you type a URL into a browser and press Enter?", "type": "technical", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-tech-03", "text": "How would you debug a bug that only happens in production?", "type": "technical", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-tech-04", "text": "What makes code easy to test? Give an example from your own work.", "type": "technical", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-tech-05", "text": "Explain how Git branching and merging work, and how you handle a merge conflict.", "type": "technical", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+  {"id": "gen-tech-06", "text": "What is the difference between authentication and authorization?", "type": "technical", "roles": ["general"], "levels": ["intern", "junior", "mid", "senior"]},
+
+  {"id": "fe-tech-01", "text": "How does the browser render a page, and what causes layout thrashing?", "type": "technical", "roles": ["frontend", "fullstack"], "levels": ["junior", "mid", "senior"]},
+  {"id": "fe-tech-02", "text": "Explain how state management works in a React app and when you would lift state up.", "type": "technical", "roles": ["frontend", "fullstack"], "levels": ["intern", "junior", "mid"]},
+  {"id": "be-tech-01", "text": "How would you design a REST API for a to-do app? Walk through the endpoints and status codes.", "type": "technical", "roles": ["backend", "fullstack"], "levels": ["intern", "junior", "mid"]},
+  {"id": "be-tech-02", "text": "What is a database index, and when can adding one make things slower?", "type": "technical", "roles": ["backend", "fullstack", "data"], "levels": ["junior", "mid", "senior"]},
+  {"id": "mob-tech-01", "text": "How do you handle offline support and syncing in a mobile app?", "type": "technical", "roles": ["mobile"], "levels": ["mid", "senior"]},
+  {"id": "mob-tech-02", "text": "What are the main differences between building for iOS and Android?", "type": "technical", "roles": ["mobile"], "levels": ["intern", "junior", "mid"]},
+  {"id": "data-tech-01", "text": "Explain the difference between a JOIN and a subquery, and when you would use each.", "type": "technical", "roles": ["data"], "levels": ["intern", "junior", "mid"]},
+  {"id": "data-tech-02", "text": "How would you detect and handle missing or duplicate data in a pipeline?", "type": "technical", "roles": ["data"], "levels": ["mid", "senior"]},
+  {"id": "be-beh-01", "text": "Tell me about a time a service you owned went down. How did you respond?", "type": "behavioral", "roles": ["backend", "fullstack"], "levels": ["mid", "senior"]}
+]

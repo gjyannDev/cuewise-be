@@ -34,6 +34,10 @@ class ConflictError(AppError):
     status_code, code = 409, "CONFLICT"
 
 
+class NotEnoughQuestionsError(ConflictError):
+    code = "NOT_ENOUGH_QUESTIONS"
+
+
 class UnauthorizedError(AppError):
     status_code, code = 401, "UNAUTHORIZED"
     headers = {"WWW-Authenticate": "Bearer"}
