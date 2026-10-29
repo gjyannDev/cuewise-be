@@ -1,5 +1,9 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI
 
+from app.core.ai.factory import build_provider
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import setup_logging
@@ -10,7 +14,20 @@ from app.modules.users.users_route import router as users_router
 
 setup_logging(settings.debug)
 
-app = FastAPI(title="Cuewise API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # One LLM client for the whole app (connection reuse); None when no key is configured.
+    provider = build_provider(settings)
+    app.state.llm_provider = provider
+    try:
+        yield
+    finally:
+        if provider is not None:
+            provider.close()
+
+
+app = FastAPI(title="Cuewise API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(RequestContextMiddleware)
 register_exception_handlers(app)
