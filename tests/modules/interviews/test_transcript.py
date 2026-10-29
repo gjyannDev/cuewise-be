@@ -2,8 +2,9 @@ import uuid
 
 import pytest
 
-from app.core.ai.provider import LLMTimeoutError
 from app.main import app
+from app.modules.interviews.interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
+from app.modules.interviews.interviews_repository import InterviewsRepository
 
 MESSAGES = "/api/v1/interviews/{}/messages"
 
@@ -62,17 +63,28 @@ def test_answered_turns_come_back_in_conversation_order(transcript, answer, star
         (2, "interviewer", "reaction"),
         (3, "interviewer", "question"),
     ]
-    assert [i["text"] for i in items[1:3]] == ["Answer one.", "Reaction one."]
+    assert items[1]["text"] == "Answer one."
+    assert items[2]["text"] and "Reaction one." not in str(items)  # predefined reaction, not an LLM one
     assert all(i["created_at"] for i in items if i["kind"] != "question")
     assert len({i["question_id"] for i in items}) == 3
 
 
-def test_missing_reaction_has_no_item_and_no_placeholder(transcript, answer, started, llm):  # EC28
-    owner, session_id, q1 = started
-    llm.script(LLMTimeoutError("slow"))
-    answer(owner, session_id, q1["id"])
+def test_a_legacy_answer_without_a_reaction_has_no_item(make_user, transcript, db):  # EC28 (pre-slice-2 data)
+    owner = make_user(email="legacy@example.com")
+    session = InterviewSession(
+        user_id=owner.id,
+        role="backend",
+        level="junior",
+        interview_type="behavioral",
+        question_count=2,
+        current_position=2,
+    )
+    stored = [InterviewQuestion(position=i, text=f"Q{i}?", category="behavioral", bank_id=f"b{i}") for i in (1, 2)]
+    InterviewsRepository(db).start(session, stored)
+    db.add(InterviewMessage(session_id=session.id, question_id=stored[0].id, role="candidate", content="A1"))
+    db.commit()
 
-    items = transcript(owner, session_id).json()["items"]
+    items = transcript(owner, session.id).json()["items"]
 
     assert shape(items) == [(1, "interviewer", "question"), (1, "candidate", "answer"), (2, "interviewer", "question")]
 
@@ -110,6 +122,7 @@ def test_abandoned_session_stops_where_it_was_left(transcript, answer, start_int
     assert shape(r.json()["items"]) == [
         (1, "interviewer", "question"),
         (1, "candidate", "answer"),
+        (1, "interviewer", "reaction"),
         (2, "interviewer", "question"),
     ]
 

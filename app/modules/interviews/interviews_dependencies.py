@@ -1,4 +1,6 @@
 import random
+import time
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -24,12 +26,26 @@ def get_llm_provider(request: Request) -> LLMProvider | None:
     return getattr(request.app.state, "llm_provider", None)
 
 
+def get_clock() -> Callable[[], float]:
+    """Monotonic clock for the per-turn LLM time budget; tests swap in a fake one."""
+    return time.monotonic
+
+
 def get_controller(
     db: Annotated[Session, Depends(get_db)],
     bank: Annotated[list[BankQuestion], Depends(get_bank)],
     llm: Annotated[LLMProvider | None, Depends(get_llm_provider)],
+    clock: Annotated[Callable[[], float], Depends(get_clock)],
 ) -> InterviewsController:
-    return InterviewsController(InterviewsRepository(db), bank, random.Random(), llm, settings.llm_max_tokens)
+    return InterviewsController(
+        InterviewsRepository(db),
+        bank,
+        random.Random(),
+        llm,
+        settings.llm_max_tokens,
+        llm_budget_seconds=settings.llm_total_budget_seconds,
+        clock=clock,
+    )
 
 
 InterviewsControllerDep = Annotated[InterviewsController, Depends(get_controller)]

@@ -108,14 +108,14 @@ def test_session_not_in_progress_is_409_and_nothing_happens(
     else:
         db.get(InterviewSession, uuid.UUID(session_id)).status = "completed"
         db.commit()
-    before = message_count(db)
+    before, calls_before = message_count(db), len(llm.fake.calls)
 
     r = answer(owner, session_id, q1["id"])
 
     assert r.status_code == 409
     assert r.json()["error"]["code"] == "SESSION_NOT_IN_PROGRESS"
     assert message_count(db) == before
-    assert llm.fake.calls == []
+    assert len(llm.fake.calls) == calls_before
 
 
 def test_any_question_but_the_current_one_is_the_same_409(
@@ -123,9 +123,9 @@ def test_any_question_but_the_current_one_is_the_same_409(
 ):  # EC9, AC7
     owner, session_id, q1 = started
     q2 = answer(owner, session_id, q1["id"]).json()["current_question"]
-    llm.script()  # fresh fake: count only calls made from here on
     other_user = make_user(email="other@example.com")
     foreign_q = start_interview(other_user).json()["current_question"]
+    llm.script()  # fresh fake: count only calls made from here on
     before = message_count(db)
 
     candidates = {
@@ -144,20 +144,20 @@ def test_any_question_but_the_current_one_is_the_same_409(
     assert q2["position"] == 2
 
 
-def test_a_future_question_is_not_current_either(answer, started, db):  # EC9
-    owner, session_id, q1 = started
-    answer(owner, session_id, q1["id"])  # now on question 2
-    q3 = db.scalar(
-        select(InterviewQuestion).where(
-            InterviewQuestion.session_id == uuid.UUID(session_id), InterviewQuestion.position == 3
-        )
+def test_a_future_question_is_not_current_either(make_user, answer, db):  # EC9
+    # New sessions only create a question when it is asked; pre-slice-2 sessions stored all of them up front.
+    owner = make_user(email="legacy@example.com")
+    session = InterviewSession(
+        user_id=owner.id, role="backend", level="junior", interview_type="behavioral", question_count=3
     )
+    stored = [InterviewQuestion(position=i, text=f"Q{i}?", category="behavioral", bank_id=f"b{i}") for i in (1, 2, 3)]
+    InterviewsRepository(db).start(session, stored)
 
-    r = answer(owner, session_id, q3.id)
+    r = answer(owner, session.id, stored[2].id)
 
     assert r.status_code == 409
     assert r.json()["error"]["code"] == "QUESTION_NOT_CURRENT"
-    assert db.get(InterviewSession, uuid.UUID(session_id)).current_position == 2
+    assert db.get(InterviewSession, session.id).current_position == 1
 
 
 def test_submitting_the_same_question_twice_stores_one_answer(answer, started, db, llm):  # EC10, AC8
@@ -183,15 +183,23 @@ def test_lost_race_on_the_advance_saves_nothing(
     question_id = uuid.UUID(created["current_question"]["id"])
     repo = InterviewsRepository(db)
 
-    def candidate(text):
-        return InterviewMessage(session_id=session.id, question_id=question_id, role="candidate", content=text)
+    def turn(text):
+        answer = InterviewMessage(session_id=session.id, question_id=question_id, role="candidate", content=text)
+        reaction = InterviewMessage(session_id=session.id, question_id=question_id, role="interviewer", content="Ok.")
+        next_question = InterviewQuestion(position=2, text=f"Next after {text}?", category="behavioral")
+        return answer, reaction, next_question
 
-    assert repo.record_answer(candidate("winner"), expected_position=1, completes=False) is True
+    assert repo.record_turn(*turn("winner"), expected_position=1, completes=False) is True
     # The loser read position 1 before the winner committed; its conditional update now matches no row.
-    assert repo.record_answer(candidate("loser"), expected_position=1, completes=False) is False
+    assert repo.record_turn(*turn("loser"), expected_position=1, completes=False) is False
 
     assert db.get(InterviewSession, session.id).current_position == 2
-    assert [m.content for m in db.scalars(select(InterviewMessage))] == ["winner"]
+    assert [m.content for m in db.scalars(select(InterviewMessage).where(InterviewMessage.role == "candidate"))] == [
+        "winner"
+    ]
+    assert [q.text for q in db.scalars(select(InterviewQuestion).where(InterviewQuestion.position == 2))] == [
+        "Next after winner?"
+    ]
 
 
 def test_database_rejects_a_second_answer_for_one_question(make_user, start_interview, db):  # EC10 backstop
@@ -226,7 +234,7 @@ def test_database_failure_while_saving_the_answer_persists_nothing(answer, start
     assert r.json()["error"]["code"] == "INTERNAL_ERROR"
     assert message_count(db) == 0
     assert db.get(InterviewSession, uuid.UUID(session_id)).current_position == 1
-    assert llm.fake.calls == []
+    assert len(db.scalars(select(InterviewQuestion)).all()) == 1  # no next question either (atomic turn)
 
 
 def test_answer_route_documents_its_error_responses():  # AC20

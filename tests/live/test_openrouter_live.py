@@ -1,7 +1,8 @@
-"""Opt-in: one real call to OpenRouter. Costs a tiny amount of money, so it never runs by default.
+"""Opt-in: real calls to OpenRouter. Costs a tiny amount of money, so it never runs by default.
 
 Run it with:  LLM_LIVE_TEST=1 uv run pytest tests/live -q -s
-(needs OPENROUTER_API_KEY and LLM_MODEL in .env). It confirms the response-shape assumptions in the spec.
+(needs OPENROUTER_API_KEY and LLM_MODEL in .env). It confirms the response-shape assumptions in the spec and that the
+configured model can follow the interviewer's JSON contract.
 """
 
 import os
@@ -10,8 +11,9 @@ import pytest
 
 from app.core.ai.factory import build_provider
 from app.core.config import settings
-from app.modules.interviews.interviews_constants import JobRole, Level
-from app.modules.interviews.interviews_utils import Turn, build_llm_messages, render_reaction_prompt
+from app.modules.interviews.interviews_constants import InterviewType, JobRole, Level
+from app.modules.interviews.interviews_reply import parse_interviewer_reply
+from app.modules.interviews.interviews_utils import QuestionTurn, build_interviewer_messages, render_interviewer_prompt
 
 pytestmark = pytest.mark.skipif(
     os.getenv("LLM_LIVE_TEST") != "1" or not settings.llm_configured,
@@ -19,28 +21,31 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_real_reaction_has_text_usage_and_finish_reason():  # AC19
+def test_real_model_writes_a_valid_next_question():  # llm-interviewer AC20
     provider = build_provider(settings)
     assert provider is not None
-    messages = build_llm_messages(
-        render_reaction_prompt(JobRole.backend, Level.junior),
-        [
-            Turn(
-                "Tell me about a time you disagreed with a teammate.",
-                "We argued about REST vs GraphQL, so I built two small prototypes and we compared them.",
-                None,
-            )
-        ],
+    asked = "Tell me about a time you disagreed with a teammate."
+    system = render_interviewer_prompt(
+        role=JobRole.backend,
+        level=Level.junior,
+        interview_type=InterviewType.mixed,
+        question_number=2,
+        question_count=5,
+    )
+    messages = build_interviewer_messages(
+        system,
+        "Backend developer for a payments API in Python.",
+        [QuestionTurn(asked, "behavioral", "We argued about REST vs GraphQL, so I built two prototypes.")],
     )
     try:
         result = provider.complete(messages, max_tokens=settings.llm_max_tokens)
     finally:
         provider.close()
 
-    reply = (
+    usage = (
         f"model={result.model} tokens={result.prompt_tokens}/{result.completion_tokens} finish={result.finish_reason}"
     )
-    print(f"\n{reply} latency_ms={result.latency_ms}\nreply={result.text!r}")
-    assert result.text.strip()
+    print(f"\n{usage} latency_ms={result.latency_ms}\nraw={result.text!r}")
     assert result.prompt_tokens and result.completion_tokens
-    assert result.finish_reason in {"stop", "length"}
+    reply = parse_interviewer_reply(result.text, interview_type=InterviewType.mixed, earlier_questions=[asked])
+    print(f"question={reply.question!r} category={reply.category}")

@@ -29,6 +29,13 @@ class InterviewsRepository:
         self.db.refresh(session)
         return session
 
+    def release(self) -> None:
+        """End the read transaction before a slow call, so no connection sits idle in a transaction meanwhile.
+
+        Every loaded object expires afterwards: callers copy what they need into plain values first.
+        """
+        self.db.rollback()
+
     def get_for_user(self, session_id: uuid.UUID, user_id: uuid.UUID) -> InterviewSession | None:
         # Keyed on the owner too, so "missing" and "someone else's" are indistinguishable.
         return self.db.scalar(
@@ -59,11 +66,20 @@ class InterviewsRepository:
             )
         )
 
-    def record_answer(self, answer: InterviewMessage, expected_position: int, *, completes: bool) -> bool:
-        """Save the answer and advance the session in one commit, only if it is still at `expected_position`.
+    def record_turn(
+        self,
+        answer: InterviewMessage,
+        reaction: InterviewMessage,
+        next_question: InterviewQuestion | None,
+        expected_position: int,
+        *,
+        completes: bool,
+    ) -> bool:
+        """Save one whole turn in one commit: advance the session, the answer, the reaction and the next question.
 
-        A compare-and-swap: the conditional UPDATE matches zero rows when another request already moved the
-        session on (double-click, retry) or it is no longer in progress, and then nothing is saved.
+        A compare-and-swap: the conditional UPDATE matches zero rows when another request already moved the session
+        on (double-click, retry, a newer interview) or it is no longer in progress, and then nothing is saved.
+        All or nothing, so a session never waits at a position that has no question.
         """
         advance = (
             {"status": SessionStatus.completed}
@@ -86,21 +102,15 @@ class InterviewsRepository:
             if result.rowcount != 1:
                 self.db.rollback()
                 return False
-            self.db.add(answer)
+            self.db.add_all([answer, reaction])
+            if next_question is not None:
+                next_question.session_id = answer.session_id
+                self.db.add(next_question)
             self.db.commit()
         except Exception:
             self.db.rollback()
             raise
         return True
-
-    def save_message(self, message: InterviewMessage) -> InterviewMessage:
-        try:
-            self.db.add(message)
-            self.db.commit()
-        except Exception:
-            self.db.rollback()
-            raise
-        return message
 
     def _abandon_in_progress(self, user_id: uuid.UUID) -> None:
         self.db.execute(

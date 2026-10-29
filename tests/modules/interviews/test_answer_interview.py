@@ -28,7 +28,7 @@ def test_answering_a_question_saves_it_and_moves_to_the_next(make_user, start_in
     body = r.json()
     assert set(body) == {"session", "reaction", "current_question"}
     assert body["session"]["status"] == "in_progress"
-    assert body["reaction"] is None  # no LLM configured in tests by default (EC18)
+    assert body["reaction"]["text"]  # predefined, present even with no LLM configured (llm-interviewer EC1)
     assert body["current_question"]["position"] == 2
     assert "bank_id" not in r.text
     [row] = candidate_rows(db, session_uuid(created))

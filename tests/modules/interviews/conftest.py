@@ -1,9 +1,11 @@
+import json
+
 import pytest
 
 from app.core.ai.fake import FakeProvider
 from app.main import app
 from app.modules.interviews.interviews_constants import Level
-from app.modules.interviews.interviews_dependencies import get_bank, get_llm_provider
+from app.modules.interviews.interviews_dependencies import get_bank, get_clock, get_llm_provider
 from app.modules.interviews.interviews_schema import BankQuestion
 
 
@@ -54,13 +56,21 @@ def answer(client, auth_header):
 
 @pytest.fixture
 def llm():
-    """Swap the LLM for a scripted fake: `llm.script(...)` queues replies/errors; `llm.fake.calls` records inputs."""
+    """Swap the LLM for a scripted fake: `llm.script(...)` queues replies/errors; `llm.fake.calls` records inputs.
+
+    Once the script runs out, every call returns a new valid behavioral question (allowed for behavioral and mixed
+    interviews), so a test only scripts the turns it cares about.
+    """
+    counter = iter(range(1, 1000))
+
+    def unique_question() -> str:
+        return _reply_json(f"Generated question number {next(counter)}?", "behavioral")
 
     class _LLM:
-        fake = FakeProvider()
+        fake = FakeProvider(default=unique_question)
 
         def script(self, *replies, on_call=None):
-            self.fake = FakeProvider(replies, on_call=on_call)
+            self.fake = FakeProvider(replies, on_call=on_call, default=unique_question)
             app.dependency_overrides[get_llm_provider] = lambda: self.fake
             return self.fake
 
@@ -68,3 +78,32 @@ def llm():
     app.dependency_overrides[get_llm_provider] = lambda: handle.fake
     yield handle
     app.dependency_overrides.pop(get_llm_provider, None)
+
+
+def _reply_json(question="How would you design a rate limiter for a public API?", category="technical") -> str:
+    return json.dumps({"question": question, "category": category})
+
+
+@pytest.fixture
+def reply_json():
+    """Builds a reply in the exact shape the interviewer LLM must produce."""
+    return _reply_json
+
+
+@pytest.fixture
+def clock():
+    """Fake monotonic clock for the per-turn LLM budget; tests advance it (e.g. inside a fake provider's on_call)."""
+
+    class _Clock:
+        now = 1000.0
+
+        def __call__(self) -> float:
+            return self.now
+
+        def advance(self, seconds: float) -> None:
+            self.now += seconds
+
+    fake = _Clock()
+    app.dependency_overrides[get_clock] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_clock, None)

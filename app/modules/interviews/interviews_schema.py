@@ -105,8 +105,8 @@ class ReactionOut(BaseModel):
 
 class AnswerOut(BaseModel):
     session: SessionOut
-    # None when the LLM is off or failed: the interview still moves on.
-    reaction: ReactionOut | None
+    # A predefined acknowledgement, always present (closing line on the last answer).
+    reaction: ReactionOut
     # The next question, or None when this answer completed the session.
     current_question: QuestionOut | None
 

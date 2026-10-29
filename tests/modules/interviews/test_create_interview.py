@@ -58,35 +58,31 @@ def test_start_creates_saved_session_and_returns_only_the_first_question(start_i
 
     [saved] = _sessions(db, user)
     assert str(saved.id) == session["id"]
-    stored = _questions(db, session["id"])
-    assert [q.position for q in stored] == [1, 2, 3]
+    # llm-interviewer: questions are created one per turn, so only question 1 exists after the start.
+    [stored] = _questions(db, session["id"])
+    assert stored.position == 1
 
     current = body["current_question"]
     assert set(current) == {"id", "position", "text", "category"}  # AC16: no bank_id
     assert current["position"] == 1
-    assert current["id"] == str(stored[0].id)
-    assert current["text"] == stored[0].text
-    for later in stored[1:]:
-        assert later.text not in r.text
+    assert current["id"] == str(stored.id)
+    assert current["text"] == stored.text
 
 
-def test_questions_fit_the_setup_and_never_repeat(start_interview, make_user, db):  # AC3, EC11, EC12
+def test_first_bank_question_fits_the_setup(start_interview, make_user, db):  # AC3, EC11 (no LLM configured)
     user = make_user()
+    for _ in range(10):
+        r = start_interview(user, interview_type="technical", question_count=5)
 
-    r = start_interview(user, interview_type="technical", question_count=5)
-
-    stored = _questions(db, r.json()["session"]["id"])
-    bank_ids = [q.bank_id for q in stored]
-    assert len(set(bank_ids)) == 5
-    assert "frontend-only" not in bank_ids
-    assert {q.category for q in stored} == {"technical"}
+        [stored] = _questions(db, r.json()["session"]["id"])
+        assert stored.bank_id != "frontend-only"
+        assert stored.category == "technical"
 
 
-def test_mixed_session_is_split_and_interleaved(start_interview, make_user, db):  # AC4, EC9
+def test_mixed_session_starts_with_a_behavioral_question(start_interview, make_user, db):  # AC4, EC9
     r = start_interview(make_user(), interview_type="mixed", question_count=5)
 
-    stored = _questions(db, r.json()["session"]["id"])
-    assert [q.category for q in stored] == ["behavioral", "technical", "behavioral", "technical", "behavioral"]
+    assert [q.category for q in _questions(db, r.json()["session"]["id"])] == ["behavioral"]
 
 
 # --- not enough questions ---
@@ -209,7 +205,7 @@ def test_failure_while_saving_questions_rolls_everything_back(start_interview, m
     [only] = _sessions(db, user)
     assert str(only.id) == first["id"]
     assert only.status == "in_progress"
-    assert _question_count(db) == 3
+    assert _question_count(db) == 1
 
 
 def test_database_rejects_two_in_progress_sessions_for_one_user(db, make_user):  # AC9, EC14
@@ -239,7 +235,7 @@ def test_losing_a_concurrent_start_is_409_conflict(start_interview, make_user, d
     assert r.json()["error"]["code"] == "CONFLICT"
     [only] = _sessions(db, user)
     assert str(only.id) == first["id"]
-    assert _question_count(db) == 3
+    assert _question_count(db) == 1
 
 
 # --- snapshot ---
