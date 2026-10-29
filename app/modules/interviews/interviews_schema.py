@@ -6,11 +6,14 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 
 from .interviews_constants import (
     JOB_DESCRIPTION_MAX_LENGTH,
+    MAX_ANSWER_LENGTH,
     MAX_QUESTION_COUNT,
     MIN_QUESTION_COUNT,
     InterviewType,
     JobRole,
     Level,
+    MessageKind,
+    MessageRole,
     QuestionCategory,
     SessionStatus,
 )
@@ -82,4 +85,45 @@ class QuestionOut(BaseModel):
 
 class InterviewOut(BaseModel):
     session: SessionOut
-    current_question: QuestionOut
+    # None once the session is completed.
+    current_question: QuestionOut | None
+
+
+class AnswerIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The question being answered; must be the session's current one, so a double-click can't answer the next.
+    question_id: UUID
+    # Untrusted text that goes to the LLM: trimmed and bounded (it is resent on every later turn).
+    answer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_ANSWER_LENGTH)]
+
+
+class ReactionOut(BaseModel):
+    id: UUID
+    text: str
+
+
+class AnswerOut(BaseModel):
+    session: SessionOut
+    # None when the LLM is off or failed: the interview still moves on.
+    reaction: ReactionOut | None
+    # The next question, or None when this answer completed the session.
+    current_question: QuestionOut | None
+
+
+class TranscriptItemOut(BaseModel):
+    """One line of the chat as the user saw it. Usage metadata (model, tokens) is never part of it."""
+
+    id: UUID
+    question_id: UUID
+    position: int
+    role: MessageRole
+    kind: MessageKind
+    text: str
+    # None for questions: they are stored when the session starts, not when they are shown.
+    created_at: datetime | None
+
+
+class TranscriptOut(BaseModel):
+    # Bounded by the 10-question cap (at most 30 items), so deliberately not paginated.
+    items: list[TranscriptItemOut]

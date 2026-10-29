@@ -38,6 +38,14 @@ class NotEnoughQuestionsError(ConflictError):
     code = "NOT_ENOUGH_QUESTIONS"
 
 
+class SessionNotInProgressError(ConflictError):
+    code = "SESSION_NOT_IN_PROGRESS"
+
+
+class QuestionNotCurrentError(ConflictError):
+    code = "QUESTION_NOT_CURRENT"
+
+
 class UnauthorizedError(AppError):
     status_code, code = 401, "UNAUTHORIZED"
     headers = {"WWW-Authenticate": "Bearer"}

@@ -9,7 +9,13 @@ from app.modules.auth.auth_dependencies import require_permissions
 from app.modules.auth.auth_model import User
 
 from .interviews_dependencies import InterviewsControllerDep
-from .interviews_schema import InterviewCreateIn, InterviewOut
+from .interviews_schema import (
+    AnswerIn,
+    AnswerOut,
+    InterviewCreateIn,
+    InterviewOut,
+    TranscriptOut,
+)
 
 router = APIRouter(
     prefix="/interviews",
@@ -23,7 +29,9 @@ router = APIRouter(
 )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, responses={409: {"model": ErrorResponse}})
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses={409: {"model": ErrorResponse}}
+)
 def start_interview(
     data: InterviewCreateIn,
     user: Annotated[User, require_permissions(Permission.interviews_create)],
@@ -32,10 +40,41 @@ def start_interview(
     return ctrl.start(user, data)
 
 
-@router.get("/{session_id}", status_code=status.HTTP_200_OK, responses={404: {"model": ErrorResponse}})
+@router.get(
+    "/{session_id}",
+    status_code=status.HTTP_200_OK,
+    responses={404: {"model": ErrorResponse}},
+)
 def get_interview(
     session_id: uuid.UUID,
     user: Annotated[User, require_permissions(Permission.interviews_read_self)],
     ctrl: InterviewsControllerDep,
 ) -> InterviewOut:
     return ctrl.get(user, session_id)
+
+
+@router.post(
+    "/{session_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+def answer_question(
+    session_id: uuid.UUID,
+    data: AnswerIn,
+    user: Annotated[User, require_permissions(Permission.interviews_answer)],
+    ctrl: InterviewsControllerDep,
+) -> AnswerOut:
+    return ctrl.answer(user, session_id, data)
+
+
+@router.get(
+    "/{session_id}/messages",
+    status_code=status.HTTP_200_OK,
+    responses={404: {"model": ErrorResponse}},
+)
+def get_transcript(
+    session_id: uuid.UUID,
+    user: Annotated[User, require_permissions(Permission.interviews_read_self)],
+    ctrl: InterviewsControllerDep,
+) -> TranscriptOut:
+    return ctrl.transcript(user, session_id)

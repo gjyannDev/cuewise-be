@@ -1,10 +1,11 @@
 import uuid
+from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from .interviews_constants import SessionStatus
-from .interviews_model import InterviewQuestion, InterviewSession
+from .interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
 
 
 class InterviewsRepository:
@@ -40,6 +41,66 @@ class InterviewsRepository:
                 InterviewQuestion.session_id == session_id, InterviewQuestion.position == position
             )
         )
+
+    def list_questions(self, session_id: uuid.UUID, up_to_position: int) -> list[InterviewQuestion]:
+        return list(
+            self.db.scalars(
+                select(InterviewQuestion)
+                .where(InterviewQuestion.session_id == session_id, InterviewQuestion.position <= up_to_position)
+                .order_by(InterviewQuestion.position)
+            )
+        )
+
+    def list_messages(self, session_id: uuid.UUID) -> list[InterviewMessage]:
+        # UUIDv7 ids are time-ordered, so id order is the order they were saved.
+        return list(
+            self.db.scalars(
+                select(InterviewMessage).where(InterviewMessage.session_id == session_id).order_by(InterviewMessage.id)
+            )
+        )
+
+    def record_answer(self, answer: InterviewMessage, expected_position: int, *, completes: bool) -> bool:
+        """Save the answer and advance the session in one commit, only if it is still at `expected_position`.
+
+        A compare-and-swap: the conditional UPDATE matches zero rows when another request already moved the
+        session on (double-click, retry) or it is no longer in progress, and then nothing is saved.
+        """
+        advance = (
+            {"status": SessionStatus.completed}
+            if completes
+            else {"current_position": InterviewSession.current_position + 1}
+        )
+        try:
+            result = cast(
+                CursorResult,
+                self.db.execute(
+                    update(InterviewSession)
+                    .where(
+                        InterviewSession.id == answer.session_id,
+                        InterviewSession.status == SessionStatus.in_progress,
+                        InterviewSession.current_position == expected_position,
+                    )
+                    .values(**advance)
+                ),
+            )
+            if result.rowcount != 1:
+                self.db.rollback()
+                return False
+            self.db.add(answer)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return True
+
+    def save_message(self, message: InterviewMessage) -> InterviewMessage:
+        try:
+            self.db.add(message)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return message
 
     def _abandon_in_progress(self, user_id: uuid.UUID) -> None:
         self.db.execute(
