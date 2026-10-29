@@ -11,6 +11,7 @@ from app.db.session import Base
 from .interviews_constants import (
     FIRST_POSITION,
     JOB_DESCRIPTION_MAX_LENGTH,
+    QuestionSource,
     SessionStatus,
 )
 
@@ -36,40 +37,42 @@ class InterviewSession(UUIDPrimaryKeyMixin, Base):
     level: Mapped[str] = mapped_column(String(32))
     interview_type: Mapped[str] = mapped_column(String(32))
     question_count: Mapped[int]
-    job_description: Mapped[str | None] = mapped_column(
-        String(JOB_DESCRIPTION_MAX_LENGTH)
-    )
+    job_description: Mapped[str | None] = mapped_column(String(JOB_DESCRIPTION_MAX_LENGTH))
     status: Mapped[str] = mapped_column(
         String(32),
         default=SessionStatus.in_progress,
         server_default=SessionStatus.in_progress.value,
     )
     # The question awaiting an answer; only ever moved by the compare-and-swap in the repository.
-    current_position: Mapped[int] = mapped_column(
-        default=FIRST_POSITION, server_default=str(FIRST_POSITION)
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    current_position: Mapped[int] = mapped_column(default=FIRST_POSITION, server_default=str(FIRST_POSITION))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class InterviewQuestion(UUIDPrimaryKeyMixin, Base):
-    """A snapshot of a bank question, so later bank edits never change an existing session."""
+    """A question as it was shown: written by the LLM, or snapshotted from the bank (so bank edits never change it)."""
 
     __tablename__ = "interview_questions"
     __table_args__ = (UniqueConstraint("session_id", "position"),)
 
-    session_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("interview_sessions.id", ondelete="CASCADE")
-    )
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_sessions.id", ondelete="CASCADE"))
     position: Mapped[int]
     text: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(32))
-    bank_id: Mapped[str] = mapped_column(String(64))
+    # Set only for bank questions; it also keeps the fallback from repeating a bank question in one session.
+    bank_id: Mapped[str | None] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(
+        String(16), default=QuestionSource.bank, server_default=QuestionSource.bank.value
+    )
+    # Usage of the LLM turn that produced this question (summed over its calls); null for bank questions.
+    model: Mapped[str | None] = mapped_column(String(128))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    prompt_tokens: Mapped[int | None]
+    completion_tokens: Mapped[int | None]
+    latency_ms: Mapped[int | None]
 
 
 class InterviewMessage(UUIDPrimaryKeyMixin, Base):
-    """A candidate answer or an interviewer reaction to one question.
+    """A candidate answer or the interviewer's reaction to one question.
 
     The questions themselves live in interview_questions; together they are the whole conversation.
     UUIDv7 ids are time-ordered, so ordering by id is conversation order.
@@ -79,18 +82,12 @@ class InterviewMessage(UUIDPrimaryKeyMixin, Base):
     # One answer and one reaction per question in this slice; the backstop behind the compare-and-swap.
     __table_args__ = (UniqueConstraint("question_id", "role"),)
 
-    session_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("interview_sessions.id", ondelete="CASCADE")
-    )
-    question_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("interview_questions.id", ondelete="CASCADE")
-    )
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_sessions.id", ondelete="CASCADE"))
+    question_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_questions.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(String(32))
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    # LLM call metadata, interviewer rows only: answers "which model and prompt wrote this, and what did it cost?"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # LLM call metadata, legacy LLM-written reactions only (predefined reactions leave these null).
     model: Mapped[str | None] = mapped_column(String(128))
     prompt_version: Mapped[str | None] = mapped_column(String(64))
     prompt_tokens: Mapped[int | None]
