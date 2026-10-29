@@ -14,10 +14,13 @@ class Permission(StrEnum):
     users_read_self = "users:read_self"
     interviews_create = "interviews:create"
     interviews_read_self = "interviews:read_self"
+    interviews_answer = "interviews:answer"
 
 
 # Every signed-in role can practice interviews on its own sessions.
-_INTERVIEW_PERMISSIONS = frozenset({Permission.interviews_create, Permission.interviews_read_self})
+_INTERVIEW_PERMISSIONS = frozenset(
+    {Permission.interviews_create, Permission.interviews_read_self, Permission.interviews_answer}
+)
 
 # Single source of truth for what each role may do. Edit here to change access.
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {

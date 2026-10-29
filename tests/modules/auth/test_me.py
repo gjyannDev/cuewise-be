@@ -4,7 +4,7 @@ from app.main import app
 from app.modules.auth.auth_constants import Role
 
 ME = "/api/v1/auth/me"
-INTERVIEW_PERMISSIONS = {"interviews:create", "interviews:read_self"}
+INTERVIEW_PERMISSIONS = {"interviews:create", "interviews:read_self", "interviews:answer"}
 
 
 @pytest.mark.parametrize(
