@@ -50,7 +50,7 @@ def test_llm_settings_default_to_off_with_documented_limits(no_llm_env):  # inte
     assert s.llm_model is None
     assert s.llm_configured is False
     assert s.llm_base_url.startswith("https://")
-    assert (s.llm_timeout_seconds, s.llm_max_retries, s.llm_total_budget_seconds, s.llm_max_tokens) == (15, 2, 30, 150)
+    assert (s.llm_timeout_seconds, s.llm_max_retries, s.llm_total_budget_seconds, s.llm_max_tokens) == (15, 2, 30, 800)
 
 
 def test_llm_settings_with_key_and_model_are_configured(no_llm_env):  # AC16
@@ -125,3 +125,11 @@ def test_env_example_lists_every_llm_setting():  # AC16
         "LLM_TOTAL_BUDGET_SECONDS",
         "LLM_MAX_TOKENS",
     } <= keys
+
+
+def test_env_example_explains_the_reasoning_model_token_cap():  # llm-interviewer AC18
+    with open(".env.example", encoding="utf-8") as f:
+        text = f.read()
+
+    assert "LLM_MAX_TOKENS=800" in text
+    assert "reasoning" in text.lower()

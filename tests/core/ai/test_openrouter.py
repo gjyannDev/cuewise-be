@@ -256,3 +256,47 @@ def test_error_messages_never_carry_the_response_body(make_provider):  # inferre
         provider.complete(MESSAGES, max_tokens=150)
 
     assert "sk-or-abc" not in str(exc.value)
+
+
+def test_empty_reply_error_carries_the_finish_reason(make_provider):  # llm-interviewer EC16
+    body = completion(content=None, finish_reason="length")
+    provider, requests = make_provider(httpx.Response(200, json=body))
+
+    with pytest.raises(LLMBadResponseError) as exc:
+        provider.complete(MESSAGES, max_tokens=150)
+
+    assert exc.value.finish_reason == "length"
+    assert len(requests) == 1
+
+
+def test_a_smaller_budget_argument_caps_retries(make_provider, clock):  # llm-interviewer AC7
+    provider, requests = make_provider(*[httpx.Response(503)] * 6, max_retries=5, budget=30.0)
+
+    with pytest.raises(LLMServerError):
+        provider.complete(MESSAGES, max_tokens=150, budget_seconds=1.0)
+
+    assert len(requests) == 2
+    assert clock.now < 1.0
+
+
+def test_a_larger_budget_argument_never_raises_the_configured_budget(make_provider, clock):  # llm-interviewer AC7
+    provider, requests = make_provider(*[httpx.Response(503)] * 6, max_retries=5, budget=1.0)
+
+    with pytest.raises(LLMServerError):
+        provider.complete(MESSAGES, max_tokens=150, budget_seconds=100.0)
+
+    assert len(requests) == 2
+
+
+def test_the_attempt_timeout_follows_the_budget_argument(make_provider):  # llm-interviewer AC7
+    seen = []
+
+    def record_timeout(request):
+        seen.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json=completion())
+
+    provider, _ = make_provider(record_timeout, timeout=15.0, budget=30.0)
+
+    provider.complete(MESSAGES, max_tokens=150, budget_seconds=4.0)
+
+    assert seen == [4.0]

@@ -27,7 +27,7 @@ def test_no_key_and_model_means_no_provider_and_one_warning(settings_with, app_l
     assert provider is None
     [warning] = [r for r in app_logs.records if r.name == "app.llm"]
     assert warning.levelno == logging.WARNING
-    assert "reactions will be null" in warning.getMessage()
+    assert "questions will come from the question bank" in warning.getMessage()
 
 
 def test_key_and_model_build_the_openrouter_provider(settings_with, app_logs):  # AC13, AC16
@@ -62,3 +62,12 @@ def test_fake_runs_the_on_call_hook_at_call_time():
     fake.complete([ChatMessage(role="user", content="hi")], max_tokens=10)
 
     assert seen == ["called"]
+
+
+def test_fake_records_the_budget_it_was_given():  # llm-interviewer AC7
+    fake = FakeProvider()
+
+    fake.complete([ChatMessage(role="user", content="hi")], max_tokens=10, budget_seconds=12.5)
+    fake.complete([ChatMessage(role="user", content="hi")], max_tokens=10)
+
+    assert fake.budgets == [12.5, None]

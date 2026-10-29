@@ -11,7 +11,9 @@ logger = logging.getLogger("app.llm")
 def build_provider(settings: Settings) -> LLMProvider | None:
     """The one place that picks the implementation; swapping vendor or model is a config change."""
     if settings.openrouter_api_key is None or settings.llm_model is None:
-        logger.warning("LLM disabled (OPENROUTER_API_KEY and LLM_MODEL unset): interviewer reactions will be null")
+        logger.warning(
+            "LLM disabled (OPENROUTER_API_KEY and LLM_MODEL unset): questions will come from the question bank"
+        )
         return None
     return OpenRouterProvider(
         api_key=settings.openrouter_api_key.get_secret_value(),

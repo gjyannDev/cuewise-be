@@ -35,9 +35,11 @@ class LLMError(Exception):
 
     retryable: ClassVar[bool] = False
 
-    def __init__(self, message: str, *, status_code: int | None = None):
+    def __init__(self, message: str, *, status_code: int | None = None, finish_reason: str | None = None):
         super().__init__(message)
         self.status_code = status_code
+        # "length" here means the token cap ran out before any reply text (e.g. a reasoning model still thinking).
+        self.finish_reason = finish_reason
         # Filled in by the provider once it stops trying, so callers can log them.
         self.attempts = 1
         self.latency_ms = 0
@@ -67,7 +69,13 @@ class LLMBadResponseError(LLMError):
 
 class LLMProvider(Protocol):
     def complete(
-        self, messages: Sequence[ChatMessage], *, max_tokens: int, temperature: float | None = None
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int,
+        temperature: float | None = None,
+        # Lowers the total time budget for this call (a caller's own deadline); it never raises it.
+        budget_seconds: float | None = None,
     ) -> LLMResult: ...
 
     def close(self) -> None: ...

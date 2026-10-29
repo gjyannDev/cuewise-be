@@ -55,7 +55,12 @@ class OpenRouterProvider:
         self._client.close()
 
     def complete(
-        self, messages: Sequence[ChatMessage], *, max_tokens: int, temperature: float | None = None
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int,
+        temperature: float | None = None,
+        budget_seconds: float | None = None,
     ) -> LLMResult:
         body: dict[str, Any] = {
             "model": self._model,
@@ -64,20 +69,21 @@ class OpenRouterProvider:
         }
         if temperature is not None:
             body["temperature"] = temperature
+        budget = self._budget if budget_seconds is None else min(self._budget, budget_seconds)
 
         start = self._clock()
         attempt = 0
         while True:
             attempt += 1
             try:
-                result = self._attempt(body, remaining=self._budget - (self._clock() - start))
+                result = self._attempt(body, remaining=budget - (self._clock() - start))
             except LLMError as exc:
                 exc.attempts, exc.latency_ms = attempt, self._elapsed_ms(start)
                 if not exc.retryable or attempt > self._max_retries:
                     raise
                 delay = self._backoff(attempt)
                 # Give up rather than start a retry the user would wait for past the budget.
-                if self._clock() - start + delay >= self._budget:
+                if self._clock() - start + delay >= budget:
                     raise
                 self._sleep(delay)
                 continue
@@ -109,7 +115,7 @@ class OpenRouterProvider:
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise LLMBadResponseError("LLM response has no usable message") from exc
         if not isinstance(text, str) or not text.strip():
-            raise LLMBadResponseError("LLM returned an empty message")
+            raise LLMBadResponseError("LLM returned an empty message", finish_reason=choice.get("finish_reason"))
 
         usage = data.get("usage") or {}
         return LLMResult(

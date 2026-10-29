@@ -17,18 +17,31 @@ class FakeProvider:
         replies: Iterable[str | LLMResult | LLMError] = (),
         *,
         on_call: Callable[[], None] | None = None,
+        # Used once the scripted replies run out; a callable gives each call its own text (e.g. unique questions).
+        default: str | Callable[[], str] = DEFAULT_REPLY,
     ):
         self._replies = deque(replies)
         self._on_call = on_call
+        self._default = default
         self.calls: list[list[ChatMessage]] = []
+        self.budgets: list[float | None] = []
 
     def complete(
-        self, messages: Sequence[ChatMessage], *, max_tokens: int, temperature: float | None = None
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int,
+        temperature: float | None = None,
+        budget_seconds: float | None = None,
     ) -> LLMResult:
         self.calls.append(list(messages))
+        self.budgets.append(budget_seconds)
         if self._on_call:
             self._on_call()
-        reply = self._replies.popleft() if self._replies else self.DEFAULT_REPLY
+        if self._replies:
+            reply = self._replies.popleft()
+        else:
+            reply = self._default() if callable(self._default) else self._default
         if isinstance(reply, LLMError):
             raise reply
         if isinstance(reply, LLMResult):

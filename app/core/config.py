@@ -15,14 +15,14 @@ class Settings(BaseSettings):
     jwt_audience: str = "cuewise-client"
     access_token_expire_minutes: int = Field(default=60, gt=0)
 
-    # LLM (OpenRouter, OpenAI-compatible chat completions). Key and model unset = LLM off, reactions are null.
+    # LLM (OpenRouter, OpenAI-compatible chat completions). Key and model unset = LLM off: bank questions only.
     openrouter_api_key: SecretStr | None = None
     llm_model: str | None = None
     llm_base_url: str = "https://openrouter.ai/api/v1"
     llm_timeout_seconds: float = Field(default=15, gt=0)
     llm_max_retries: int = Field(default=2, ge=0)
     llm_total_budget_seconds: float = Field(default=30, gt=0)
-    llm_max_tokens: int = Field(default=150, gt=0)
+    llm_max_tokens: int = Field(default=2000, gt=0)
 
     model_config = SettingsConfigDict(env_file=".env")
 
@@ -34,9 +34,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _key_and_model_together(self) -> Self:
-        # Half a config would silently run with every reaction null; fail at startup instead.
+        # Half a config would silently run on bank questions only; fail at startup instead.
         if (self.openrouter_api_key is None) != (self.llm_model is None):
-            raise ValueError("Set OPENROUTER_API_KEY and LLM_MODEL together, or leave both unset")
+            raise ValueError(
+                "Set OPENROUTER_API_KEY and LLM_MODEL together, or leave both unset"
+            )
         return self
 
     @property
