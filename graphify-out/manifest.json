@@ -54,9 +54,9 @@
     "semantic_hash": ""
   },
   "app/core/logging.py": {
-    "mtime": 1793082114.438452,
-    "seen": 1793172700.6433,
-    "ast_hash": "8f8b32b0829068e90f2694c16f28c08a",
+    "mtime": 1793321398.6672366,
+    "seen": 1793321404.0618184,
+    "ast_hash": "8497ae70d7f348f48dd78748f6556f06",
     "semantic_hash": ""
   },
   "app/core/middleware.py": {
@@ -768,15 +768,21 @@
     "semantic_hash": ""
   },
   "docs/features/context-management/task.md": {
-    "mtime": 1793272250.8396144,
-    "seen": 1793272721.596353,
-    "ast_hash": "5642e867a2560de675cb50238ce2e88e",
+    "mtime": 1793280185.915748,
+    "seen": 1793321404.0619302,
+    "ast_hash": "d4639e3015d4cf431c7158a7c44d0601",
     "semantic_hash": ""
   },
   "app/modules/interviews/prompts/job_description_summary_v2.md": {
     "mtime": 1793280145.418192,
     "seen": 1793280179.143482,
     "ast_hash": "a8c18972bcb2e5e97b4df655caae2e82",
+    "semantic_hash": ""
+  },
+  "tests/core/test_logging.py": {
+    "mtime": 1793321398.6672366,
+    "seen": 1793321404.061877,
+    "ast_hash": "0c2a6166ad74d9779cd51423ef466115",
     "semantic_hash": ""
   }
 }
