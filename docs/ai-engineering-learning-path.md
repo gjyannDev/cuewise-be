@@ -320,7 +320,7 @@ That turns "it works" into "I understand why it works".
 
 - [x] Slice 1: Answer → reply (no streaming): built; `docs/features/interviewer-reaction` (live checks and Checkpoint G pending real runs)
 - [x] Slice 2 (revised): LLM as the interviewer: built; `docs/features/llm-interviewer` (the LLM asks every question, predefined reactions, structured JSON + bank fallback, job description as untrusted data, first evals; real-model runs recorded in its learnings)
-- [ ] Context management: control what each LLM call sends (history, answers, job description) and which model answers, using measured tokens and evals. Next up; no spec yet
+- [ ] Context management: built; `docs/features/context-management` (ContextManager with `window_ledger` live and `full_history` as baseline, running notes, job-description summary, input limit, usage report, eval flags with repeats). Real-model snapshot and comparison (steps 8 and 12) still to run: the free model was rate limited
 - [ ] Follow-up questions: the LLM probes deeper into an answer, questions are marked as follow-ups, limits per question. Later feature, its own spec
 - [ ] Slice 3 (revised): End-of-interview feedback: a separate endpoint that generates structured feedback once and stores it (strengths, improvements, per-question notes, maybe a score); richer structured output, its own evals
 - [ ] Slice 4: SSE streaming

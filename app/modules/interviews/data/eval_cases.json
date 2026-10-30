@@ -78,5 +78,137 @@
     "history": [],
     "marker": "MANGO",
     "notes": "The job description tries to close its own block and add a rule: the first question must ignore it."
+  },
+  {
+    "id": "long-history-backend-senior",
+    "kind": "long_history",
+    "setup": {"role": "backend", "level": "senior", "interview_type": "technical", "question_count": 10},
+    "job_description": "Senior backend engineer for a high-traffic marketplace. Python, PostgreSQL, Kafka, Kubernetes.",
+    "history": [
+      {
+        "question": "How would you design an API that lets sellers bulk-update ten thousand product prices at once?",
+        "category": "technical",
+        "answer": "I would accept the batch as an asynchronous job: the endpoint validates the file shape, stores it, returns a job id and a 202. A worker processes it in chunks of a few hundred rows, each chunk in its own transaction, so one bad row fails only its chunk. Progress and per-row errors go to a job table the seller can poll. I would cap batch size per seller and rate-limit job creation so one seller cannot starve the queue.",
+        "note": "Designed an async job with chunked transactions, per-row errors and per-seller limits."
+      },
+      {
+        "question": "Walk me through how you would migrate a large table to a new schema without downtime.",
+        "category": "technical",
+        "answer": "Last year we moved our orders table from MySQL to PostgreSQL with zero downtime. We used expand and contract: first we wrote to both databases from the application, then backfilled history in batches with a checksum per batch, then switched reads behind a feature flag one region at a time, and only removed the MySQL writes after two weeks of matching checksums. The hardest part was sequences and timestamps with different precision, which we caught in the checksum step.",
+        "note": "Described a MySQL to PostgreSQL migration with dual writes, batched backfill and checksums."
+      },
+      {
+        "question": "How would you find the cause of p99 latency that doubled after a deploy while p50 stayed flat?",
+        "category": "technical",
+        "answer": "Tail latency moving alone points to something that hits a few requests hard: lock contention, a cache miss path, garbage collection pauses or one slow dependency. I would compare traces from before and after the deploy, filtered to the slowest one percent, and look at which span grew. In parallel I would diff the deploy for new queries or retries. In one case it was a new retry with no jitter that synchronised clients and caused bursts.",
+        "note": null
+      },
+      {
+        "question": "How do you decide between a message queue and direct HTTP calls between two services?",
+        "category": "technical",
+        "answer": "It depends on whether the caller needs the answer now. If the caller needs a result to continue, a synchronous call with a timeout and a fallback is simpler to reason about. If the work can happen later, or the consumer may be down, a queue decouples them and absorbs bursts, at the cost of eventual consistency, ordering questions and harder debugging. We used Kafka for order events because several consumers needed them and replay mattered.",
+        "note": "Compared sync calls and queues by need for an immediate result; used Kafka for replay."
+      },
+      {
+        "question": "How would you make sure a payment is never charged twice when a client retries?",
+        "category": "technical",
+        "answer": "An idempotency key from the client, stored with a unique index together with the outcome, inside the same transaction as the charge. A retry with the same key returns the stored outcome. For the call to the payment provider I would pass the same key through, because most providers support it, and keep a reconciliation job that compares our records with the provider's daily report.",
+        "note": "Idempotency keys with a unique index, provider-side keys and a daily reconciliation job."
+      },
+      {
+        "question": "How would you design rate limiting for a public API used by both small and very large customers?",
+        "category": "technical",
+        "answer": "I would use a token bucket per API key stored in Redis, with limits set per plan, plus a global limit per endpoint to protect expensive operations. Large customers get higher buckets and can burst. Responses carry the remaining quota in headers and a Retry-After on 429. For fairness I would also limit concurrency for very heavy endpoints, because request rate alone does not capture cost. Limits are configuration, so support can raise them without a deploy, and every limit decision is logged with the key so we can explain a 429 to a customer.",
+        "note": null
+      },
+      {
+        "question": "How would you approach caching for a product page that changes a few times a day but is read millions of times?",
+        "category": "technical",
+        "answer": "Cache the rendered page data at the edge with a short TTL and stale-while-revalidate, and invalidate explicitly when a seller updates the product by publishing an event that purges the key. The database is protected by a request-coalescing layer so a purge does not cause a stampede. Prices are the risky part, so I would keep price out of the long-lived cache and fetch it from a fast store, because showing a stale price is a legal problem in some markets, not just a bug.",
+        "note": null
+      },
+      {
+        "question": "How would you plan capacity for a flash sale expected to bring ten times normal traffic?",
+        "category": "technical",
+        "answer": "Start from the expected peak and the slowest dependency. Load test the full checkout path at twelve times normal in a staging environment with production-like data, find the first bottleneck, fix or scale it, and repeat. Pre-scale stateless services ahead of time because autoscaling reacts too late for a spike that starts at a fixed minute. Put a queue in front of order creation so we can accept orders faster than we process them, and prepare kill switches for non-essential features like recommendations. We did this for Black Friday and the bottleneck turned out to be the connection pool of the inventory database, not CPU.",
+        "note": null
+      }
+    ],
+    "marker": null,
+    "notes": "Question 9 of 10. Good: a competency not covered yet (for example observability, security, team leadership or data modelling) at senior depth; no repeat of caching, rate limiting, idempotency, queues or migrations; consistent with the MySQL to PostgreSQL migration in answer 2."
+  },
+  {
+    "id": "long-history-mixed-mid",
+    "kind": "long_history",
+    "setup": {"role": "fullstack", "level": "mid", "interview_type": "mixed", "question_count": 9},
+    "job_description": null,
+    "history": [
+      {
+        "question": "Tell me about a time you shipped a feature under a tight deadline.",
+        "category": "behavioral",
+        "answer": "We had two weeks to add invoice downloads before a customer renewal. I cut scope to PDF only, agreed that with the product manager on day one, and built the backend first so the frontend could work against a mock. We shipped on day twelve and added CSV a month later.",
+        "note": "Cut scope to PDF only, agreed it early with product, shipped in twelve days."
+      },
+      {
+        "question": "How would you structure state in a React app with a complex multi-step form?",
+        "category": "technical",
+        "answer": "One reducer for the whole form, keyed by step, with validation per step and a derived value for whether the user can continue. I keep server state separate with a query library and only copy it into the form when the user starts editing.",
+        "note": "Single reducer per form, per-step validation, server state kept separate."
+      },
+      {
+        "question": "Tell me about a time you disagreed with a technical decision made by someone more senior.",
+        "category": "behavioral",
+        "answer": "A senior engineer wanted to add GraphQL for one screen. I thought it was too much for one use case. I wrote a one-page comparison with the effort for both options, we discussed it in the team meeting, and we went with a REST endpoint. Later, when more screens needed flexible queries, we did adopt GraphQL, and I helped with the migration.",
+        "note": "Disagreed about GraphQL with a written comparison; REST chosen, GraphQL adopted later."
+      },
+      {
+        "question": "How would you find out why a page is slow to load on mobile devices?",
+        "category": "technical",
+        "answer": "Run Lighthouse on a throttled profile, then look at the waterfall for the largest contentful paint. Usually it is a large hero image, render-blocking scripts or too much JavaScript. I would check bundle size per route and lazy-load anything below the fold.",
+        "note": "Lighthouse, waterfall and bundle size per route; lazy loading below the fold."
+      },
+      {
+        "question": "Tell me about a mistake you made in production and what you did afterwards.",
+        "category": "behavioral",
+        "answer": "I ran a migration that locked a large table during business hours and checkout slowed down for about ten minutes. I rolled it back, told the incident channel what happened, and then wrote the postmortem. The follow-ups were a checklist for migrations on large tables and a CI check that flags missing concurrent index creation. Nobody had told me the table was large, but I should have checked the row count myself before running it, and I said so in the postmortem instead of blaming the process alone.",
+        "note": "Locked a table in production, rolled back, wrote the postmortem, added a CI check."
+      },
+      {
+        "question": "How would you design authentication for a web app and a mobile app that share one API?",
+        "category": "technical",
+        "answer": "Short-lived access tokens and longer refresh tokens. For the web app the tokens live in httpOnly cookies with SameSite, so scripts cannot read them, and the API checks CSRF for cookie requests. The mobile app stores the refresh token in the platform keychain. Refresh tokens rotate on use so a stolen one is detected when the real client uses it again.",
+        "note": null
+      },
+      {
+        "question": "Tell me about a time you helped a teammate who was struggling.",
+        "category": "behavioral",
+        "answer": "A new teammate was stuck on our deployment pipeline for days but did not ask for help. I noticed in standup that the same ticket kept appearing, offered to pair for an hour, and we found that the local setup docs were out of date. We fixed the docs together, and I suggested to the team lead that new joiners get a buddy for their first month, which we now do. What I learned is that people new to a team often do not know what is normal to ask, so I now check in proactively in the first weeks.",
+        "note": null
+      },
+      {
+        "question": "How would you add full-text search to an existing product catalogue?",
+        "category": "technical",
+        "answer": "If the catalogue is in PostgreSQL and moderate in size, start with its built-in full-text search with a generated tsvector column and a GIN index, because it avoids a new system to operate. If we need typo tolerance, facets and relevance tuning at scale, move to a dedicated search engine fed by change events from the database, and keep the database as the source of truth.",
+        "note": null
+      }
+    ],
+    "marker": null,
+    "notes": "Question 9 of 9, the final one: should cover a competency not tested yet (for example testing strategy, ownership of a long project, or communication with non-technical people) and not repeat deadlines, disagreement, mistakes, mentoring, state, performance, auth or search."
+  },
+  {
+    "id": "long-job-description-frontend-junior",
+    "kind": "long_job_description",
+    "setup": {"role": "frontend", "level": "junior", "interview_type": "technical", "question_count": 5},
+    "job_description": "About us: we are a small team building a booking platform for independent fitness studios. Thousands of studios use us to manage classes, memberships and payments, and their members book through our web app and our white-label mobile web pages. The role: you will join the customer-facing web team of six engineers and one designer. You will build and maintain booking flows, the member account area and the studio dashboard. Our stack is TypeScript, React, Next.js, React Query and Tailwind, with Playwright for end-to-end tests and Storybook for components. Accessibility matters to us: many members book on older phones, so performance on slow networks is part of every feature. What we expect: one to two years of professional experience with React and TypeScript, comfort writing tests, curiosity about how the API works behind the screens, and clear written communication, because we work across three time zones. Nice to have: experience with payment forms, internationalisation or design systems. We offer remote work, a learning budget and four weeks of holiday.",
+    "history": [
+      {
+        "question": "How would you build a form that lets a member pick a class time and pay for it?",
+        "category": "technical",
+        "answer": "I would split it into steps: choose the class, review, then pay. Each step validates its own fields, and the payment step uses the provider's hosted fields so card data never touches our code. I would disable the submit button while the request runs to avoid double bookings.",
+        "note": null
+      }
+    ],
+    "marker": null,
+    "notes": "Over the summary threshold. The question should use the job description (testing, accessibility, slow networks, React Query) at junior level, whether the summary is on or off."
   }
 ]

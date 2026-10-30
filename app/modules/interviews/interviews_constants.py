@@ -77,6 +77,48 @@ QUESTION_BANK_PATH = Path(__file__).parent / "data" / "questions.json"
 INTERVIEWER_PROMPT_VERSION = "interviewer_v1"
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
+# --- Context management: what each LLM call sends (see app/core/ai/context.py) ---
+INTERVIEWER_TASK = "interviewer_turn"
+SUMMARY_TASK = "job_description_summary"
+FULL_HISTORY = "full_history"
+WINDOW_LEDGER = "window_ledger"
+# Stable-prefix prompt used by window_ledger: no question number in it, so the system prompt never changes.
+INTERVIEWER_V2_PROMPT_VERSION = "interviewer_v2"
+SUMMARY_PROMPT_VERSION = "job_description_summary_v2"
+# Starting values, tuned by the eval comparison (docs/features/context-management/learnings.md).
+WINDOW_TURNS = 3
+WINDOW_ANSWER_CAP = 600
+# Estimated tokens. A safety net, not a cost target: a worst-case window_ledger call is about 4,000.
+WINDOW_INPUT_LIMIT = 5000
+TRUNCATION_MARKER = " [answer shortened]"
+NOTE_MAX_LENGTH = 200
+# A job description longer than this is condensed once at interview start.
+SUMMARY_THRESHOLD = 600
+SUMMARY_MAX_LENGTH = 500
+# Models count tokens, not characters, so the prompt asks for words: 60 words is about 400 characters, under the cap.
+SUMMARY_MAX_WORDS = 60
+SUMMARY_TIME_CAP_SECONDS = 10.0
+
+# Fills {{level_guidance}} in interviewer_v2, so difficulty is spelled out rather than left to the level word.
+LEVEL_GUIDANCE = {
+    Level.intern: (
+        "For an intern, test fundamentals and how they learn; school or personal projects are fine as examples; "
+        "one concept per question."
+    ),
+    Level.junior: (
+        "For a junior, focus on everyday work: small features, debugging, reading existing code and handling "
+        "review feedback."
+    ),
+    Level.mid: (
+        "For a mid-level developer, focus on owning features end to end, design trade-offs, production issues and "
+        "working across teams."
+    ),
+    Level.senior: (
+        "For a senior, focus on system design at scale, ambiguous problems, technical leadership, mentoring and "
+        "cross-team decisions."
+    ),
+}
+
 
 class LevelGroup(StrEnum):
     """Reactions are warmer for people early in their career and briefer for experienced ones."""

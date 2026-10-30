@@ -43,7 +43,7 @@ def test_the_llm_writes_the_first_question(start_interview, make_user, llm, repl
     assert current["category"] == "behavioral" and current["position"] == 1
     assert set(current) == {"id", "position", "text", "category"}
     [q] = stored_questions(db, r.json()["session"]["id"])
-    assert (q.source, q.bank_id, q.prompt_version, q.model) == ("llm", None, "interviewer_v1", "fake-model")
+    assert (q.source, q.bank_id, q.prompt_version, q.model) == ("llm", None, "interviewer_v2", "fake-model")
     assert len(llm.fake.calls) == 1
 
 
@@ -64,7 +64,8 @@ def test_the_first_call_carries_the_setup_and_the_job_description_as_data(
 
     [call] = llm.fake.calls
     system, opening = call
-    assert system.role == "system" and "question 1 of 4" in system.content and "technical" in system.content
+    assert system.role == "system" and "4 questions" in system.content and "technical" in system.content
+    assert "<interview_status>" not in opening.content  # the first call has no answer, so no status block yet
     assert JOB_DESCRIPTION not in system.content
     assert opening.role == "user" and "<job_description>" in opening.content and JOB_DESCRIPTION in opening.content
 
@@ -160,7 +161,7 @@ def test_every_call_logs_one_line_without_any_content(start_interview, make_user
     assert ok.levelno == logging.INFO and "outcome=ok" in ok.getMessage()
     for line in (invalid, ok):
         message = line.getMessage()
-        assert "prompt_version=interviewer_v1" in message and "prompt_tokens=100" in message
+        assert "prompt_version=interviewer_v2" in message and "prompt_tokens=100" in message
         assert "garbage" not in message and "CAP theorem" not in message and "payments" not in message
 
 

@@ -2,7 +2,7 @@ import json
 import random
 import re
 from collections.abc import Collection, Mapping, Sequence
-from itertools import chain, zip_longest
+from itertools import chain, groupby, zip_longest
 from pathlib import Path
 from typing import NamedTuple
 
@@ -15,10 +15,15 @@ from .interviews_constants import (
     CLOSING_REACTIONS,
     GENERAL_ROLE,
     INTERVIEWER_PROMPT_VERSION,
+    INTERVIEWER_V2_PROMPT_VERSION,
     LEVEL_GROUPS,
+    LEVEL_GUIDANCE,
     PROMPTS_DIR,
     QUESTION_BANK_PATH,
     REACTION_POOLS,
+    SUMMARY_MAX_LENGTH,
+    SUMMARY_MAX_WORDS,
+    SUMMARY_PROMPT_VERSION,
     InterviewType,
     JobRole,
     Level,
@@ -129,11 +134,19 @@ def build_transcript(
 
 
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
-# Matches an opening or closing job_description tag in any case, so the data block can't be closed early.
-_JOB_DESCRIPTION_TAG = re.compile(r"<\s*/?\s*job_description\s*>", re.IGNORECASE)
+# Matches an opening or closing tag the app uses to fence data, in any case, so untrusted text can't close its own
+# block or fake the app's status block.
+APP_TAG = re.compile(r"<\s*/?\s*(job_description|interview_status)\s*>", re.IGNORECASE)
+
+
+def neutralize_app_tags(text: str) -> str:
+    return APP_TAG.sub("[tag removed]", text)
+
 
 # Loaded at import like the bank: a missing prompt file stops the app at startup, not mid-interview.
 INTERVIEWER_PROMPT = load_prompt(INTERVIEWER_PROMPT_VERSION)
+INTERVIEWER_V2_PROMPT = load_prompt(INTERVIEWER_V2_PROMPT_VERSION)
+SUMMARY_PROMPT = load_prompt(SUMMARY_PROMPT_VERSION)
 
 _CATEGORY_RULES = {
     InterviewType.behavioral: 'Every question is behavioral (past experience, teamwork, decisions): use "category": "behavioral".',
@@ -148,6 +161,8 @@ class QuestionTurn(NamedTuple):
     question: str
     category: str
     answer: str
+    # The model's running note about this answer, when it wrote a usable one (window_ledger shows it for old turns).
+    note: str | None = None
 
 
 def render_template(template: str, values: Mapping[str, object]) -> str:
@@ -159,11 +174,17 @@ def render_template(template: str, values: Mapping[str, object]) -> str:
 
 
 def render_interviewer_prompt(
-    *, role: JobRole, level: Level, interview_type: InterviewType, question_number: int, question_count: int
+    *,
+    role: JobRole,
+    level: Level,
+    interview_type: InterviewType,
+    question_number: int,
+    question_count: int,
+    template: str = INTERVIEWER_PROMPT,
 ) -> str:
     """Only trusted values go in here; the job description and answers never enter the system prompt."""
     return render_template(
-        INTERVIEWER_PROMPT,
+        template,
         {
             "role": role.value,
             "level": level.value,
@@ -175,19 +196,51 @@ def render_interviewer_prompt(
     )
 
 
+def render_interviewer_v2_prompt(
+    *,
+    role: JobRole,
+    level: Level,
+    interview_type: InterviewType,
+    question_count: int,
+    template: str = INTERVIEWER_V2_PROMPT,
+) -> str:
+    """Per-interview constants only, so the text is identical on every call of an interview (a cacheable prefix)."""
+    return render_template(
+        template,
+        {
+            "role": role.value,
+            "level": level.value,
+            "interview_type": interview_type.value,
+            "question_count": question_count,
+            "category_rule": _CATEGORY_RULES[interview_type],
+            "level_guidance": LEVEL_GUIDANCE[level],
+        },
+    )
+
+
+def render_summary_prompt() -> str:
+    return render_template(SUMMARY_PROMPT, {"max_words": SUMMARY_MAX_WORDS, "max_length": SUMMARY_MAX_LENGTH})
+
+
 def job_description_block(job_description: str | None) -> str:
     """Untrusted text, fenced as data. Tags inside it are neutralised so it can't close its own block."""
     if not job_description:
         return "No job description was provided."
-    return f"<job_description>\n{_JOB_DESCRIPTION_TAG.sub('[tag removed]', job_description)}\n</job_description>"
+    return f"<job_description>\n{neutralize_app_tags(job_description)}\n</job_description>"
 
 
 def interviewer_history(
     questions: Sequence[InterviewQuestion], messages: Sequence[InterviewMessage]
 ) -> list[QuestionTurn]:
-    """Answered questions with their answers, in interview order. Stored reactions are left out on purpose."""
-    answers = {m.question_id: m.content for m in messages if m.role == MessageRole.candidate}
-    return [QuestionTurn(q.text, q.category, answers[q.id]) for q in sorted(questions, key=lambda q: q.position)]
+    """Answered questions with their answers (and the model's note on each), in interview order.
+
+    Stored reactions are left out on purpose.
+    """
+    answers = {m.question_id: m for m in messages if m.role == MessageRole.candidate}
+    return [
+        QuestionTurn(q.text, q.category, answers[q.id].content, answers[q.id].note)
+        for q in sorted(questions, key=lambda q: q.position)
+    ]
 
 
 def build_interviewer_messages(
@@ -247,3 +300,44 @@ def pick_reaction(
     group = LEVEL_GROUPS[level]
     pool = CLOSING_REACTIONS[group] if final else REACTION_POOLS[(category, group)]
     return rng.choice([r for r in pool if r != previous] or list(pool))
+
+
+def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
+    """Stored LLM usage per interview and question position: numbers and ids only, never question text.
+
+    Expects rows ordered by session, then position. Usage the provider didn't report (or bank questions) shows as
+    `-` and is left out of the sums.
+    """
+
+    def shown(value: object) -> str:
+        return "-" if value is None else str(value)
+
+    lines: list[str] = []
+    prompt_sums: list[int] = []
+    completion_sums: list[int] = []
+    for session_id, rows in groupby(questions, key=lambda q: q.session_id):
+        rows = list(rows)
+        llm = sum(1 for q in rows if q.source == "llm")
+        lines.append(f"interview {session_id} questions={len(rows)} llm={llm} bank={len(rows) - llm}")
+        for q in rows:
+            lines.append(
+                f"  q{q.position} prompt={shown(q.prompt_tokens)} completion={shown(q.completion_tokens)} "
+                f"latency_ms={shown(q.latency_ms)} source={q.source} prompt_version={shown(q.prompt_version)}"
+            )
+        prompt, completion = sum(q.prompt_tokens or 0 for q in rows), sum(q.completion_tokens or 0 for q in rows)
+        lines.append(f"  total prompt={prompt} completion={completion}")
+        if llm:
+            prompt_sums.append(prompt)
+            completion_sums.append(completion)
+
+    interviews = len({q.session_id for q in questions})
+    used = len(prompt_sums)
+    summary = f"interviews={interviews} llm_interviews={used}"
+    if used:
+        # Averaged over interviews that used the LLM: bank-only ones (LLM off) would hide the real cost.
+        summary += (
+            f" avg_prompt_per_llm_interview={round(sum(prompt_sums) / used)}"
+            f" avg_completion_per_llm_interview={round(sum(completion_sums) / used)}"
+        )
+    lines.append(summary)
+    return "\n".join(lines)

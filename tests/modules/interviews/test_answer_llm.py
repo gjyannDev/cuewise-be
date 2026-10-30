@@ -51,7 +51,7 @@ def test_a_non_final_answer_gets_a_reaction_and_the_llms_next_question(
     assert body["current_question"]["text"] == "Second question?" and body["current_question"]["position"] == 2
     assert body["reaction"]["text"] in ALL_REACTIONS
     q2 = questions(db, created["session"]["id"])[1]
-    assert (q2.source, q2.category, q2.prompt_version) == ("llm", "behavioral", "interviewer_v1")
+    assert (q2.source, q2.category, q2.prompt_version) == ("llm", "behavioral", "interviewer_v2")
     assert len(llm.fake.calls) == 2
 
 
@@ -135,8 +135,8 @@ def test_each_turn_resends_the_conversation_without_reactions(
     opening, turn2, turn3 = llm.fake.calls
     assert [m.role for m in turn3] == ["system", "user", "assistant", "user", "assistant", "user"]
     assert json.loads(turn3[2].content)["question"] == "Q one?" and turn3[3].content == "Answer one."
-    assert turn3[-1].content == "Answer two."
-    assert "question 3 of 4" in turn3[0].content
+    assert turn3[-1].content.startswith("Answer two.\n\n<interview_status>")
+    assert "question 3 of 4" in turn3[-1].content and "question 3 of 4" not in turn3[0].content
     assert len(opening) < len(turn2) < len(turn3)
     sent = " ".join(m.content for call in llm.fake.calls for m in call)
     assert not any(reaction in sent for reaction in ALL_REACTIONS)

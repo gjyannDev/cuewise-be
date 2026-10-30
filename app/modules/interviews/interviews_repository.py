@@ -66,6 +66,14 @@ class InterviewsRepository:
             )
         )
 
+    def list_all_questions(self) -> list[InterviewQuestion]:
+        """Every stored question, grouped by interview in creation order (UUIDv7), for the usage report script."""
+        return list(
+            self.db.scalars(
+                select(InterviewQuestion).order_by(InterviewQuestion.session_id, InterviewQuestion.position)
+            )
+        )
+
     def record_turn(
         self,
         answer: InterviewMessage,

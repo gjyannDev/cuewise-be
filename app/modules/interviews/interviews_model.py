@@ -11,6 +11,8 @@ from app.db.session import Base
 from .interviews_constants import (
     FIRST_POSITION,
     JOB_DESCRIPTION_MAX_LENGTH,
+    NOTE_MAX_LENGTH,
+    SUMMARY_MAX_LENGTH,
     QuestionSource,
     SessionStatus,
 )
@@ -38,6 +40,8 @@ class InterviewSession(UUIDPrimaryKeyMixin, Base):
     interview_type: Mapped[str] = mapped_column(String(32))
     question_count: Mapped[int]
     job_description: Mapped[str | None] = mapped_column(String(JOB_DESCRIPTION_MAX_LENGTH))
+    # Made once at start when the job description is long; sent instead of it on every call. Never returned by the API.
+    job_description_summary: Mapped[str | None] = mapped_column(String(SUMMARY_MAX_LENGTH))
     status: Mapped[str] = mapped_column(
         String(32),
         default=SessionStatus.in_progress,
@@ -87,6 +91,8 @@ class InterviewMessage(UUIDPrimaryKeyMixin, Base):
     role: Mapped[str] = mapped_column(String(32))
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Candidate rows only: the model's short running note about this answer (window_ledger sends it for old turns).
+    note: Mapped[str | None] = mapped_column(String(NOTE_MAX_LENGTH))
     # LLM call metadata, legacy LLM-written reactions only (predefined reactions leave these null).
     model: Mapped[str | None] = mapped_column(String(128))
     prompt_version: Mapped[str | None] = mapped_column(String(64))
