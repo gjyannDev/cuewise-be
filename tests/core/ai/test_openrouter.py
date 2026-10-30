@@ -300,3 +300,40 @@ def test_the_attempt_timeout_follows_the_budget_argument(make_provider):  # llm-
     provider.complete(MESSAGES, max_tokens=150, budget_seconds=4.0)
 
     assert seen == [4.0]
+
+
+def test_reasoning_effort_is_left_out_unless_given(make_provider):  # context-management AC18
+    provider, requests = make_provider(httpx.Response(200, json=completion()))
+
+    provider.complete(MESSAGES, max_tokens=50)
+
+    assert "reasoning" not in json.loads(requests[0].content)
+
+
+def test_reasoning_effort_is_sent_in_openrouters_reasoning_option(make_provider):  # AC18 (field name: verify live)
+    provider, requests = make_provider(httpx.Response(200, json=completion()))
+
+    provider.complete(MESSAGES, max_tokens=50, reasoning_effort="low")
+
+    assert json.loads(requests[0].content)["reasoning"] == {"effort": "low"}
+
+
+def test_cached_and_reasoning_tokens_are_read_when_reported(make_provider):  # context-management step 12
+    body = completion()
+    body["usage"] |= {
+        "prompt_tokens_details": {"cached_tokens": 128},
+        "completion_tokens_details": {"reasoning_tokens": 9},
+    }
+    provider, _ = make_provider(httpx.Response(200, json=body))
+
+    result = provider.complete(MESSAGES, max_tokens=50)
+
+    assert (result.cached_tokens, result.reasoning_tokens) == (128, 9)
+
+
+def test_cached_and_reasoning_tokens_are_none_when_not_reported(make_provider):
+    provider, _ = make_provider(httpx.Response(200, json=completion()))
+
+    result = provider.complete(MESSAGES, max_tokens=50)
+
+    assert (result.cached_tokens, result.reasoning_tokens) == (None, None)

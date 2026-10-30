@@ -71,3 +71,12 @@ def test_fake_records_the_budget_it_was_given():  # llm-interviewer AC7
     fake.complete([ChatMessage(role="user", content="hi")], max_tokens=10)
 
     assert fake.budgets == [12.5, None]
+
+
+def test_fake_records_the_reasoning_effort():  # context-management AC18
+    fake = FakeProvider()
+
+    fake.complete([ChatMessage(role="user", content="hi")], max_tokens=10, reasoning_effort="high")
+    fake.complete([ChatMessage(role="user", content="hi")], max_tokens=10)
+
+    assert fake.reasoning_efforts == ["high", None]

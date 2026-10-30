@@ -3,10 +3,8 @@
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 
-from .provider import ChatMessage, LLMError, LLMResult
-
-# Rough rule of thumb (~4 characters per token for English); real counts come from the provider's `usage`.
-CHARS_PER_TOKEN = 4
+from .context import CHARS_PER_TOKEN
+from .provider import ChatMessage, LLMError, LLMResult, ReasoningEffort
 
 
 class FakeProvider:
@@ -25,6 +23,7 @@ class FakeProvider:
         self._default = default
         self.calls: list[list[ChatMessage]] = []
         self.budgets: list[float | None] = []
+        self.reasoning_efforts: list[ReasoningEffort | None] = []
 
     def complete(
         self,
@@ -33,9 +32,11 @@ class FakeProvider:
         max_tokens: int,
         temperature: float | None = None,
         budget_seconds: float | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> LLMResult:
         self.calls.append(list(messages))
         self.budgets.append(budget_seconds)
+        self.reasoning_efforts.append(reasoning_effort)
         if self._on_call:
             self._on_call()
         if self._replies:

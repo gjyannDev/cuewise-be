@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=15, gt=0)
     llm_max_retries: int = Field(default=2, ge=0)
     llm_total_budget_seconds: float = Field(default=30, gt=0)
-    llm_max_tokens: int = Field(default=2000, gt=0)
+    llm_max_tokens: int = Field(default=4000, gt=0)
 
     model_config = SettingsConfigDict(env_file=".env")
 

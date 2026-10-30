@@ -19,6 +19,7 @@ from .provider import (
     LLMResult,
     LLMServerError,
     LLMTimeoutError,
+    ReasoningEffort,
 )
 
 BACKOFF_BASE_SECONDS = 0.5
@@ -61,6 +62,7 @@ class OpenRouterProvider:
         max_tokens: int,
         temperature: float | None = None,
         budget_seconds: float | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> LLMResult:
         body: dict[str, Any] = {
             "model": self._model,
@@ -69,6 +71,9 @@ class OpenRouterProvider:
         }
         if temperature is not None:
             body["temperature"] = temperature
+        if reasoning_effort is not None:
+            # OpenRouter's unified reasoning option; models without a reasoning budget may ignore it.
+            body["reasoning"] = {"effort": reasoning_effort}
         budget = self._budget if budget_seconds is None else min(self._budget, budget_seconds)
 
         start = self._clock()
@@ -126,6 +131,8 @@ class OpenRouterProvider:
             latency_ms=0,
             finish_reason=choice.get("finish_reason"),
             attempts=1,
+            cached_tokens=_int_or_none((usage.get("prompt_tokens_details") or {}).get("cached_tokens")),
+            reasoning_tokens=_int_or_none((usage.get("completion_tokens_details") or {}).get("reasoning_tokens")),
         )
 
     def _backoff(self, attempt: int) -> float:

@@ -28,6 +28,14 @@ class LLMResult(BaseModel):
     # "stop" = finished on its own, "length" = cut off by max_tokens.
     finish_reason: str | None
     attempts: int
+    # Reported by some providers only: input tokens served from the prompt cache, and hidden reasoning tokens
+    # (part of completion_tokens). None when not reported; never guessed.
+    cached_tokens: int | None = None
+    reasoning_tokens: int | None = None
+
+
+# Passed through to models that support a reasoning budget; others may ignore or reject it.
+ReasoningEffort = Literal["low", "medium", "high"]
 
 
 class LLMError(Exception):
@@ -76,6 +84,7 @@ class LLMProvider(Protocol):
         temperature: float | None = None,
         # Lowers the total time budget for this call (a caller's own deadline); it never raises it.
         budget_seconds: float | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> LLMResult: ...
 
     def close(self) -> None: ...
