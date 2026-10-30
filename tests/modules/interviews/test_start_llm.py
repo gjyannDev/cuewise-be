@@ -43,7 +43,7 @@ def test_the_llm_writes_the_first_question(start_interview, make_user, llm, repl
     assert current["category"] == "behavioral" and current["position"] == 1
     assert set(current) == {"id", "position", "text", "category"}
     [q] = stored_questions(db, r.json()["session"]["id"])
-    assert (q.source, q.bank_id, q.prompt_version, q.model) == ("llm", None, "interviewer_v2", "fake-model")
+    assert (q.source, q.bank_id, q.prompt_version, q.model) == ("llm", None, "interviewer_v3", "fake-model")
     assert len(llm.fake.calls) == 1
 
 
@@ -161,8 +161,29 @@ def test_every_call_logs_one_line_without_any_content(start_interview, make_user
     assert ok.levelno == logging.INFO and "outcome=ok" in ok.getMessage()
     for line in (invalid, ok):
         message = line.getMessage()
-        assert "prompt_version=interviewer_v2" in message and "prompt_tokens=100" in message
+        assert "prompt_version=interviewer_v3" in message and "prompt_tokens=100" in message
         assert "garbage" not in message and "CAP theorem" not in message and "payments" not in message
+
+
+def test_cache_and_reasoning_tokens_are_logged_when_reported(start_interview, make_user, llm, reply_json, app_logs):
+    reported = result(reply_json("What is the CAP theorem?")).model_copy(
+        update={"cached_tokens": 1024, "reasoning_tokens": 300}
+    )
+    llm.script(reported)
+
+    start_interview(make_user(), interview_type="technical")
+
+    [line] = llm_lines(app_logs)
+    assert "cached_tokens=1024" in line.getMessage() and "reasoning_tokens=300" in line.getMessage()
+
+
+def test_unreported_cache_and_reasoning_tokens_are_a_dash(start_interview, make_user, llm, reply_json, app_logs):
+    llm.script(result(reply_json("What is the CAP theorem?")))
+
+    start_interview(make_user(), interview_type="technical")
+
+    [line] = llm_lines(app_logs)
+    assert "cached_tokens=- " in line.getMessage() and "reasoning_tokens=- " in line.getMessage()
 
 
 def test_an_uncoverable_setup_is_refused_before_any_llm_call(start_interview, make_user, llm, reply_json):  # AC14

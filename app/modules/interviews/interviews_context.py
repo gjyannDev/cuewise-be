@@ -17,7 +17,7 @@ from .interviews_constants import (
     FULL_HISTORY,
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_TASK,
-    INTERVIEWER_V2_PROMPT_VERSION,
+    INTERVIEWER_V3_PROMPT_VERSION,
     SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
     TRUNCATION_MARKER,
@@ -94,7 +94,7 @@ class FullHistory:
 class WindowLedger:
     def __init__(
         self,
-        version: str = INTERVIEWER_V2_PROMPT_VERSION,
+        version: str = INTERVIEWER_V3_PROMPT_VERSION,
         *,
         window: int = WINDOW_TURNS,
         cap: int = WINDOW_ANSWER_CAP,
@@ -207,7 +207,7 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
                 default=WINDOW_LEDGER,
                 strategies={
                     WINDOW_LEDGER: WindowLedger(
-                        prompts.get(WINDOW_LEDGER, INTERVIEWER_V2_PROMPT_VERSION)
+                        prompts.get(WINDOW_LEDGER, INTERVIEWER_V3_PROMPT_VERSION)
                     ),
                     FULL_HISTORY: FullHistory(
                         prompts.get(FULL_HISTORY, INTERVIEWER_PROMPT_VERSION)

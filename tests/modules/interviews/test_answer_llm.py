@@ -51,7 +51,7 @@ def test_a_non_final_answer_gets_a_reaction_and_the_llms_next_question(
     assert body["current_question"]["text"] == "Second question?" and body["current_question"]["position"] == 2
     assert body["reaction"]["text"] in ALL_REACTIONS
     q2 = questions(db, created["session"]["id"])[1]
-    assert (q2.source, q2.category, q2.prompt_version) == ("llm", "behavioral", "interviewer_v2")
+    assert (q2.source, q2.category, q2.prompt_version) == ("llm", "behavioral", "interviewer_v3")
     assert len(llm.fake.calls) == 2
 
 

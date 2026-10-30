@@ -77,3 +77,38 @@ Concept: 10 Evals, model choice.
 
 ## Checkpoint D: the comparison (step 12) - NOT RECORDED YET
 Run the same N as Checkpoint C and compare against it: `full_history` vs `window_ledger`, `--summary on/off`, `--notes on/off`, `--reasoning-effort low/medium/high`, a reasoning vs a non-reasoning model, and the prompt ablation (`--prompt <variant>`). Read `finish=length` first. Note whether the provider reports cached tokens (`cached=` in the runner output) before claiming any caching saving, and whether wrong notes carried into later questions (error accumulation).
+
+---
+
+## Checkpoint E: where the cost went (live interview, 2026-10-30)
+Concept: 2 Context, 9 Cost.
+
+**Predict** (you)
+- `window_ledger` sends fewer turns than `full_history`. For a 5-question interview, which one sends fewer tokens in total? Why?
+- _your answer here_
+
+**Observed** (live interview `01a18a8f-...` on `gemini-3.5-flash-lite`: 5 questions, 1030-char job description summarised to 439, answers of 441 / 458 / 836 / 633 / 1081 chars. Every call re-built offline from the stored data under each setup; estimated input tokens, chars / 4. The `window_ledger v2` row matches the live `context_build` log exactly.)
+```
+setup                              Q1     Q2     Q3     Q4     Q5   total
+full_history v1 + original JD     606    777    936   1190   1400    4909
+full_history v1 + summary         458    630    788   1043   1252    4171
+window_ledger v2 + summary       1534   1725   1884   2138   2227    9508
+window_ledger v3 + summary        875   1066   1225   1479   1568    6213
+```
+- Every part of the context manager worked: the summary saved about 148 tokens per call (740 over 5 calls, against 546 for the one summary call); the ledger kicked in at Q5 (Q4 -> Q5 grew +89 tokens against +210 for full history); the 836-char answer was capped to 600 once it left the latest turn.
+- Yet `window_ledger v2` sent about twice as much as the old setup. `interviewer_v2` (5,501 chars, about 1,400 tokens) is resent on every call, against v1's 1,298 chars. That fixed cost was bigger than everything the history strategy saved.
+- With answers like these, full history grows about 200 tokens per question and `window_ledger` about 90 after Q4: the gap closes too slowly to break even within the 10-question maximum. With 2,000-char answers it would break even around Q6-7.
+- `interviewer_v3` (2,848 chars) keeps v2's rules but drops the bad examples, the self-check and repeated wording: 35% less input than v2 (6,213 vs 9,508). Still above v1, because the level guidance, the interview arc and the note instructions cost tokens.
+- The last turn of the 3-question baseline interview tripled in *output* tokens (Checkpoint A), not input; on `gemini-3.5-flash-lite` output stayed at 37-72 tokens per question. Context strategies did not fix that; the model change did.
+
+**Why**
+- A context strategy only removes what grows (history). Whatever is resent unchanged on every call (system prompt, job description) is a fixed cost per call, and with short interviews it dominates. Measure both before calling a strategy a saving.
+- The fixed prefix is the part a provider can cache. Whether that makes it cheap is a fact to observe (`cached_tokens` in the `llm_call` log), not to assume.
+
+**To do** (you)
+1. Run one more live interview and read `cached_tokens` in each `llm_call` line: is the prefix served from cache from Q2 on?
+2. Check that v3 did not lose quality: `interviews_evals --prompt interviewer_v2` vs the default (v3), same model, `--repeat 3`, and read the long-history questions side by side.
+
+**Proof** (you)
+- Why can a strategy that sends fewer turns still cost more per interview? What would you measure before trimming a prompt?
+- _your answer here_

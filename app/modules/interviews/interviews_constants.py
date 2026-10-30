@@ -82,8 +82,11 @@ INTERVIEWER_TASK = "interviewer_turn"
 SUMMARY_TASK = "job_description_summary"
 FULL_HISTORY = "full_history"
 WINDOW_LEDGER = "window_ledger"
-# Stable-prefix prompt used by window_ledger: no question number in it, so the system prompt never changes.
+# Stable-prefix prompts: no question number in them, so the system prompt never changes during an interview.
 INTERVIEWER_V2_PROMPT_VERSION = "interviewer_v2"
+# v2's rules in about half the characters (v2's ~1,400 tokens were most of every call); window_ledger's default.
+# v2 stays for comparison: `interviews_evals --prompt interviewer_v2`.
+INTERVIEWER_V3_PROMPT_VERSION = "interviewer_v3"
 SUMMARY_PROMPT_VERSION = "job_description_summary_v2"
 # Starting values, tuned by the eval comparison (docs/features/context-management/learnings.md).
 WINDOW_TURNS = 3

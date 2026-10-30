@@ -5,6 +5,7 @@ import pytest
 from app.modules.interviews.interviews_constants import (
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_V2_PROMPT_VERSION,
+    INTERVIEWER_V3_PROMPT_VERSION,
     LEVEL_GUIDANCE,
     NOTE_MAX_LENGTH,
     PROMPTS_DIR,
@@ -20,20 +21,26 @@ from app.modules.interviews.interviews_utils import load_prompt, render_intervie
 
 SECTIONS = ["# Role", "# Task", "# Input", "# Output", "# Constraints", "# Capabilities"]
 LONG_JD = "We build payment APIs in Python and PostgreSQL. " * 20
+STABLE_PREFIX_VERSIONS = [INTERVIEWER_V2_PROMPT_VERSION, INTERVIEWER_V3_PROMPT_VERSION]
 
 
-@pytest.mark.parametrize("version", [INTERVIEWER_V2_PROMPT_VERSION, SUMMARY_PROMPT_VERSION])
+@pytest.mark.parametrize("version", [*STABLE_PREFIX_VERSIONS, SUMMARY_PROMPT_VERSION])
 def test_new_prompts_have_the_six_sections_in_order(version):  # plan step 3 checklist
     headings = [line for line in load_prompt(version).splitlines() if re.match(r"^# \w", line)]
 
     assert headings == SECTIONS
 
 
+@pytest.mark.parametrize("version", STABLE_PREFIX_VERSIONS)
 @pytest.mark.parametrize("level", list(Level))
 @pytest.mark.parametrize("interview_type", list(InterviewType))
-def test_v2_renders_with_no_unfilled_placeholder(level, interview_type):  # AC20
+def test_stable_prefix_prompts_render_with_no_unfilled_placeholder(version, level, interview_type):  # AC20
     text = render_interviewer_v2_prompt(
-        role=JobRole.backend, level=level, interview_type=interview_type, question_count=5
+        role=JobRole.backend,
+        level=level,
+        interview_type=interview_type,
+        question_count=5,
+        template=load_prompt(version),
     )
 
     assert "{{" not in text
@@ -45,12 +52,21 @@ def test_every_level_has_guidance():  # AC20
     assert set(LEVEL_GUIDANCE) == set(Level) and all(LEVEL_GUIDANCE.values())
 
 
-def test_v2_has_no_question_number_and_asks_for_a_note():  # AC5: the number lives in the per-call trailer
+@pytest.mark.parametrize("version", STABLE_PREFIX_VERSIONS)
+def test_stable_prefix_prompts_have_no_question_number_and_ask_for_a_note(version):  # AC5: number is in the trailer
     text = render_interviewer_v2_prompt(
-        role=JobRole.data, level=Level.mid, interview_type=InterviewType.mixed, question_count=7
+        role=JobRole.data,
+        level=Level.mid,
+        interview_type=InterviewType.mixed,
+        question_count=7,
+        template=load_prompt(version),
     )
 
     assert "question 1 of" not in text and '"note"' in text and "<interview_status>" in text
+
+
+def test_v3_is_shorter_than_v2():  # v3 exists to cut the fixed cost of every call
+    assert len(load_prompt(INTERVIEWER_V3_PROMPT_VERSION)) < len(load_prompt(INTERVIEWER_V2_PROMPT_VERSION)) * 0.6
 
 
 def test_summary_prompt_asks_for_words_and_states_the_character_cap():

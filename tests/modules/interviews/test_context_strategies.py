@@ -7,7 +7,7 @@ from app.modules.interviews.interviews_constants import (
     FULL_HISTORY,
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_TASK,
-    INTERVIEWER_V2_PROMPT_VERSION,
+    INTERVIEWER_V3_PROMPT_VERSION,
     SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
     TRUNCATION_MARKER,
@@ -92,7 +92,7 @@ def test_the_first_call_is_system_then_job_description_with_no_status():  # EC2
 
     assert [m.role for m in built.messages] == ["system", "user"]
     assert "<interview_status>" not in built.messages[1].content
-    assert built.prompt_version == INTERVIEWER_V2_PROMPT_VERSION
+    assert built.prompt_version == INTERVIEWER_V3_PROMPT_VERSION
 
 
 def test_fewer_turns_than_the_window_are_all_sent_with_no_ledger():  # EC1

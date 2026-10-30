@@ -72,19 +72,25 @@ def _log_llm_call(
     model: str = "-",
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
+    # Part of prompt_tokens served from the provider's prompt cache / part of completion_tokens spent on hidden
+    # reasoning. "-" when the provider doesn't report them.
+    cached_tokens: int | None = None,
+    reasoning_tokens: int | None = None,
     latency_ms: int,
     attempts: int,
     finish: str | None = None,
 ) -> None:
     llm_logger.log(
         level,
-        "llm_call session=%s model=%s prompt_version=%s prompt_tokens=%s completion_tokens=%s "
-        "latency_ms=%s attempts=%s finish=%s outcome=%s",
+        "llm_call session=%s model=%s prompt_version=%s prompt_tokens=%s cached_tokens=%s completion_tokens=%s "
+        "reasoning_tokens=%s latency_ms=%s attempts=%s finish=%s outcome=%s",
         session_id,
         model,
         prompt_version,
         "-" if prompt_tokens is None else prompt_tokens,
+        "-" if cached_tokens is None else cached_tokens,
         "-" if completion_tokens is None else completion_tokens,
+        "-" if reasoning_tokens is None else reasoning_tokens,
         latency_ms,
         attempts,
         finish or "-",
@@ -107,6 +113,8 @@ def _log_result(
         model=result.model,
         prompt_tokens=result.prompt_tokens,
         completion_tokens=result.completion_tokens,
+        cached_tokens=result.cached_tokens,
+        reasoning_tokens=result.reasoning_tokens,
         latency_ms=result.latency_ms,
         attempts=result.attempts,
         finish=result.finish_reason,

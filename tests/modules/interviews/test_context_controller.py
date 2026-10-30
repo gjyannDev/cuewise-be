@@ -46,7 +46,7 @@ def tiny_context():
     app.dependency_overrides.pop(get_context_manager, None)
 
 
-def test_the_live_default_is_the_window_layout_with_v2(start_interview, make_user, answer, llm, db):  # AC2
+def test_the_live_default_is_the_window_layout_with_v3(start_interview, make_user, answer, llm, db):  # AC2
     owner = make_user()
     created = start_interview(owner, question_count=3).json()
 
@@ -55,7 +55,7 @@ def test_the_live_default_is_the_window_layout_with_v2(start_interview, make_use
     system, *_, last = llm.fake.calls[1]
     assert "question 2 of" not in system.content and "question 2 of 3" in last.content
     q2 = db.scalars(select(InterviewQuestion).where(InterviewQuestion.position == 2)).one()
-    assert q2.prompt_version == "interviewer_v2"
+    assert q2.prompt_version == "interviewer_v3"
 
 
 def test_older_answers_are_not_resent_in_a_long_interview(start_interview, make_user, answer, llm):  # AC3
