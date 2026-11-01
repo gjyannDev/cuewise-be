@@ -162,3 +162,52 @@ def test_a_field_other_than_question_category_and_note_is_still_rejected():  # E
         parse(reply(note="Fine.", score=10))
 
     assert exc.value.reason == "schema"
+
+
+# --- follow-up mode: the question only; the category is the main question's, set by the app ---
+
+
+def follow_up(raw, interview_type=InterviewType.technical, earlier=EARLIER, category=QuestionCategory.technical):
+    return parse_interviewer_reply(
+        raw, interview_type=interview_type, earlier_questions=earlier, follow_up_category=category
+    )
+
+
+def test_a_follow_up_is_accepted_without_a_category_and_inherits_the_parents():  # EC15
+    result = follow_up(json.dumps({"question": "Which algorithm would you run on Redis, and why?"}))
+
+    assert result.question == "Which algorithm would you run on Redis, and why?"
+    assert result.category == QuestionCategory.technical
+
+
+def test_a_follow_up_in_a_behavioral_only_interview_keeps_the_behavioral_category():  # EC15
+    result = follow_up(
+        json.dumps({"question": "What did you do yourself?"}),
+        interview_type=InterviewType.behavioral,
+        category=QuestionCategory.behavioral,
+    )
+
+    assert result.category == QuestionCategory.behavioral
+
+
+def test_the_model_cannot_choose_the_category_of_a_follow_up():  # EC15
+    with pytest.raises(InvalidReplyError) as exc:
+        follow_up(reply(question="Which algorithm would you use?", category="behavioral"))
+
+    assert exc.value.reason == "schema"
+
+
+def test_a_follow_up_that_repeats_an_earlier_follow_up_is_rejected():  # EC14
+    earlier = [*EARLIER, "Which algorithm would you run on Redis, and why?"]
+
+    with pytest.raises(InvalidReplyError) as exc:
+        follow_up(json.dumps({"question": "which algorithm would you run on Redis, and WHY?"}), earlier=earlier)
+
+    assert exc.value.reason == "repeat"
+
+
+def test_a_follow_up_still_asks_one_question_only():
+    with pytest.raises(InvalidReplyError) as exc:
+        follow_up(json.dumps({"question": "Why Redis? And why not Memcached?"}))
+
+    assert exc.value.reason == "multiple_questions"

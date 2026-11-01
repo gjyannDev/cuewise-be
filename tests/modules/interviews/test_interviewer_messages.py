@@ -130,7 +130,7 @@ def test_answers_only_ever_appear_in_user_turns():  # EC14
 
 
 def _question(position, text, category="technical"):
-    return InterviewQuestion(id=uuid.uuid7(), position=position, text=text, category=category)
+    return InterviewQuestion(id=uuid.uuid7(), position=position, text=text, category=category, kind="main")
 
 
 def test_history_pairs_questions_with_answers_and_ignores_reactions():  # AC11

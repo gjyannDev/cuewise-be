@@ -66,6 +66,23 @@ class InterviewsRepository:
             )
         )
 
+    def get_session(self, session_id: uuid.UUID) -> InterviewSession | None:
+        """Any user's session, by id: for the report script only (the API always goes through get_for_user)."""
+        return self.db.get(InterviewSession, session_id)
+
+    def latest_sessions(self, limit: int) -> list[InterviewSession]:
+        # UUIDv7 ids are time-ordered, so the highest ids are the newest interviews.
+        return list(self.db.scalars(select(InterviewSession).order_by(InterviewSession.id.desc()).limit(limit)))
+
+    def list_session_questions(self, session_id: uuid.UUID) -> list[InterviewQuestion]:
+        return list(
+            self.db.scalars(
+                select(InterviewQuestion)
+                .where(InterviewQuestion.session_id == session_id)
+                .order_by(InterviewQuestion.position)
+            )
+        )
+
     def list_all_questions(self) -> list[InterviewQuestion]:
         """Every stored question, grouped by interview in creation order (UUIDv7), for the usage report script."""
         return list(
@@ -77,7 +94,7 @@ class InterviewsRepository:
     def record_turn(
         self,
         answer: InterviewMessage,
-        reaction: InterviewMessage,
+        reaction: InterviewMessage | None,
         next_question: InterviewQuestion | None,
         expected_position: int,
         *,
@@ -110,7 +127,8 @@ class InterviewsRepository:
             if result.rowcount != 1:
                 self.db.rollback()
                 return False
-            self.db.add_all([answer, reaction])
+            # No reaction before a follow-up: it comes straight after the answer.
+            self.db.add_all([m for m in (answer, reaction) if m is not None])
             if next_question is not None:
                 next_question.session_id = answer.session_id
                 self.db.add(next_question)

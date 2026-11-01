@@ -4,13 +4,24 @@ import pytest
 
 from app.core.ai.fake import FakeProvider
 from app.main import app
-from app.modules.interviews.interviews_constants import Level
-from app.modules.interviews.interviews_dependencies import get_bank, get_clock, get_llm_provider
+from app.modules.interviews.interviews_constants import DECISION_PROMPT_VERSION, Level, QuestionCategory
+from app.modules.interviews.interviews_dependencies import (
+    get_bank,
+    get_clock,
+    get_llm_provider,
+)
 from app.modules.interviews.interviews_schema import BankQuestion
+from app.modules.interviews.interviews_utils import load_prompt
 
 
 def _bank_question(qid, category="behavioral", roles=("general",), levels=tuple(Level)):
-    return BankQuestion(id=qid, text=f"Question {qid}?", type=category, roles=list(roles), levels=list(levels))
+    return BankQuestion(
+        id=qid,
+        text=f"Question {qid}?",
+        type=QuestionCategory(category),
+        roles=list(roles),
+        levels=list(levels),
+    )
 
 
 @pytest.fixture
@@ -36,7 +47,12 @@ def start_interview(client, auth_header, bank):
     """POST a setup for `user`; any field can be overridden, or dropped by passing None."""
 
     def _start(user, **overrides):
-        body = {"role": "backend", "level": "junior", "interview_type": "behavioral", "question_count": 3}
+        body = {
+            "role": "backend",
+            "level": "junior",
+            "interview_type": "behavioral",
+            "question_count": 3,
+        }
         body = {k: v for k, v in (body | overrides).items() if v is not None}
         return client.post("/api/v1/interviews", json=body, headers=auth_header(user))
 
@@ -47,9 +63,19 @@ def start_interview(client, auth_header, bank):
 def answer(client, auth_header):
     """POST an answer; `question_id` defaults to whatever the caller passes, body fields can be overridden."""
 
-    def _answer(user, session_id, question_id, text="I built a prototype to compare both options.", **overrides):
+    def _answer(
+        user,
+        session_id,
+        question_id,
+        text="I built a prototype to compare both options.",
+        **overrides,
+    ):
         body = {"question_id": str(question_id), "answer": text} | overrides
-        return client.post(f"/api/v1/interviews/{session_id}/messages", json=body, headers=auth_header(user))
+        return client.post(
+            f"/api/v1/interviews/{session_id}/messages",
+            json=body,
+            headers=auth_header(user),
+        )
 
     return _answer
 
@@ -60,6 +86,9 @@ def llm():
 
     Once the script runs out, every call returns a new valid behavioral question (allowed for behavioral and mixed
     interviews), so a test only scripts the turns it cares about.
+
+    Decide calls (follow-ups) go to their own fake, `llm.decide`, scripted with `llm.script_decide(...)`; by default
+    every decision is "next_question", so tests that only script questions behave as before follow-ups existed.
     """
     counter = iter(range(1, 1000))
 
@@ -68,19 +97,50 @@ def llm():
 
     class _LLM:
         fake = FakeProvider(default=unique_question)
+        decide = FakeProvider(default=_decision_json())
 
         def script(self, *replies, on_call=None):
             self.fake = FakeProvider(replies, on_call=on_call, default=unique_question)
-            app.dependency_overrides[get_llm_provider] = lambda: self.fake
             return self.fake
 
+        def script_decide(self, *replies, on_call=None, default=None):
+            self.decide = FakeProvider(
+                replies, on_call=on_call, default=default or _decision_json()
+            )
+            return self.decide
+
+        # The provider the app gets: routes each call by its system prompt.
+        def complete(self, messages, **kwargs):
+            fake = self.decide if _DECISION_MARKER in messages[0].content else self.fake
+            return fake.complete(messages, **kwargs)
+
+        def close(self) -> None:
+            pass
+
     handle = _LLM()
-    app.dependency_overrides[get_llm_provider] = lambda: handle.fake
+    app.dependency_overrides[get_llm_provider] = lambda: handle
     yield handle
     app.dependency_overrides.pop(get_llm_provider, None)
 
 
-def _reply_json(question="How would you design a rate limiter for a public API?", category="technical") -> str:
+# A phrase only the decide prompt has (its role line, before the first placeholder), read from the prompt file.
+_DECISION_MARKER = load_prompt(DECISION_PROMPT_VERSION).splitlines()[1].split("{{")[0]
+
+
+def _decision_json(action="next_question", gap=None, note=None) -> str:
+    return json.dumps({"action": action, "gap": gap} | ({"note": note} if note else {}))
+
+
+@pytest.fixture
+def decision_json():
+    """Builds a reply in the exact shape the decide call must produce."""
+    return _decision_json
+
+
+def _reply_json(
+    question="How would you design a rate limiter for a public API?",
+    category="technical",
+) -> str:
     return json.dumps({"question": question, "category": category})
 
 

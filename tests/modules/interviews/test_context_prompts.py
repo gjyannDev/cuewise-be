@@ -3,21 +3,30 @@ import re
 import pytest
 
 from app.modules.interviews.interviews_constants import (
+    DECISION_PROMPT_VERSION,
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_V2_PROMPT_VERSION,
     INTERVIEWER_V3_PROMPT_VERSION,
+    INTERVIEWER_V4_PROMPT_VERSION,
     LEVEL_GUIDANCE,
     NOTE_MAX_LENGTH,
     PROMPTS_DIR,
     SUMMARY_MAX_LENGTH,
     SUMMARY_MAX_WORDS,
     SUMMARY_PROMPT_VERSION,
+    FollowUpAction,
+    FollowUpGap,
     InterviewType,
     JobRole,
     Level,
 )
 from app.modules.interviews.interviews_reply import InvalidReplyError, validate_note, validate_summary
-from app.modules.interviews.interviews_utils import load_prompt, render_interviewer_v2_prompt, render_summary_prompt
+from app.modules.interviews.interviews_utils import (
+    load_prompt,
+    render_decision_prompt,
+    render_interviewer_v2_prompt,
+    render_summary_prompt,
+)
 
 SECTIONS = ["# Role", "# Task", "# Input", "# Output", "# Constraints", "# Capabilities"]
 LONG_JD = "We build payment APIs in Python and PostgreSQL. " * 20
@@ -106,6 +115,40 @@ def test_an_unusable_summary_is_rejected_with_a_reason(text, reason):  # EC10
 
 def test_a_valid_note_is_returned_trimmed():
     assert validate_note("  Described a cache rollout; no metrics.  ") == "Described a cache rollout; no metrics."
+
+
+# --- follow-ups: the decide prompt and interviewer_v4 ---
+
+
+@pytest.mark.parametrize("version", [DECISION_PROMPT_VERSION, INTERVIEWER_V4_PROMPT_VERSION])
+def test_follow_up_prompts_have_the_six_sections_in_order(version):  # AC9
+    headings = [line for line in load_prompt(version).splitlines() if re.match(r"^# \w", line)]
+
+    assert headings == SECTIONS
+
+
+@pytest.mark.parametrize("level", list(Level))
+@pytest.mark.parametrize("interview_type", list(InterviewType))
+def test_the_decide_prompt_renders_fully_and_names_every_action_and_gap(level, interview_type):  # AC9
+    text = render_decision_prompt(role=JobRole.backend, level=level, interview_type=interview_type)
+
+    assert "{{" not in text
+    assert all(f'"{value}"' in text for value in [*FollowUpAction, *FollowUpGap])
+    assert LEVEL_GUIDANCE[level] in text and "<interview_status>" in text
+
+
+def test_v4_renders_like_v3_but_asks_for_no_note_and_allows_follow_ups():  # AC9
+    text = render_interviewer_v2_prompt(
+        role=JobRole.data,
+        level=Level.mid,
+        interview_type=InterviewType.mixed,
+        question_count=7,
+        template=load_prompt(INTERVIEWER_V4_PROMPT_VERSION),
+    )
+
+    assert "{{" not in text and "<interview_status>" in text and "question 1 of" not in text
+    assert '"note"' not in text and "rather than following up" not in text
+    assert "follow-up" in text.lower()
 
 
 @pytest.mark.parametrize(

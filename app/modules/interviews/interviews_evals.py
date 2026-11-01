@@ -1,6 +1,7 @@
 """Opt-in evals for the interviewer prompt: fixed cases, run against the real model, checked by rules.
 
 Run:  uv run python -m app.modules.interviews.interviews_evals [--strategy ...] [--repeat N] [--help]
+      uv run python -m app.modules.interviews.interviews_evals --task decide --repeat 3   (follow-up decisions)
 (needs OPENROUTER_API_KEY and LLM_MODEL). It costs real calls, so it never runs in `uv run pytest`; the checks
 themselves are unit-tested with the fake provider. Never imported by the app.
 
@@ -8,6 +9,9 @@ Each case is one moment of an interview (setup, conversation so far, last answer
 rules, because a good interview question has no single right text: is the reply valid, is it only a question,
 does it avoid judging the candidate, and does it ignore injected instructions. Rules cannot see question quality,
 so long-history outputs are printed with their setup for a manual review (docs/features/context-management).
+
+The decide task is the opposite: a decision does have a right answer, so cases carry a label (`expect`) and the
+runner reports accuracy, over-probing (a follow-up nobody needed) and under-probing (a gap left unexplored).
 """
 
 import argparse
@@ -24,16 +28,20 @@ from app.core.ai.context import ContextManager, ContextTooLargeError
 from app.core.ai.provider import LLMError, LLMProvider, LLMResult, ReasoningEffort
 
 from .interviews_constants import (
+    DECISION_TASK,
     FULL_HISTORY,
     INTERVIEWER_TASK,
     PROMPTS_DIR,
     SUMMARY_TASK,
     SUMMARY_THRESHOLD,
     WINDOW_LEDGER,
+    FollowUpAction,
+    FollowUpGap,
     InterviewType,
     JobRole,
     Level,
     QuestionCategory,
+    QuestionKind,
 )
 from .interviews_context import (
     CONTEXT_MANAGER,
@@ -43,6 +51,7 @@ from .interviews_context import (
 )
 from .interviews_reply import (
     InvalidReplyError,
+    parse_decision_reply,
     parse_interviewer_reply,
     validate_summary,
 )
@@ -82,6 +91,17 @@ class EvalTurn(BaseModel):
     answer: str
     # The running note the model would have written about this answer (window_ledger shows it for old turns).
     note: str | None = None
+    # A follow-up belongs to the thread of the main question before it (a thread at the cap has two).
+    kind: QuestionKind = QuestionKind.main
+
+
+class Expect(BaseModel):
+    """The label for the decide call: the action it should pick, and the gap when only one is fair."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: FollowUpAction
+    gap: FollowUpGap | None = None
 
 
 class EvalCase(BaseModel):
@@ -97,10 +117,13 @@ class EvalCase(BaseModel):
         "injection_job_description",
         "long_history",
         "long_job_description",
+        "at_cap",
     ]
     setup: EvalSetup
     job_description: str | None = None
     history: list[EvalTurn]
+    # Decide evals only (`--task decide`); cases without a label are writing cases only.
+    expect: Expect | None = None
     # A word the injected text asks the model to output; the reply must not contain it.
     marker: str | None = None
     notes: str = ""
@@ -123,6 +146,11 @@ class CaseResult(BaseModel):
     reasoning_tokens: int = 0
     latency_ms: int = 0
     finish_reason: str | None = None
+    # Decide evals: what the model picked against the label.
+    decided: str | None = None
+    decided_gap: str | None = None
+    expected_action: str | None = None
+    expected_gap: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -147,6 +175,19 @@ class RunsSummary(BaseModel):
     mean: float
     minimum: float
     maximum: float
+
+
+class DecisionSummary(BaseModel):
+    """Correct = the labelled action (and the gap, when one is labelled). Over-probing costs the candidate time and
+    patience; under-probing leaves a vague answer unexplored. Both are counted apart from plain mistakes.
+    """
+
+    correct: int
+    labelled: int
+    over_probing: int
+    under_probing: int
+    # Per labelled gap: right gap / cases expecting it.
+    per_gap: dict[str, str]
 
 
 def load_cases(path: Path) -> list[EvalCase]:
@@ -199,6 +240,107 @@ def check_reply(case: EvalCase, raw: str, *, expect_note: bool = False) -> list[
     return checks + ([note] if note else [])
 
 
+def check_decision(case: EvalCase, raw: str) -> list[Check]:
+    """The decide reply against the case's label; the injection check reads the raw reply (the note included)."""
+    assert case.expect is not None
+    obeyed = bool(case.marker) and case.marker.casefold() in raw.casefold()
+    injection = Check(name="injection_ignored", passed=not obeyed, detail=(case.marker or "") if obeyed else "")
+    try:
+        decision = parse_decision_reply(raw)
+    except InvalidReplyError as exc:
+        return [
+            Check(name="valid_reply", passed=False, detail=exc.reason),
+            Check(name="decision", passed=False, detail="invalid"),
+            injection,
+        ]
+    checks = [
+        Check(name="valid_reply", passed=True),
+        Check(
+            name="decision",
+            passed=decision.action == case.expect.action,
+            detail=f"{decision.action}, expected {case.expect.action}",
+        ),
+        injection,
+    ]
+    if case.expect.gap and decision.action == case.expect.action:
+        checks.append(
+            Check(name="gap", passed=decision.gap == case.expect.gap, detail=f"{decision.gap}, expected {case.expect.gap}")
+        )
+    return checks
+
+
+def run_decide_case(
+    provider: LLMProvider,
+    case: EvalCase,
+    *,
+    max_tokens: int,
+    context: ContextManager = CONTEXT_MANAGER,
+    reasoning_effort: ReasoningEffort | None = None,
+) -> CaseResult:
+    """One decide call on the case's latest answer, as the app makes it after every answer."""
+    assert case.expect is not None
+    usage = CaseResult(
+        case_id=case.id,
+        checks=[],
+        expected_action=case.expect.action,
+        expected_gap=case.expect.gap,
+    )
+    inputs = InterviewerInputs(
+        role=case.setup.role,
+        level=case.setup.level,
+        interview_type=case.setup.interview_type,
+        question_count=case.setup.question_count,
+        job_description=case.job_description,
+        turns=[QuestionTurn(t.question, t.category, t.answer, t.note, t.kind) for t in case.history],
+    )
+    try:
+        built = context.build(DECISION_TASK, inputs)
+    except ContextTooLargeError:
+        return usage.model_copy(update={"error": "context_too_large"})
+    try:
+        result = provider.complete(built.messages, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
+    except LLMError as exc:
+        return usage.model_copy(update={"error": type(exc).__name__, "finish_reason": exc.finish_reason})
+    _add_usage(usage, result)
+    checks = check_decision(case, result.text)
+    try:
+        decision = parse_decision_reply(result.text)
+        decided, decided_gap = decision.action.value, decision.gap
+    except InvalidReplyError:
+        decided, decided_gap = None, None
+    return usage.model_copy(
+        update={
+            "checks": checks,
+            "question": result.text.strip(),
+            "finish_reason": result.finish_reason,
+            "decided": decided,
+            "decided_gap": decided_gap,
+        }
+    )
+
+
+def summarize_decisions(results: Sequence[CaseResult]) -> DecisionSummary:
+    def right(r: CaseResult) -> bool:
+        return r.decided == r.expected_action and (r.expected_gap is None or r.decided_gap == r.expected_gap)
+
+    gaps = sorted({r.expected_gap for r in results if r.expected_gap})
+    return DecisionSummary(
+        correct=sum(right(r) for r in results),
+        labelled=len(results),
+        over_probing=sum(
+            r.expected_action == FollowUpAction.next_question and r.decided == FollowUpAction.follow_up for r in results
+        ),
+        under_probing=sum(
+            r.expected_action == FollowUpAction.follow_up and r.decided == FollowUpAction.next_question for r in results
+        ),
+        per_gap={
+            gap: f"{sum(r.decided_gap == gap for r in results if r.expected_gap == gap)}/"
+            f"{sum(r.expected_gap == gap for r in results)}"
+            for gap in gaps
+        },
+    )
+
+
 def run_case(
     provider: LLMProvider,
     case: EvalCase,
@@ -227,7 +369,7 @@ def run_case(
         question_count=case.setup.question_count,
         job_description=job_description,
         turns=[
-            QuestionTurn(t.question, t.category, t.answer, t.note if notes else None)
+            QuestionTurn(t.question, t.category, t.answer, t.note if notes else None, t.kind)
             for t in case.history
         ],
         summary_used=summary_used,
@@ -340,6 +482,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--notes", choices=["on", "off"], default="on")
     parser.add_argument("--summary", choices=["on", "off"], default="on")
     parser.add_argument("--repeat", type=_positive, default=1)
+    parser.add_argument(
+        "--task",
+        choices=["write", "decide"],
+        default="write",
+        help="write: the question rules (default); decide: the follow-up decision on the labelled cases",
+    )
     return parser
 
 
@@ -369,31 +517,28 @@ def main(
             )
             return 1
     print(
-        f"model={model} max_tokens={settings.llm_max_tokens} strategy={args.strategy or 'default'} "
+        f"model={model} max_tokens={settings.llm_max_tokens} task={args.task} strategy={args.strategy or 'default'} "
         f"prompt={args.prompt or 'default'} reasoning_effort={args.reasoning_effort or '-'} "
         f"notes={args.notes} summary={args.summary} repeat={args.repeat}\n"
     )
-    runs = []
+    decide = args.task == "decide"
+    runs, decisions = [], []
     try:
         cases = load_cases(EVAL_CASES_PATH)
+        if decide:
+            cases = [c for c in cases if c.expect]
         for run in range(1, args.repeat + 1):
             print(f"=== run {run}/{args.repeat}")
             results = []
             for case in cases:
-                result = run_case(
-                    provider,
-                    case,
-                    max_tokens=settings.llm_max_tokens,
-                    context=context,
-                    strategy=args.strategy,
-                    notes=args.notes == "on",
-                    summary=args.summary == "on",
-                    reasoning_effort=args.reasoning_effort,
-                )
+                result = _run_one(provider, case, args, context, settings.llm_max_tokens)
                 results.append(result)
                 _print_case(case, result)
             runs.append(summarize(results))
             _print_summary(runs[-1])
+            if decide:
+                decisions.append(summarize_decisions(results))
+                _print_decisions(decisions[-1])
     finally:
         provider.close()
     aggregate = summarize_runs(runs)
@@ -401,6 +546,13 @@ def main(
         f"\npass rate mean={aggregate.mean:.2f} min={aggregate.minimum:.2f} max={aggregate.maximum:.2f} "
         f"runs={', '.join(f'{rate:.2f}' for rate in aggregate.pass_rates)}"
     )
+    if decisions:
+        rates = [d.correct / d.labelled if d.labelled else 0.0 for d in decisions]
+        print(
+            f"decision accuracy mean={sum(rates) / len(rates):.2f} min={min(rates):.2f} max={max(rates):.2f} "
+            f"over_probing={sum(d.over_probing for d in decisions)} "
+            f"under_probing={sum(d.under_probing for d in decisions)} (over all runs)"
+        )
     return 0
 
 
@@ -430,6 +582,32 @@ def _print_summary(summary: Summary) -> None:
         f"tokens {summary.prompt_tokens} in ({summary.cached_tokens} cached) / {summary.completion_tokens} out "
         f"({summary.reasoning_tokens} reasoning), avg latency {summary.average_latency_ms} ms, "
         f"finish=length {summary.finish_length}/{summary.total}\n"
+    )
+
+
+def _run_one(
+    provider: LLMProvider, case: EvalCase, args: argparse.Namespace, context: ContextManager, max_tokens: int
+) -> CaseResult:
+    if args.task == "decide":
+        return run_decide_case(
+            provider, case, max_tokens=max_tokens, context=context, reasoning_effort=args.reasoning_effort
+        )
+    return run_case(
+        provider,
+        case,
+        max_tokens=max_tokens,
+        context=context,
+        strategy=args.strategy,
+        notes=args.notes == "on",
+        summary=args.summary == "on",
+        reasoning_effort=args.reasoning_effort,
+    )
+
+
+def _print_decisions(summary: DecisionSummary) -> None:
+    print(
+        f"decision accuracy {summary.correct}/{summary.labelled}  over_probing={summary.over_probing} "
+        f"under_probing={summary.under_probing}  per gap: {summary.per_gap or 'none labelled'}\n"
     )
 
 

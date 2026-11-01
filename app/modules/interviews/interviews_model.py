@@ -13,6 +13,7 @@ from .interviews_constants import (
     JOB_DESCRIPTION_MAX_LENGTH,
     NOTE_MAX_LENGTH,
     SUMMARY_MAX_LENGTH,
+    QuestionKind,
     QuestionSource,
     SessionStatus,
 )
@@ -73,6 +74,16 @@ class InterviewQuestion(UUIDPrimaryKeyMixin, Base):
     prompt_tokens: Mapped[int | None]
     completion_tokens: Mapped[int | None]
     latency_ms: Mapped[int | None]
+    # A main question opens a thread; a follow-up points at it and copies its category and main_number.
+    kind: Mapped[str] = mapped_column(String(16), default=QuestionKind.main, server_default=QuestionKind.main.value)
+    parent_question_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("interview_questions.id", ondelete="CASCADE")
+    )
+    # "Question 3 of 5": stored so no response has to count rows. Defaults to position (true when there are no
+    # follow-ups, as in every session from before them).
+    main_number: Mapped[int] = mapped_column(default=lambda ctx: ctx.get_current_parameters()["position"])
+    # The decide call's prompt when one ran for the turn that produced this question (prompt_version is the writer's).
+    decision_prompt_version: Mapped[str | None] = mapped_column(String(64))
 
 
 class InterviewMessage(UUIDPrimaryKeyMixin, Base):

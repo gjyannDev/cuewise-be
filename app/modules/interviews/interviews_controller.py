@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
-from app.core.ai.context import ContextManager, ContextTooLargeError
+from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMError, LLMProvider, LLMResult
 from app.core.errors import (
     NotFoundError,
@@ -16,10 +16,6 @@ from app.modules.auth.auth_model import User
 
 from .interviews_constants import (
     FIRST_POSITION,
-    INTERVIEWER_PROMPT_VERSION,
-    INTERVIEWER_TASK,
-    MAX_REPLY_ATTEMPTS,
-    MIN_SECONDS_FOR_RETRY,
     SUMMARY_TASK,
     SUMMARY_THRESHOLD,
     SUMMARY_TIME_CAP_SECONDS,
@@ -28,16 +24,13 @@ from .interviews_constants import (
     Level,
     MessageRole,
     QuestionCategory,
+    QuestionKind,
     QuestionSource,
     SessionStatus,
 )
 from .interviews_context import CONTEXT_MANAGER, InterviewerInputs, SummaryInputs
 from .interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
-from .interviews_reply import (
-    InvalidReplyError,
-    parse_interviewer_reply,
-    validate_summary,
-)
+from .interviews_reply import InvalidReplyError, validate_summary
 from .interviews_repository import InterviewsRepository
 from .interviews_schema import (
     AnswerIn,
@@ -50,6 +43,15 @@ from .interviews_schema import (
     SessionOut,
     TranscriptOut,
 )
+from .interviews_turn import (
+    Interviewer,
+    TurnAction,
+    Written,
+    log_llm_call,
+    log_result,
+    log_turn_summary,
+    sum_known,
+)
 from .interviews_utils import (
     QuestionTurn,
     build_transcript,
@@ -58,72 +60,6 @@ from .interviews_utils import (
     pick_reaction,
     select_questions,
 )
-
-# One line per LLM call: metadata only (ids, model, tokens, timing, outcome), never answer or reply text.
-llm_logger = logging.getLogger("app.llm")
-
-
-def _log_llm_call(
-    level: int,
-    session_id: uuid.UUID,
-    outcome: str,
-    *,
-    prompt_version: str = INTERVIEWER_PROMPT_VERSION,
-    model: str = "-",
-    prompt_tokens: int | None = None,
-    completion_tokens: int | None = None,
-    # Part of prompt_tokens served from the provider's prompt cache / part of completion_tokens spent on hidden
-    # reasoning. "-" when the provider doesn't report them.
-    cached_tokens: int | None = None,
-    reasoning_tokens: int | None = None,
-    latency_ms: int,
-    attempts: int,
-    finish: str | None = None,
-) -> None:
-    llm_logger.log(
-        level,
-        "llm_call session=%s model=%s prompt_version=%s prompt_tokens=%s cached_tokens=%s completion_tokens=%s "
-        "reasoning_tokens=%s latency_ms=%s attempts=%s finish=%s outcome=%s",
-        session_id,
-        model,
-        prompt_version,
-        "-" if prompt_tokens is None else prompt_tokens,
-        "-" if cached_tokens is None else cached_tokens,
-        "-" if completion_tokens is None else completion_tokens,
-        "-" if reasoning_tokens is None else reasoning_tokens,
-        latency_ms,
-        attempts,
-        finish or "-",
-        outcome,
-    )
-
-
-def _log_result(
-    level: int,
-    session_id: uuid.UUID,
-    outcome: str,
-    result: LLMResult,
-    prompt_version: str = INTERVIEWER_PROMPT_VERSION,
-) -> None:
-    _log_llm_call(
-        level,
-        session_id,
-        outcome,
-        prompt_version=prompt_version,
-        model=result.model,
-        prompt_tokens=result.prompt_tokens,
-        completion_tokens=result.completion_tokens,
-        cached_tokens=result.cached_tokens,
-        reasoning_tokens=result.reasoning_tokens,
-        latency_ms=result.latency_ms,
-        attempts=result.attempts,
-        finish=result.finish_reason,
-    )
-
-
-def _sum_known(values: Sequence[int | None]) -> int | None:
-    known = [v for v in values if v is not None]
-    return sum(known) if known else None
 
 
 class InterviewSetup(NamedTuple):
@@ -137,6 +73,14 @@ class InterviewSetup(NamedTuple):
     job_description: str | None
     # Sent instead of job_description when present (made once at start for long descriptions).
     job_description_summary: str | None = None
+
+
+class Thread(NamedTuple):
+    """The main question the answered question belongs to (itself, or a follow-up's parent), as plain values."""
+
+    main_id: uuid.UUID
+    main_number: int
+    category: QuestionCategory
 
 
 class InterviewsController:
@@ -158,10 +102,16 @@ class InterviewsController:
         # None = LLM off: every question comes from the bank.
         self.llm = llm
         self.llm_max_tokens = llm_max_tokens
-        self.llm_budget_seconds = llm_budget_seconds
-        self.clock = clock
         # Decides what each LLM call sends (strategy, trimming); see interviews_context.py.
         self.context = context
+        # Decide, limits, write: one answer turn of the LLM interviewer (interviews_turn.py).
+        self.interviewer = (
+            None
+            if llm is None
+            else Interviewer(
+                llm, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
+            )
+        )
 
     def start(self, user: User, data: InterviewCreateIn) -> InterviewOut:
         # The bank must be able to back every position (the fallback), and a refused setup costs no LLM call.
@@ -189,9 +139,13 @@ class InterviewsController:
         if summary is not None:
             session.job_description_summary = summary
             setup = setup._replace(job_description_summary=summary)
-        first, _ = self._next_question(
-            setup, FIRST_POSITION, history=[], used_bank_ids=set()
-        )
+        first = None
+        if self.interviewer is not None:
+            written = self.interviewer.first_question(setup.session_id, self._inputs(setup, []))
+            if written.reply is not None:
+                first = _llm_question(written, written.results, FIRST_POSITION, 1)
+        if first is None:
+            first = self._bank_question(setup, FIRST_POSITION, 1, set())
         self.repo.start(session, [first])
         return InterviewOut(
             session=SessionOut.model_validate(session),
@@ -217,7 +171,7 @@ class InterviewsController:
                 "This is not the current question of the interview"
             )
 
-        # Read everything as plain values first: the read transaction ends before the (slow) LLM call, and after
+        # Read everything as plain values first: the read transaction ends before the (slow) LLM calls, and after
         # that every loaded ORM object is expired.
         setup = InterviewSetup(
             session.id,
@@ -228,27 +182,25 @@ class InterviewsController:
             session.job_description,
             session.job_description_summary,
         )
-        completes = position == session.question_count
         asked = self.repo.list_questions(session.id, position)
         saved = self.repo.list_messages(session.id)
         history = [
             *interviewer_history(asked[:-1], saved),
-            QuestionTurn(question.text, question.category, data.answer),
+            QuestionTurn(question.text, question.category, data.answer, kind=question.kind),
         ]
-        used_bank_ids = {q.bank_id for q in asked if q.bank_id}
-        stored_next = (
-            None if completes else self.repo.get_question(session.id, position + 1)
+        main = (
+            question
+            if question.kind == QuestionKind.main
+            else next(q for q in asked if q.id == question.parent_question_id)
         )
+        thread = Thread(main.id, main.main_number, QuestionCategory(main.category))
+        last_main = thread.main_number == setup.question_count
+        used_bank_ids = {q.bank_id for q in asked if q.bank_id}
+        # Pre-slice-2 sessions stored every question up front: no LLM, no follow-ups, the stored order.
+        stored_next = self.repo.get_question(session.id, position + 1)
         previous_reaction = next(
             (m.content for m in reversed(saved) if m.role == MessageRole.interviewer),
             None,
-        )
-        reaction_text = pick_reaction(
-            QuestionCategory(question.category),
-            setup.level,
-            final=completes,
-            previous=previous_reaction,
-            rng=self.rng,
         )
         answer = InterviewMessage(
             session_id=session.id,
@@ -256,24 +208,68 @@ class InterviewsController:
             role=MessageRole.candidate,
             content=data.answer,
         )
-        # The id is set here so the response needs no read of the committed (expired) row.
-        reaction_id = uuid.uuid7()
-        reaction = InterviewMessage(
-            id=reaction_id,
-            session_id=session.id,
-            question_id=question.id,
-            role=MessageRole.interviewer,
-            content=reaction_text,
-        )
         self.repo.release()
 
-        # Pre-slice-2 sessions already stored every question; otherwise the interviewer writes the next one.
-        next_question = stored_next
-        if not completes and next_question is None:
-            next_question, answer.note = self._next_question(
-                setup, position + 1, history=history, used_bank_ids=used_bank_ids
+        new_question: InterviewQuestion | None = None
+        if stored_next is not None:
+            completes = False
+            log_turn_summary(setup.session_id, decision="skipped", action=TurnAction.next_question, source="stored")
+        elif self.interviewer is None:
+            completes = last_main
+            if not completes:
+                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, used_bank_ids)
+            log_turn_summary(
+                setup.session_id,
+                decision="skipped",
+                action=TurnAction.complete if completes else TurnAction.next_question,
+                source="-" if completes else "bank",
             )
-        new_question = None if stored_next is not None else next_question
+        else:
+            outcome = self.interviewer.answer_turn(
+                setup.session_id, self._inputs(setup, history), last_main=last_main
+            )
+            answer.note = outcome.note
+            completes = outcome.action == TurnAction.complete
+            if outcome.action == TurnAction.follow_up and outcome.written is not None:
+                new_question = _llm_question(
+                    outcome.written,
+                    outcome.results,
+                    position + 1,
+                    thread.main_number,
+                    kind=QuestionKind.follow_up,
+                    thread=thread,
+                    decision_version=outcome.decision_prompt_version,
+                )
+            elif outcome.action == TurnAction.next_question and outcome.written is not None:
+                new_question = _llm_question(
+                    outcome.written,
+                    outcome.results,
+                    position + 1,
+                    thread.main_number + 1,
+                    decision_version=outcome.decision_prompt_version,
+                )
+            elif outcome.action == TurnAction.next_question:
+                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, used_bank_ids)
+
+        follows_up = new_question is not None and new_question.kind == QuestionKind.follow_up
+        reaction, reaction_text, reaction_id = None, "", uuid.uuid7()
+        # A follow-up comes straight after the answer; moving on or completing gets the predefined acknowledgement.
+        if not follows_up:
+            reaction_text = pick_reaction(
+                thread.category,
+                setup.level,
+                final=completes,
+                previous=previous_reaction,
+                rng=self.rng,
+            )
+            # The id is set here so the response needs no read of the committed (expired) row.
+            reaction = InterviewMessage(
+                id=reaction_id,
+                session_id=setup.session_id,
+                question_id=data.question_id,
+                role=MessageRole.interviewer,
+                content=reaction_text,
+            )
         if not self.repo.record_turn(
             answer, reaction, new_question, position, completes=completes
         ):
@@ -284,8 +280,8 @@ class InterviewsController:
 
         return AnswerOut(
             session=SessionOut.model_validate(session),
-            reaction=ReactionOut(id=reaction_id, text=reaction_text),
-            current_question=self._question_out(next_question),
+            reaction=None if reaction is None else ReactionOut(id=reaction_id, text=reaction_text),
+            current_question=self._question_out(stored_next or new_question),
         )
 
     def transcript(self, user: User, session_id: uuid.UUID) -> TranscriptOut:
@@ -296,7 +292,42 @@ class InterviewsController:
             items=build_transcript(questions, self.repo.list_messages(session.id))
         )
 
-    # --- the next question: the LLM first, the bank as the fallback ---
+    # --- the LLM's inputs, the bank fallback and the summary ---
+
+    @staticmethod
+    def _inputs(setup: InterviewSetup, turns: Sequence[QuestionTurn]) -> InterviewerInputs:
+        return InterviewerInputs(
+            role=setup.role,
+            level=setup.level,
+            interview_type=setup.interview_type,
+            question_count=setup.question_count,
+            job_description=setup.job_description_summary or setup.job_description,
+            turns=turns,
+            summary_used=setup.job_description_summary is not None,
+        )
+
+    def _bank_question(
+        self, setup: InterviewSetup, position: int, main_number: int, used_bank_ids: set[str]
+    ) -> InterviewQuestion:
+        """The fallback when the LLM is off, fails, runs out of time or keeps breaking the contract."""
+        picked = pick_fallback_question(
+            self.bank,
+            setup.role,
+            setup.level,
+            setup.interview_type,
+            main_number,
+            used_bank_ids,
+            self.rng,
+        )
+        return InterviewQuestion(
+            position=position,
+            main_number=main_number,
+            kind=QuestionKind.main,
+            text=picked.text,
+            category=picked.type,
+            bank_id=picked.id,
+            source=QuestionSource.bank,
+        )
 
     def _summarize(self, setup: InterviewSetup) -> str | None:
         """Condense a long job description once, so later calls send less. One attempt with its own short time cap;
@@ -313,10 +344,11 @@ class InterviewsController:
                 budget_seconds=SUMMARY_TIME_CAP_SECONDS,
             )
         except LLMError as exc:
-            _log_llm_call(
+            log_llm_call(
                 logging.WARNING,
                 setup.session_id,
                 f"summary_failed:{type(exc).__name__}",
+                task=SUMMARY_TASK,
                 prompt_version=built.prompt_version,
                 latency_ms=exc.latency_ms,
                 attempts=exc.attempts,
@@ -326,154 +358,17 @@ class InterviewsController:
         try:
             summary = validate_summary(original, result.text)
         except InvalidReplyError as exc:
-            _log_result(
+            log_result(
                 logging.WARNING,
                 setup.session_id,
                 f"summary_invalid:{exc.reason}",
                 result,
+                SUMMARY_TASK,
                 built.prompt_version,
             )
             return None
-        _log_result(
-            logging.INFO, setup.session_id, "summary_ok", result, built.prompt_version
-        )
+        log_result(logging.INFO, setup.session_id, "summary_ok", result, SUMMARY_TASK, built.prompt_version)
         return summary
-
-    def _next_question(
-        self,
-        setup: InterviewSetup,
-        position: int,
-        *,
-        history: Sequence[QuestionTurn],
-        used_bank_ids: set[str],
-    ) -> tuple[InterviewQuestion, str | None]:
-        """The next question, and the model's note about the latest answer (None from the bank or when unusable).
-
-        Never fails because of the LLM: if it is off, fails, or keeps breaking the contract, the bank answers.
-        """
-        if self.llm is not None:
-            asked = self._ask_llm(self.llm, setup, position, history)
-            if asked is not None:
-                return asked
-        picked = pick_fallback_question(
-            self.bank,
-            setup.role,
-            setup.level,
-            setup.interview_type,
-            position,
-            used_bank_ids,
-            self.rng,
-        )
-        return InterviewQuestion(
-            position=position,
-            text=picked.text,
-            category=picked.type,
-            bank_id=picked.id,
-            source=QuestionSource.bank,
-        ), None
-
-    def _ask_llm(
-        self,
-        llm: LLMProvider,
-        setup: InterviewSetup,
-        position: int,
-        history: Sequence[QuestionTurn],
-    ) -> tuple[InterviewQuestion, str | None] | None:
-        """At most two attempts sharing one time budget. Only a reply that came back but broke the contract is
-        retried: a provider error was already retried inside the provider, and an empty reply would fail the same way.
-        """
-        inputs = InterviewerInputs(
-            role=setup.role,
-            level=setup.level,
-            interview_type=setup.interview_type,
-            question_count=setup.question_count,
-            job_description=setup.job_description_summary or setup.job_description,
-            turns=history,
-            summary_used=setup.job_description_summary is not None,
-        )
-        try:
-            built = self.context.build(INTERVIEWER_TASK, inputs)
-        except ContextTooLargeError:
-            # Even trimmed, the input is over the limit: the bank asks this one (the manager logged the sizes).
-            _log_llm_call(
-                logging.WARNING,
-                setup.session_id,
-                "context_too_large",
-                latency_ms=0,
-                attempts=0,
-            )
-            return None
-        version = built.prompt_version
-        # The code-side repeat check always sees every earlier question, whatever the strategy sent.
-        earlier = [turn.question for turn in history]
-        deadline = self.clock() + self.llm_budget_seconds
-        results: list[LLMResult] = []
-
-        for attempt in range(1, MAX_REPLY_ATTEMPTS + 1):
-            remaining = deadline - self.clock()
-            if attempt > 1 and remaining < MIN_SECONDS_FOR_RETRY:
-                return None
-            try:
-                result = llm.complete(
-                    built.messages,
-                    max_tokens=self.llm_max_tokens,
-                    budget_seconds=remaining,
-                )
-            except LLMError as exc:
-                # Transient faults are expected now and then; a bad key or broken reply needs someone to look.
-                level = logging.WARNING if exc.retryable else logging.ERROR
-                _log_llm_call(
-                    level,
-                    setup.session_id,
-                    type(exc).__name__,
-                    prompt_version=version,
-                    latency_ms=exc.latency_ms,
-                    attempts=exc.attempts,
-                    finish=exc.finish_reason,
-                )
-                return None
-            results.append(result)
-            if not result.text.strip():
-                _log_result(
-                    logging.WARNING, setup.session_id, "empty_reply", result, version
-                )
-                return None
-            try:
-                reply = parse_interviewer_reply(
-                    result.text,
-                    interview_type=setup.interview_type,
-                    earlier_questions=earlier,
-                )
-            except InvalidReplyError as exc:
-                _log_result(
-                    logging.WARNING,
-                    setup.session_id,
-                    f"invalid_reply:{exc.reason}",
-                    result,
-                    version,
-                )
-                continue
-            _log_result(logging.INFO, setup.session_id, "ok", result, version)
-            if reply.note_dropped:
-                llm_logger.warning(
-                    "note_dropped session=%s reason=%s",
-                    setup.session_id,
-                    reply.note_dropped,
-                )
-            question = InterviewQuestion(
-                position=position,
-                text=reply.question,
-                category=reply.category,
-                source=QuestionSource.llm,
-                model=result.model,
-                prompt_version=version,
-                prompt_tokens=_sum_known([r.prompt_tokens for r in results]),
-                completion_tokens=_sum_known([r.completion_tokens for r in results]),
-                latency_ms=sum(r.latency_ms for r in results),
-            )
-            # A note describes the latest answer, so there is none before the first answer.
-            return question, reply.note if history else None
-        return None
 
     # --- helpers ---
 
@@ -491,3 +386,36 @@ class InterviewsController:
     @staticmethod
     def _question_out(question: InterviewQuestion | None) -> QuestionOut | None:
         return None if question is None else QuestionOut.model_validate(question)
+
+
+def _llm_question(
+    written: Written,
+    results: Sequence[LLMResult],
+    position: int,
+    main_number: int,
+    *,
+    kind: QuestionKind = QuestionKind.main,
+    thread: Thread | None = None,
+    decision_version: str | None = None,
+) -> InterviewQuestion:
+    """A question the LLM wrote; `results` is every call of the turn, so the stored usage is what the turn cost.
+
+    A follow-up takes its thread's main question as parent and its category, whatever the model would have chosen.
+    """
+    reply = written.reply
+    assert reply is not None
+    return InterviewQuestion(
+        position=position,
+        main_number=main_number,
+        kind=kind,
+        parent_question_id=thread.main_id if thread else None,
+        text=reply.question,
+        category=thread.category if thread else reply.category,
+        source=QuestionSource.llm,
+        model=written.results[-1].model,
+        prompt_version=written.prompt_version,
+        decision_prompt_version=decision_version,
+        prompt_tokens=sum_known([r.prompt_tokens for r in results]),
+        completion_tokens=sum_known([r.completion_tokens for r in results]),
+        latency_ms=sum(r.latency_ms for r in results),
+    )

@@ -5,6 +5,7 @@ import pytest
 from app.main import app
 from app.modules.interviews.interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
 from app.modules.interviews.interviews_repository import InterviewsRepository
+from app.modules.interviews.interviews_utils import build_transcript
 
 MESSAGES = "/api/v1/interviews/{}/messages"
 
@@ -43,7 +44,10 @@ def test_fresh_session_shows_only_the_first_question(transcript, started):  # EC
         "kind": "question",
         "text": q1["text"],
         "created_at": None,
+        "question_kind": "main",
+        "main_number": 1,
     }
+    assert (q1["question_kind"], q1["main_number"]) == ("main", 1)  # AC8: QuestionOut too
 
 
 def test_answered_turns_come_back_in_conversation_order(transcript, answer, started, llm):  # AC23, concept 2
@@ -152,3 +156,20 @@ def test_transcript_route_documents_its_error_responses():  # AC25
 
     for status in ("401", "403", "404", "422"):
         assert responses[status]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
+
+
+def test_a_follow_up_is_shown_with_its_kind_and_its_main_questions_number():  # AC8
+    main = InterviewQuestion(id=uuid.uuid7(), position=1, main_number=1, kind="main", text="Q1?", category="technical")
+    follow = InterviewQuestion(
+        id=uuid.uuid7(), position=2, main_number=1, kind="follow_up", parent_question_id=main.id, text="Why?",
+        category="technical",
+    )
+    answer = InterviewMessage(id=uuid.uuid7(), question_id=main.id, role="candidate", content="Redis.")
+
+    items = build_transcript([follow, main], [answer])
+
+    assert [(i.position, i.kind, i.question_kind, i.main_number) for i in items] == [
+        (1, "question", "main", 1),
+        (1, "answer", "main", 1),
+        (2, "question", "follow_up", 1),
+    ]

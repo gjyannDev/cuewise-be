@@ -46,6 +46,32 @@ class QuestionSource(StrEnum):
     bank = "bank"
 
 
+class QuestionKind(StrEnum):
+    """A main question opens a thread; a follow-up digs into the latest answer of that thread."""
+
+    main = "main"
+    follow_up = "follow_up"
+
+
+class FollowUpAction(StrEnum):
+    """What the decide call may answer (a closed list: anything else is an invalid reply)."""
+
+    follow_up = "follow_up"
+    next_question = "next_question"
+
+
+class FollowUpGap(StrEnum):
+    """The one clear gap a follow-up targets. Closed, so the write call gets app data, not model free text."""
+
+    missing_situation = "missing_situation"
+    missing_own_action = "missing_own_action"
+    missing_result = "missing_result"
+    no_tradeoff = "no_tradeoff"
+    no_how = "no_how"
+    no_example = "no_example"
+    partial_answer = "partial_answer"
+
+
 class MessageKind(StrEnum):
     """Transcript item kinds: a question comes from interview_questions, the other two from interview_messages."""
 
@@ -71,6 +97,15 @@ MAX_REPLY_ATTEMPTS = 2
 # A retry is only worth starting if this much of the turn's LLM time budget is left.
 MIN_SECONDS_FOR_RETRY = 5.0
 
+# --- Follow-ups: the model decides, the code enforces these (starting values, tuned from the logged latencies) ---
+MAX_FOLLOW_UPS = 2
+# The decide call never runs longer than this, so a slow one can't eat the time of the question the user sees.
+DECIDE_MAX_SECONDS = 10.0
+# Below this much time left on the turn, no write call is started: the bank asks instead.
+MIN_SECONDS_FOR_WRITE = 5.0
+# Kept back from the decide call for the write call that follows it.
+WRITE_RESERVE_SECONDS = MIN_SECONDS_FOR_WRITE
+
 QUESTION_BANK_PATH = Path(__file__).parent / "data" / "questions.json"
 
 # The prompt file in use. Never edit a shipped version in place: stored replies name it.
@@ -87,6 +122,10 @@ INTERVIEWER_V2_PROMPT_VERSION = "interviewer_v2"
 # v2's rules in about half the characters (v2's ~1,400 tokens were most of every call); window_ledger's default.
 # v2 stays for comparison: `interviews_evals --prompt interviewer_v2`.
 INTERVIEWER_V3_PROMPT_VERSION = "interviewer_v3"
+# v3 without the note (moved to the decide call) and with a follow-up mode; window_ledger's default since follow-ups.
+INTERVIEWER_V4_PROMPT_VERSION = "interviewer_v4"
+DECISION_TASK = "follow_up_decision"
+DECISION_PROMPT_VERSION = "follow_up_decision_v1"
 SUMMARY_PROMPT_VERSION = "job_description_summary_v2"
 # Starting values, tuned by the eval comparison (docs/features/context-management/learnings.md).
 WINDOW_TURNS = 3

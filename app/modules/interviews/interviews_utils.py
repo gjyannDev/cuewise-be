@@ -1,4 +1,5 @@
 import json
+import math
 import random
 import re
 from collections.abc import Collection, Mapping, Sequence
@@ -13,11 +14,13 @@ from app.core.errors import NotEnoughQuestionsError
 
 from .interviews_constants import (
     CLOSING_REACTIONS,
+    DECISION_PROMPT_VERSION,
     GENERAL_ROLE,
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_V2_PROMPT_VERSION,
     LEVEL_GROUPS,
     LEVEL_GUIDANCE,
+    MAX_FOLLOW_UPS,
     PROMPTS_DIR,
     QUESTION_BANK_PATH,
     REACTION_POOLS,
@@ -30,6 +33,7 @@ from .interviews_constants import (
     MessageKind,
     MessageRole,
     QuestionCategory,
+    QuestionKind,
 )
 from .interviews_model import InterviewMessage, InterviewQuestion
 from .interviews_schema import BankQuestion, QuestionBank, TranscriptItemOut
@@ -103,15 +107,15 @@ def build_transcript(
     by_question = {(m.question_id, m.role): m for m in messages}
     items: list[TranscriptItemOut] = []
     for q in sorted(questions, key=lambda q: q.position):
+        of_question = {"question_id": q.id, "position": q.position, "question_kind": q.kind, "main_number": q.main_number}
         items.append(
             TranscriptItemOut(
                 id=q.id,
-                question_id=q.id,
-                position=q.position,
                 role=MessageRole.interviewer,
                 kind=MessageKind.question,
                 text=q.text,
                 created_at=None,
+                **of_question,
             )
         )
         for role, kind in (
@@ -122,12 +126,11 @@ def build_transcript(
                 items.append(
                     TranscriptItemOut(
                         id=message.id,
-                        question_id=q.id,
-                        position=q.position,
                         role=role,
                         kind=kind,
                         text=message.content,
                         created_at=message.created_at,
+                        **of_question,
                     )
                 )
     return items
@@ -147,6 +150,7 @@ def neutralize_app_tags(text: str) -> str:
 INTERVIEWER_PROMPT = load_prompt(INTERVIEWER_PROMPT_VERSION)
 INTERVIEWER_V2_PROMPT = load_prompt(INTERVIEWER_V2_PROMPT_VERSION)
 SUMMARY_PROMPT = load_prompt(SUMMARY_PROMPT_VERSION)
+DECISION_PROMPT = load_prompt(DECISION_PROMPT_VERSION)
 
 _CATEGORY_RULES = {
     InterviewType.behavioral: 'Every question is behavioral (past experience, teamwork, decisions): use "category": "behavioral".',
@@ -163,6 +167,22 @@ class QuestionTurn(NamedTuple):
     answer: str
     # The model's running note about this answer, when it wrote a usable one (window_ledger shows it for old turns).
     note: str | None = None
+    kind: str = QuestionKind.main
+
+
+def main_numbers(turns: Sequence[QuestionTurn]) -> list[int]:
+    """The main-question number of each turn: a follow-up shares the number of the main question it digs into."""
+    numbers, count = [], 0
+    for turn in turns:
+        count += turn.kind == QuestionKind.main
+        numbers.append(count)
+    return numbers
+
+
+def thread_start(turns: Sequence[QuestionTurn], index: int | None = None) -> int:
+    """Index of the main question whose thread holds turn `index` (default: the latest turn)."""
+    index = len(turns) - 1 if index is None else index
+    return max((i for i in range(index + 1) if turns[i].kind == QuestionKind.main), default=0)
 
 
 def render_template(template: str, values: Mapping[str, object]) -> str:
@@ -222,6 +242,20 @@ def render_summary_prompt() -> str:
     return render_template(SUMMARY_PROMPT, {"max_words": SUMMARY_MAX_WORDS, "max_length": SUMMARY_MAX_LENGTH})
 
 
+def render_decision_prompt(*, role: JobRole, level: Level, interview_type: InterviewType) -> str:
+    """Per-interview constants only, like v2: the decide call's system prompt never changes during an interview."""
+    return render_template(
+        DECISION_PROMPT,
+        {
+            "role": role.value,
+            "level": level.value,
+            "interview_type": interview_type.value,
+            "level_guidance": LEVEL_GUIDANCE[level],
+            "max_follow_ups": MAX_FOLLOW_UPS,
+        },
+    )
+
+
 def job_description_block(job_description: str | None) -> str:
     """Untrusted text, fenced as data. Tags inside it are neutralised so it can't close its own block."""
     if not job_description:
@@ -238,7 +272,7 @@ def interviewer_history(
     """
     answers = {m.question_id: m for m in messages if m.role == MessageRole.candidate}
     return [
-        QuestionTurn(q.text, q.category, answers[q.id].content, answers[q.id].note)
+        QuestionTurn(q.text, q.category, answers[q.id].content, answers[q.id].note, q.kind)
         for q in sorted(questions, key=lambda q: q.position)
     ]
 
@@ -306,7 +340,8 @@ def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
     """Stored LLM usage per interview and question position: numbers and ids only, never question text.
 
     Expects rows ordered by session, then position. Usage the provider didn't report (or bank questions) shows as
-    `-` and is left out of the sums.
+    `-` and is left out of the sums. A question's usage is its whole turn (the decide call too), so tokens by
+    question kind answer "what does a follow-up cost"; decide-only tokens are in the per-call log lines.
     """
 
     def shown(value: object) -> str:
@@ -318,11 +353,15 @@ def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
     for session_id, rows in groupby(questions, key=lambda q: q.session_id):
         rows = list(rows)
         llm = sum(1 for q in rows if q.source == "llm")
-        lines.append(f"interview {session_id} questions={len(rows)} llm={llm} bank={len(rows) - llm}")
+        follow_ups = sum(1 for q in rows if q.kind == QuestionKind.follow_up)
+        lines.append(
+            f"interview {session_id} questions={len(rows)} llm={llm} bank={len(rows) - llm} follow_ups={follow_ups}"
+        )
         for q in rows:
             lines.append(
                 f"  q{q.position} prompt={shown(q.prompt_tokens)} completion={shown(q.completion_tokens)} "
-                f"latency_ms={shown(q.latency_ms)} source={q.source} prompt_version={shown(q.prompt_version)}"
+                f"latency_ms={shown(q.latency_ms)} source={q.source} prompt_version={shown(q.prompt_version)} "
+                f"kind={q.kind}"
             )
         prompt, completion = sum(q.prompt_tokens or 0 for q in rows), sum(q.completion_tokens or 0 for q in rows)
         lines.append(f"  total prompt={prompt} completion={completion}")
@@ -340,4 +379,21 @@ def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
             f" avg_completion_per_llm_interview={round(sum(completion_sums) / used)}"
         )
     lines.append(summary)
+    if used:
+        by_kind = " ".join(
+            f"{kind} prompt={sum(q.prompt_tokens or 0 for q in questions if q.kind == kind)}"
+            f" completion={sum(q.completion_tokens or 0 for q in questions if q.kind == kind)}"
+            for kind in QuestionKind
+        )
+        follow_ups = sum(1 for q in questions if q.kind == QuestionKind.follow_up)
+        lines.append(f"tokens {by_kind} follow_ups={follow_ups}")
+    # A stored question's latency is the LLM time of the turn that produced it: does the turn budget fit?
+    turn_ms = sorted(q.latency_ms for q in questions if q.source == "llm" and q.latency_ms is not None)
+    if turn_ms:
+        lines.append(f"turn_llm_ms p50={percentile(turn_ms, 50)} p95={percentile(turn_ms, 95)} turns={len(turn_ms)}")
     return "\n".join(lines)
+
+
+def percentile(ordered: Sequence[int], p: int) -> int:
+    """Nearest rank: a value that was really measured, which reads better than an interpolated one for few turns."""
+    return ordered[max(math.ceil(p / 100 * len(ordered)) - 1, 0)]

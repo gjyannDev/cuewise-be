@@ -63,7 +63,7 @@ def test_start_creates_saved_session_and_returns_only_the_first_question(start_i
     assert stored.position == 1
 
     current = body["current_question"]
-    assert set(current) == {"id", "position", "text", "category"}  # AC16: no bank_id
+    assert set(current) == {"id", "position", "text", "category", "question_kind", "main_number"}  # AC16: no bank_id
     assert current["position"] == 1
     assert current["id"] == str(stored.id)
     assert current["text"] == stored.text

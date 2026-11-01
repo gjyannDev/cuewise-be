@@ -15,6 +15,7 @@ from .interviews_constants import (
     MessageKind,
     MessageRole,
     QuestionCategory,
+    QuestionKind,
     SessionStatus,
 )
 
@@ -81,6 +82,10 @@ class QuestionOut(BaseModel):
     position: int
     text: str
     category: QuestionCategory
+    # Read from the row's `kind`; named so it can't be confused with a transcript item's kind.
+    question_kind: QuestionKind = Field(validation_alias="kind")
+    # The main question this belongs to ("Question 3 of 5"); a follow-up shares its main question's number.
+    main_number: int
 
 
 class InterviewOut(BaseModel):
@@ -105,8 +110,9 @@ class ReactionOut(BaseModel):
 
 class AnswerOut(BaseModel):
     session: SessionOut
-    # A predefined acknowledgement, always present (closing line on the last answer).
-    reaction: ReactionOut
+    # A predefined acknowledgement when the interview moves to the next main question or completes; None when the
+    # next question is a follow-up (it comes straight away, with nothing in between).
+    reaction: ReactionOut | None
     # The next question, or None when this answer completed the session.
     current_question: QuestionOut | None
 
@@ -122,8 +128,11 @@ class TranscriptItemOut(BaseModel):
     text: str
     # None for questions: they are stored when the session starts, not when they are shown.
     created_at: datetime | None
+    # Of the question this item belongs to (answers and reactions share their question's).
+    question_kind: QuestionKind
+    main_number: int
 
 
 class TranscriptOut(BaseModel):
-    # Bounded by the 10-question cap (at most 30 items), so deliberately not paginated.
+    # Bounded by the 10-question cap and 2 follow-ups each (at most 90 items), so deliberately not paginated.
     items: list[TranscriptItemOut]

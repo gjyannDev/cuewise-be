@@ -15,6 +15,8 @@ from .interviews_constants import (
     MAX_QUESTION_LENGTH,
     NOTE_MAX_LENGTH,
     SUMMARY_MAX_LENGTH,
+    FollowUpAction,
+    FollowUpGap,
     InterviewType,
     QuestionCategory,
 )
@@ -40,6 +42,15 @@ class _RawReply(BaseModel):
     note: object = None
 
 
+class _RawFollowUp(BaseModel):
+    """A follow-up carries no category: it inherits its main question's, so the model can't break the category rule."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_QUESTION_LENGTH)]
+    note: object = None
+
+
 class InterviewerReply(NamedTuple):
     question: str
     category: QuestionCategory
@@ -49,44 +60,93 @@ class InterviewerReply(NamedTuple):
 
 
 def parse_interviewer_reply(
-    raw: str, *, interview_type: InterviewType, earlier_questions: Sequence[str]
+    raw: str,
+    *,
+    interview_type: InterviewType,
+    earlier_questions: Sequence[str],
+    # Set = follow-up mode: the reply is the question only and gets this category (the main question's).
+    follow_up_category: QuestionCategory | None = None,
 ) -> InterviewerReply:
+    data = _load_object(raw)
+
+    try:
+        if follow_up_category is None:
+            reply = _RawReply.model_validate(data)
+            category = reply.category
+        else:
+            reply = _RawFollowUp.model_validate(data)
+            category = follow_up_category
+    except ValidationError as exc:
+        raise InvalidReplyError("schema") from exc
+
+    if sum(reply.question.count(mark) for mark in _QUESTION_MARKS) > 1:
+        raise InvalidReplyError("multiple_questions")
+    if interview_type != InterviewType.mixed and category != QuestionCategory(interview_type):
+        raise InvalidReplyError("category")
+    if _normalized(reply.question) in {_normalized(q) for q in earlier_questions}:
+        raise InvalidReplyError("repeat")
+
+    if reply.note is None:
+        return InterviewerReply(reply.question, category)
+    try:
+        return InterviewerReply(reply.question, category, note=validate_note(reply.note))
+    except InvalidReplyError as exc:
+        return InterviewerReply(reply.question, category, note_dropped=exc.reason)
+
+
+def _normalized(question: str) -> str:
+    return " ".join(question.casefold().split())
+
+
+def _load_object(raw: str) -> dict:
+    """The reply as a JSON object: one optional fence around it, nothing else before or after."""
     text = raw.strip()
     if text.startswith("```"):
         fenced = _FENCE.match(text)
         if fenced is None:
             raise InvalidReplyError("fence")
         text = fenced.group(1)
-
     try:
         data = json.loads(text)
     except ValueError as exc:
         raise InvalidReplyError("not_json") from exc
     if not isinstance(data, dict):
         raise InvalidReplyError("not_object")
+    return data
 
+
+class _RawDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: FollowUpAction
+    gap: FollowUpGap | None = None
+    note: object = None
+
+
+class Decision(NamedTuple):
+    action: FollowUpAction
+    gap: FollowUpGap | None = None
+    note: str | None = None
+    note_dropped: str | None = None
+
+
+def parse_decision_reply(raw: str) -> Decision:
+    """The decide call suggests; the code still applies the follow-up cap and the time check afterwards."""
     try:
-        reply = _RawReply.model_validate(data)
+        reply = _RawDecision.model_validate(_load_object(raw))
     except ValidationError as exc:
         raise InvalidReplyError("schema") from exc
-
-    if sum(reply.question.count(mark) for mark in _QUESTION_MARKS) > 1:
-        raise InvalidReplyError("multiple_questions")
-    if interview_type != InterviewType.mixed and reply.category != QuestionCategory(interview_type):
-        raise InvalidReplyError("category")
-    if _normalized(reply.question) in {_normalized(q) for q in earlier_questions}:
-        raise InvalidReplyError("repeat")
+    if reply.action == FollowUpAction.follow_up and reply.gap is None:
+        raise InvalidReplyError("missing_gap")
+    if reply.action == FollowUpAction.next_question and reply.gap is not None:
+        raise InvalidReplyError("unexpected_gap")
 
     if reply.note is None:
-        return InterviewerReply(reply.question, reply.category)
+        return Decision(reply.action, reply.gap)
     try:
-        return InterviewerReply(reply.question, reply.category, note=validate_note(reply.note))
+        return Decision(reply.action, reply.gap, note=validate_note(reply.note))
     except InvalidReplyError as exc:
-        return InterviewerReply(reply.question, reply.category, note_dropped=exc.reason)
-
-
-def _normalized(question: str) -> str:
-    return " ".join(question.casefold().split())
+        return Decision(reply.action, reply.gap, note_dropped=exc.reason)
 
 
 def validate_note(value: object) -> str:

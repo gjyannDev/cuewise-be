@@ -51,7 +51,7 @@ def test_a_non_final_answer_gets_a_reaction_and_the_llms_next_question(
     assert body["current_question"]["text"] == "Second question?" and body["current_question"]["position"] == 2
     assert body["reaction"]["text"] in ALL_REACTIONS
     q2 = questions(db, created["session"]["id"])[1]
-    assert (q2.source, q2.category, q2.prompt_version) == ("llm", "behavioral", "interviewer_v3")
+    assert (q2.source, q2.category, q2.prompt_version) == ("llm", "behavioral", "interviewer_v4")
     assert len(llm.fake.calls) == 2
 
 
@@ -157,6 +157,18 @@ def test_usage_is_stored_with_the_question_it_produced(start_interview, make_use
         )
 
     llm.script(result("Q1?", 100), result("Q2?", 150))
+    # The turn's decide call is summed onto the question it produced too (follow-ups AC10).
+    llm.script_decide(
+        LLMResult(
+            text='{"action": "next_question", "gap": null}',
+            model="m",
+            prompt_tokens=40,
+            completion_tokens=5,
+            latency_ms=5,
+            finish_reason="stop",
+            attempts=1,
+        )
+    )
     created = start_interview(owner, question_count=3).json()
     answer(owner, created["session"]["id"], created["current_question"]["id"])
 
@@ -165,7 +177,7 @@ def test_usage_is_stored_with_the_question_it_produced(start_interview, make_use
             InterviewQuestion.session_id == uuid.UUID(created["session"]["id"])
         )
     )
-    assert total == 270
+    assert total == 270 + 45
 
 
 def test_no_transaction_is_open_while_the_llm_writes_the_next_question(
@@ -296,5 +308,6 @@ def test_answer_turn_logs_carry_no_answer_text(start_interview, make_user, answe
     answer(owner, created["session"]["id"], created["current_question"]["id"], text="My phone is 555-0100.")
 
     lines = [r for r in app_logs.records if r.name == "app.llm"]
-    assert len(lines) == 2 and all(line.levelno == logging.INFO for line in lines)
+    # Start: one write call. Answer: the decide call, the write call and the turn summary.
+    assert len(lines) == 4 and all(line.levelno == logging.INFO for line in lines)
     assert all("555-0100" not in r.getMessage() for r in app_logs.records)

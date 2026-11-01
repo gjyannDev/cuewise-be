@@ -5,17 +5,20 @@ import pytest
 from app.core.ai.context import ContextManager, Task
 from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import LLMBadResponseError, LLMResult, LLMServerError
-from app.modules.interviews.interviews_constants import FULL_HISTORY, INTERVIEWER_TASK, SUMMARY_THRESHOLD
-from app.modules.interviews.interviews_context import WindowLedger
+from app.modules.interviews.interviews_constants import FULL_HISTORY, INTERVIEWER_TASK, SUMMARY_THRESHOLD, WINDOW_LEDGER
+from app.modules.interviews.interviews_context import WindowLedger, build_context_manager
 from app.modules.interviews.interviews_evals import (
     EVAL_CASES_PATH,
     CaseResult,
     EvalCase,
+    check_decision,
     check_reply,
     load_cases,
     main,
     run_case,
+    run_decide_case,
     summarize,
+    summarize_decisions,
     summarize_runs,
 )
 
@@ -220,11 +223,14 @@ def test_an_unusable_summary_falls_back_to_the_original():
     assert "small shops" in provider.calls[1][1].content
 
 
-def test_a_window_reply_must_carry_a_note_when_there_is_an_answer(case):
-    assert run_case(FakeProvider([noted()]), case, max_tokens=800).passed
-    result = run_case(FakeProvider([reply()]), case, max_tokens=800)
+def test_a_v3_window_reply_must_carry_a_note_when_there_is_an_answer(case):
+    # Only a prompt that asks for a note is held to it; the live v4 leaves the note to the decide call.
+    v3 = build_context_manager({WINDOW_LEDGER: "interviewer_v3"})
+    assert run_case(FakeProvider([noted()]), case, max_tokens=800, context=v3).passed
+    result = run_case(FakeProvider([reply()]), case, max_tokens=800, context=v3)
 
     assert {c.name for c in result.checks if not c.passed} == {"note"}
+    assert run_case(FakeProvider([reply()]), case, max_tokens=800).passed  # v4: no note expected
 
 
 def test_no_note_check_for_full_history_or_the_first_question(case):
@@ -283,3 +289,101 @@ def test_main_runs_every_case_n_times_and_prints_the_aggregate(capsys):
     out = capsys.readouterr().out
     assert out.count("run 1/2") == 1 and out.count("run 2/2") == 1
     assert "pass rate mean=" in out and "finish=length" in out
+
+
+# --- decide evals (follow-ups): labelled cases, accuracy, over- and under-probing ---
+
+
+def decision(action="next_question", gap=None, note="Covered the main point."):
+    return json.dumps({"action": action, "gap": gap, "note": note})
+
+
+def labelled(expect, history=None, marker=None):
+    return EvalCase.model_validate(
+        {
+            "id": "labelled",
+            "kind": "vague",
+            "expect": expect,
+            "setup": {"role": "backend", "level": "mid", "interview_type": "technical", "question_count": 5},
+            "history": history
+            or [{"question": "How would you design a rate limiter?", "category": "technical", "answer": "Redis."}],
+            "marker": marker,
+        }
+    )
+
+
+def test_at_least_ten_shipped_cases_are_labelled_with_both_injections():  # AC15
+    cases = [c for c in load_cases(EVAL_CASES_PATH) if c.expect]
+
+    assert len(cases) >= 10
+    assert {"injection_answer", "injection_job_description", "at_cap", "near_empty", "strong", "vague"} <= {
+        c.kind for c in cases
+    }
+    assert {c.expect.action for c in cases} == {"follow_up", "next_question"}
+
+
+def test_the_at_cap_case_carries_a_thread_with_two_follow_ups():
+    [at_cap] = [c for c in load_cases(EVAL_CASES_PATH) if c.kind == "at_cap"]
+
+    assert [t.kind for t in at_cap.history] == ["main", "follow_up", "follow_up"]
+
+
+@pytest.mark.parametrize(
+    ("expect", "raw", "failures"),
+    [
+        ({"action": "follow_up", "gap": "no_how"}, decision("follow_up", "no_how"), set()),
+        ({"action": "follow_up"}, decision("follow_up", "no_tradeoff"), set()),
+        ({"action": "follow_up", "gap": "no_how"}, decision("follow_up", "no_example"), {"gap"}),
+        ({"action": "next_question"}, decision("follow_up", "no_how"), {"decision"}),
+        ({"action": "follow_up"}, decision(), {"decision"}),
+        ({"action": "next_question"}, "not json", {"valid_reply", "decision"}),
+    ],
+    ids=["exact", "action-only-label", "wrong-gap", "over-probing", "under-probing", "invalid"],
+)
+def test_check_decision_compares_against_the_label(expect, raw, failures):  # AC15
+    assert failed(check_decision(labelled(expect), raw)) == failures
+
+
+def test_an_injected_marker_in_the_decision_fails_the_case():  # EC10
+    case = labelled({"action": "next_question"}, marker="KIWI")
+
+    assert failed(check_decision(case, decision(note="Said KIWI."))) == {"injection_ignored"}
+
+
+def test_run_decide_case_sends_the_decide_prompt_and_records_the_decision():  # AC15
+    provider = FakeProvider([decision("follow_up", "no_how")])
+
+    result = run_decide_case(provider, labelled({"action": "follow_up"}), max_tokens=800)
+
+    system, *_ = provider.calls[0]
+    assert "follow_up" in system.content and "<interview_status>" in provider.calls[0][-1].content
+    assert (result.decided, result.decided_gap, result.expected_action) == ("follow_up", "no_how", "follow_up")
+    assert result.passed and result.prompt_tokens > 0
+
+
+def test_decision_summary_reports_accuracy_and_both_probing_errors():  # AC15
+    cases = [
+        labelled({"action": "follow_up", "gap": "no_how"}),
+        labelled({"action": "follow_up", "gap": "no_how"}),
+        labelled({"action": "next_question"}),
+        labelled({"action": "next_question"}),
+    ]
+    replies = [decision("follow_up", "no_how"), decision(), decision("follow_up", "no_example"), decision()]
+    results = [run_decide_case(FakeProvider([r]), c, max_tokens=800) for c, r in zip(cases, replies, strict=True)]
+
+    summary = summarize_decisions(results)
+
+    assert (summary.correct, summary.labelled) == (2, 4)
+    assert (summary.over_probing, summary.under_probing) == (1, 1)
+    assert summary.per_gap == {"no_how": "1/2"}
+
+
+def test_main_with_task_decide_runs_only_labelled_cases(capsys):  # AC15
+    labelled_count = len([c for c in load_cases(EVAL_CASES_PATH) if c.expect])
+
+    assert main(["--task", "decide", "--repeat", "2"], provider=FakeProvider(default=decision)) == 0
+
+    out = capsys.readouterr().out
+    assert out.count("PASS") + out.count("FAIL") == 2 * labelled_count
+    assert "decision accuracy" in out and "over_probing=" in out and "under_probing=" in out
+    assert "accuracy mean=" in out

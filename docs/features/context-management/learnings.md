@@ -62,21 +62,73 @@ Concept: 3 Prompts as data.
 
 ---
 
-## Checkpoint C: the "before" snapshot (step 8) - NOT RECORDED YET
+## Checkpoint C: the "before" snapshot (step 8)
 Concept: 10 Evals, model choice.
 
-**Observed so far**
-- 2026-10-29: `interviews_evals --strategy full_history --repeat 3` with the configured model `google/gemma-4-26b-a4b-it:free` returned HTTP 429 (rate limited) on 26 of 27 calls. A free model's per-minute and daily caps make it unusable for repeated eval runs, so there is no snapshot yet.
+**Observed**
+- 2026-10-29: the first attempt on `google/gemma-4-26b-a4b-it:free` returned HTTP 429 (rate limited) on 26 of 27 calls. A free model's per-minute and daily caps make it unusable for repeated eval runs.
+- 2026-10-30: `interviews_evals --strategy full_history --repeat 3 --model gemini-3.5-flash-lite` (prompt `interviewer_v1`, `max_tokens=2000`). Recorded after `window_ledger` became the default; `full_history` is unchanged code, so it still reproduces the old behaviour.
+```
+run 1: passed 9/9   tokens 5512 in (0 cached) / 366 out (0 reasoning)   finish=length 0/9
+run 2: passed 6/9   3 x LLMRateLimitError (no reply)
+run 3: passed 6/9   2 x LLMRateLimitError, 1 x valid_reply(schema)
+runner: mean=0.78 min=0.67 max=1.00
+```
+- The runner counts rate-limit errors as failures. Counting only calls that returned a reply: **20/21 passed**. The one real failure (run 3, `long-history-backend-senior`) wrapped a valid reply in an extra object: `{"json": {"question": "...", "category": "technical"}}`. The strict contract rejected it (in the app: one retry, then a bank question).
+- Injection: `injection-in-answer` and `injection-in-job-description` passed 3/3 each.
+- Input tokens per case (run 1): 329-391 for the short cases, 1117-1348 for the two long-history cases (question 9), 953 for the long job description (summary on). Output 23-40 tokens, except 106-123 for the long job description. No reasoning tokens.
+- Long-history replies for the checklist: `backend-senior` asked about Kafka schema evolution twice (once valid, once wrapped); `mixed-mid` asked behavioral questions both times (changing approach when requirements shifted; onboarding onto an unfamiliar codebase).
 
-**To do** (you, before relying on `window_ledger` as the live default)
-1. `uv run python -m app.modules.interviews.interviews_evals --strategy full_history --repeat 3 --model <a model that is not rate limited>`
-2. Review the long-history outputs (the `review:` lines) with the 5-point checklist from the plan; write pass/fail with a one-line reason for each.
-3. Record here: tokens per case and per run, `finish=length` count, pass rate mean/min/max, checklist results.
+**To do** (you)
+- Grade the long-history replies above with the 5-point checklist from the plan; write pass/fail with a one-line reason for each.
 
 ---
 
-## Checkpoint D: the comparison (step 12) - NOT RECORDED YET
-Run the same N as Checkpoint C and compare against it: `full_history` vs `window_ledger`, `--summary on/off`, `--notes on/off`, `--reasoning-effort low/medium/high`, a reasoning vs a non-reasoning model, and the prompt ablation (`--prompt <variant>`). Read `finish=length` first. Note whether the provider reports cached tokens (`cached=` in the runner output) before claiming any caching saving, and whether wrong notes carried into later questions (error accumulation).
+## Checkpoint D: the comparison (step 12) - strategy comparison recorded, ablations open
+Concept: 2 Context, 9 Cost, 10 Evals.
+
+**Observed** (2026-10-30, `gemini-3.5-flash-lite`, `--repeat 3`, same cases as Checkpoint C)
+- This compares the old live setup (`full_history` + `interviewer_v1`) with the new one (`window_ledger` + `interviewer_v3` + notes), not the strategy alone: the prompt changed too.
+```
+                                   full_history v1   window_ledger v3
+pass rate (runner)                 1.00 0.67 0.67    1.00 1.00 0.89
+rate-limit errors                  5                 1
+passed, replies only               20/21             26/26
+finish=length                      0                 0
+input tokens, run 1 (9 cases)      5512              8453   (+53%)
+output tokens, run 1               366               530    (+45%, the notes)
+cached tokens                      0                 0
+```
+- Input per case, run 1:
+```
+case                                  full_history v1   window_ledger v3
+strong-backend-mid                    391               792
+vague-behavioral-junior               335               731
+off-topic-mixed-senior                340               738
+near-empty-data-intern                329               728
+injection-in-answer                   358               754
+injection-in-job-description          341               717
+long-history-backend-senior (Q9)      1348              1375
+long-history-mixed-mid (Q9)           1117              1269
+long-job-description-frontend-junior  953               1349
+```
+- Short cases cost about +400 tokens under `window_ledger` v3: that is the longer prompt (v3 2,848 chars vs v1 1,298). At question 9 the gap shrinks to +27 and +152: the ledger's savings on history almost cancel the larger prompt.
+- Injection: both cases passed 3/3 under v3 as well, and the notes summarise only the real part of the injected answer. The v3 prompt kept the defences v1 had.
+- Long-history replies under `window_ledger` for the checklist: `backend-senior` asked about distributed tracing, then multi-tenant isolation in PostgreSQL twice (new competencies, consistent with the PostgreSQL migration); `mixed-mid` asked technical questions in runs 1-2 (data consistency between services, refactoring a legacy schema) and a behavioral one in run 3, although question 8 was already technical.
+- Format slip that passed: in `vague-behavioral-junior` runs 1-2 the model wrote the `"category"` key twice in one object. Python's `json.loads` keeps the last value, so `extra="forbid"` does not see it.
+- Latency is not comparable: the runner averages rate-limited calls in at 0 ms (full_history run 2 shows 528 ms).
+
+**Why**
+- Separate infrastructure errors from quality failures before reading a pass rate. The runner's 0.78 vs 0.96 is mostly rate limits; on replies the model actually returned, both setups are near-perfect on the rule checks.
+- With interviews of up to 10 questions, `window_ledger` is a cap on input size (it keeps the maximum interview under the input limit), not a saving: the fixed prompt is the bigger cost, as in Checkpoint E.
+- `cached=0` here says nothing about caching: each eval case is a different interview with a different prefix. Caching can only show up in a live interview (Checkpoint E, to do 1).
+
+**Not run yet** (optional tuning; keeping `window_ledger` + v3 as the default does not depend on them)
+- `--summary on/off`, `--notes on/off`, `--reasoning-effort low/medium/high`, a reasoning vs a non-reasoning model, and the prompt ablation (`--prompt interviewer_v2` vs the default v3, Checkpoint E to do 2). Wait a minute between runs: both runs above hit HTTP 429 after about 25 calls.
+
+**Proof** (you)
+- Did `window_ledger` + v3 earn its place as the default? Answer with the numbers above: quality, injection, tokens, and which cost it does not remove.
+- _your answer here_
 
 ---
 

@@ -41,9 +41,9 @@ def test_the_llm_writes_the_first_question(start_interview, make_user, llm, repl
     current = r.json()["current_question"]
     assert current["text"] == "Tell me about a time you had to learn a new tool quickly."
     assert current["category"] == "behavioral" and current["position"] == 1
-    assert set(current) == {"id", "position", "text", "category"}
+    assert set(current) == {"id", "position", "text", "category", "question_kind", "main_number"}
     [q] = stored_questions(db, r.json()["session"]["id"])
-    assert (q.source, q.bank_id, q.prompt_version, q.model) == ("llm", None, "interviewer_v3", "fake-model")
+    assert (q.source, q.bank_id, q.prompt_version, q.model) == ("llm", None, "interviewer_v4", "fake-model")
     assert len(llm.fake.calls) == 1
 
 
@@ -161,7 +161,7 @@ def test_every_call_logs_one_line_without_any_content(start_interview, make_user
     assert ok.levelno == logging.INFO and "outcome=ok" in ok.getMessage()
     for line in (invalid, ok):
         message = line.getMessage()
-        assert "prompt_version=interviewer_v3" in message and "prompt_tokens=100" in message
+        assert "prompt_version=interviewer_v4" in message and "prompt_tokens=100" in message
         assert "garbage" not in message and "CAP theorem" not in message and "payments" not in message
 
 
