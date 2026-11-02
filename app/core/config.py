@@ -33,6 +33,8 @@ class ProviderConfig(BaseModel):
 class Settings(BaseSettings):
     database_url: str
     debug: bool = False
+    # Labels every Langfuse trace (development / production ...), so environments stay apart in one project.
+    app_env: str = "development"
 
     # No default: the app must not start with a guessable signing key.
     jwt_secret_key: str = Field(min_length=32)
@@ -50,6 +52,11 @@ class Settings(BaseSettings):
     llm_max_retries: int = Field(default=2, ge=0)
     llm_total_budget_seconds: float = Field(default=30, gt=0)
     llm_max_tokens: int = Field(default=4000, gt=0)
+
+    # Langfuse tracing: both keys set = on, anything less = off (see `langfuse_enabled`).
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_base_url: str | None = None
 
     removed_openrouter_api_key: SecretStr | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
     removed_llm_model: str | None = Field(default=None, validation_alias="LLM_MODEL")
@@ -69,6 +76,9 @@ class Settings(BaseSettings):
         "llm_google_api_key",
         "llm_google_model",
         "llm_google_base_url",
+        "langfuse_public_key",
+        "langfuse_secret_key",
+        "langfuse_base_url",
         "removed_openrouter_api_key",
         "removed_llm_model",
         "removed_llm_base_url",
@@ -117,6 +127,10 @@ class Settings(BaseSettings):
             ProviderConfig(name=name, **{field: getattr(self, f"llm_{name}_{field}") for field in _VENDOR_FIELDS})
             for name in self.llm_providers
         ]
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        return self.langfuse_public_key is not None and self.langfuse_secret_key is not None
 
     @property
     def llm_configured(self) -> bool:

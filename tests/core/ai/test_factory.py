@@ -99,3 +99,13 @@ def test_fake_records_the_reasoning_effort():  # context-management AC18
     fake.complete([ChatMessage(role="user", content="hi")], max_tokens=10)
 
     assert fake.reasoning_efforts == ["high", None]
+
+
+def test_enabled_tracer_wraps_the_provider_and_a_disabled_one_does_not(settings_with):  # AC1, AC8
+    from app.core.ai.tracing import Tracer, TracingProvider
+
+    wrapped = build_provider(settings_with(**GOOGLE), tracer=Tracer(object(), propagate=lambda **_: None))
+    plain = build_provider(settings_with(**GOOGLE), tracer=Tracer(None))
+
+    assert isinstance(wrapped, TracingProvider)
+    assert isinstance(plain, OpenAICompatibleProvider)

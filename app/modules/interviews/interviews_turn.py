@@ -8,7 +8,7 @@ Every failure has a fallback, so a turn never fails because of the LLM: the cont
 
 import logging
 import uuid
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import aclosing
 from enum import StrEnum
 from typing import NamedTuple
@@ -275,7 +275,8 @@ class Interviewer:
             attempt_start = self.clock()
             finished: Draft | None = None
             try:
-                draft = self._stream_draft(built.messages, remaining, deadline, follow_up_category)
+                labels = {"task": INTERVIEWER_STREAM_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms}
+                draft = self._stream_draft(built.messages, remaining, deadline, follow_up_category, labels)
                 async with aclosing(draft) as chunks:
                     async for item in chunks:
                         if isinstance(item, Draft):
@@ -355,13 +356,16 @@ class Interviewer:
         remaining: float,
         deadline: Deadline,
         follow_up_category: QuestionCategory | None,
+        trace_labels: Mapping[str, str | int | None],
     ) -> AsyncGenerator[str | Draft]:
         """One streamed attempt: the question's text chunks (never the CATEGORY line), then the finished Draft.
         Raises InvalidReplyError for a bad CATEGORY line before any text, and LLMTimeoutError when the turn's deadline
         runs out mid-stream."""
         buffer, category, text = "", follow_up_category, ""
         result: LLMResult | None = None
-        stream = self.llm.stream(messages, max_tokens=self.max_tokens, budget_seconds=remaining)
+        stream = self.llm.stream(
+            messages, max_tokens=self.max_tokens, budget_seconds=remaining, trace_labels=trace_labels
+        )
         async with aclosing(stream) as items:
             async for item in items:
                 if isinstance(item, LLMResult):
@@ -484,7 +488,10 @@ class Interviewer:
             budget_left_ms = round(deadline.remaining() * 1000)
             try:
                 result = self.llm.complete(
-                    built.messages, max_tokens=self.max_tokens, budget_seconds=left
+                    built.messages,
+                    max_tokens=self.max_tokens,
+                    budget_seconds=left,
+                    trace_labels={"task": DECISION_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
                 )
             except LLMError as exc:
                 _log_error(session_id, exc, DECISION_TASK, version, budget_left_ms)
@@ -569,7 +576,10 @@ class Interviewer:
             budget_left_ms = round(remaining * 1000)
             try:
                 result = self.llm.complete(
-                    built.messages, max_tokens=self.max_tokens, budget_seconds=remaining
+                    built.messages,
+                    max_tokens=self.max_tokens,
+                    budget_seconds=remaining,
+                    trace_labels={"task": INTERVIEWER_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
                 )
             except LLMError as exc:
                 _log_error(session_id, exc, INTERVIEWER_TASK, version, budget_left_ms)

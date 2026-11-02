@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 
 from app.core.ai.factory import build_provider
+from app.core.ai.tracing import build_tracer
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import setup_logging
@@ -18,7 +19,9 @@ setup_logging(settings.debug)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # One LLM client for the whole app (connection reuse); None when no key is configured.
-    provider = build_provider(settings)
+    tracer = build_tracer(settings)
+    provider = build_provider(settings, tracer=tracer)
+    app.state.tracer = tracer
     app.state.llm_provider = provider
     try:
         yield
@@ -26,6 +29,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if provider is not None:
             provider.close()
             await provider.aclose()
+        # After the provider: its last calls are recorded by now, so this flush sends them too.
+        tracer.close()
 
 
 app = FastAPI(title="Cuewise API", version="1.0.0", lifespan=lifespan)

@@ -221,3 +221,47 @@ def test_env_example_explains_the_reasoning_model_token_cap():  # llm-interviewe
 
     assert "LLM_MAX_TOKENS=800" in text
     assert "reasoning" in text.lower()
+
+
+@pytest.fixture
+def no_langfuse_env(monkeypatch):
+    for name in list(os.environ):
+        if name.upper().startswith(("LANGFUSE_", "APP_ENV")):
+            monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def test_langfuse_off_and_env_defaults_when_unset(no_langfuse_env):  # AC8, EC1
+    settings = _settings()
+
+    assert settings.langfuse_enabled is False
+    assert settings.app_env == "development"
+
+
+def test_langfuse_blank_keys_count_as_unset(no_langfuse_env):  # AC8, EC1
+    for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"):
+        no_langfuse_env.setenv(name, "")
+
+    assert _settings().langfuse_enabled is False
+
+
+def test_langfuse_on_only_with_both_keys(no_langfuse_env):  # AC8, EC2
+    no_langfuse_env.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    assert _settings().langfuse_enabled is False
+
+    no_langfuse_env.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+    assert _settings().langfuse_enabled is True
+
+
+def test_langfuse_secret_key_is_not_echoed(no_langfuse_env):  # AC14
+    no_langfuse_env.setenv("LANGFUSE_SECRET_KEY", "sk-very-secret")
+
+    assert "sk-very-secret" not in repr(_settings())
+
+
+def test_env_example_lists_langfuse_and_app_env():  # AC14
+    with open(".env.example", encoding="utf-8") as f:
+        text = f.read()
+
+    for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL", "APP_ENV"):
+        assert name in text

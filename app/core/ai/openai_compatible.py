@@ -7,7 +7,7 @@ Deliberately no SDK: the request body, the response shape and the retry rules ar
 import json
 import random
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 import anyio
@@ -81,6 +81,8 @@ class OpenAICompatibleProvider:
         temperature: float | None = None,
         budget_seconds: float | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
+        trace_labels: Mapping[str, str | int | None] | None = None,
     ) -> LLMResult:
         body = self._body(messages, max_tokens, temperature, reasoning_effort)
         budget = self._budget_for(budget_seconds)
@@ -108,6 +110,8 @@ class OpenAICompatibleProvider:
         temperature: float | None = None,
         budget_seconds: float | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
+        trace_labels: Mapping[str, str | int | None] | None = None,
     ) -> AsyncGenerator[str | LLMResult]:
         """Same request with `stream: true`: chunks as they arrive, then the final LLMResult. The same retry rules as
         `complete`, but only until the first chunk was yielded (the caller may have shown it): after that a failure

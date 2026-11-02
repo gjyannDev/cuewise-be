@@ -3,7 +3,7 @@
 Nothing here knows about HTTP or a vendor, so a controller can handle "the LLM failed" without importing httpx.
 """
 
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -87,6 +87,8 @@ class LLMProvider(Protocol):
         # Lowers the total time budget for this call (a caller's own deadline); it never raises it.
         budget_seconds: float | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
+        trace_labels: Mapping[str, str | int | None] | None = None,
     ) -> LLMResult: ...
 
     def stream(
@@ -97,6 +99,8 @@ class LLMProvider(Protocol):
         temperature: float | None = None,
         budget_seconds: float | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
+        trace_labels: Mapping[str, str | int | None] | None = None,
     ) -> AsyncGenerator[str | LLMResult]:
         """The reply as it is generated: text chunks, then one final LLMResult (the joined text, usage, timing).
 

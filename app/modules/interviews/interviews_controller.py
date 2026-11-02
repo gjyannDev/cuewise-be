@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMError, LLMProvider, LLMResult
+from app.core.ai.tracing import Tracer
 from app.core.errors import (
     NotFoundError,
     QuestionNotCurrentError,
@@ -121,6 +122,8 @@ class TurnContext(NamedTuple):
     previous_reaction: str | None
     # The candidate's answer, saved with the rest of the turn (its note is filled in by the decide call).
     answer: InterviewMessage
+    # For the request's trace; read here because `session` reloads from the DB once its transaction has ended.
+    user_id: uuid.UUID
 
 
 class InterviewsController:
@@ -135,12 +138,15 @@ class InterviewsController:
         llm_budget_seconds: float = 30,
         clock: Callable[[], float] = time.monotonic,
         context: ContextManager = CONTEXT_MANAGER,
+        tracer: Tracer | None = None,
     ):
         self.repo = repo
         self.bank = bank
         self.rng = rng
         # None = LLM off: every question comes from the bank.
         self.llm = llm
+        # Langfuse traces (one per request that can call the LLM); a disabled tracer costs nothing.
+        self.tracer = tracer or Tracer(None)
         self.llm_max_tokens = llm_max_tokens
         # Decides what each LLM call sends (strategy, trimming); see interviews_context.py.
         self.context = context
@@ -174,23 +180,27 @@ class InterviewsController:
             data.question_count,
             data.job_description,
         )
-        self.repo.release()
-        summary = self._summarize(setup)
-        if summary is not None:
-            session.job_description_summary = summary
-            setup = setup._replace(job_description_summary=summary)
-        first = None
-        if self.interviewer is not None:
-            written = self.interviewer.first_question(setup.session_id, self._inputs(setup, []))
-            if written.reply is not None:
-                first = _llm_question(written, written.results, FIRST_POSITION, 1)
-        if first is None:
-            first = self._bank_question(setup, FIRST_POSITION, 1, set())
-        self.repo.start(session, [first])
-        return InterviewOut(
-            session=SessionOut.model_validate(session),
-            current_question=QuestionOut.model_validate(first),
+        trace = self.tracer.trace(
+            "start-interview", user_id=str(user.id), session_id=str(session.id), input=data.model_dump(mode="json")
         )
+        with trace:
+            self.repo.release()
+            summary = self._summarize(setup)
+            if summary is not None:
+                session.job_description_summary = summary
+                setup = setup._replace(job_description_summary=summary)
+            first = None
+            if self.interviewer is not None:
+                written = self.interviewer.first_question(setup.session_id, self._inputs(setup, []))
+                if written.reply is not None:
+                    first = _llm_question(written, written.results, FIRST_POSITION, 1)
+            if first is None:
+                first = self._bank_question(setup, FIRST_POSITION, 1, set())
+            self.repo.start(session, [first])
+            return InterviewOut(
+                session=SessionOut.model_validate(session),
+                current_question=QuestionOut.model_validate(first),
+            )
 
     def get(self, user: User, session_id: uuid.UUID) -> InterviewOut:
         session = self._owned_session(user, session_id)
@@ -202,12 +212,21 @@ class InterviewsController:
     def answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> AnswerOut:
         ctx = self.prepare_answer(user, session_id, data)
         outcome = None
-        if self.uses_interviewer(ctx):
-            assert self.interviewer is not None
-            outcome = self.interviewer.answer_turn(
-                ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
-            )
+        with self._answer_trace(ctx):
+            if self.uses_interviewer(ctx):
+                assert self.interviewer is not None
+                outcome = self.interviewer.answer_turn(
+                    ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
+                )
         return self.finish_answer(ctx, outcome)
+
+    def _answer_trace(self, ctx: TurnContext):
+        return self.tracer.trace(
+            "answer-turn",
+            user_id=str(ctx.user_id),
+            session_id=str(ctx.setup.session_id),
+            input={"question_id": str(ctx.question_id), "answer": ctx.answer.content},
+        )
 
     def prepare_answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> TurnContext:
         """Every check and read of an answer turn, before any LLM call. Raises the usual errors (404, 409), so a
@@ -267,6 +286,7 @@ class InterviewsController:
                 role=MessageRole.candidate,
                 content=data.answer,
             ),
+            user_id=user.id,
         )
         self.repo.release()
         return ctx
@@ -377,64 +397,66 @@ class InterviewsController:
         cancelled) leaves the session on the same question. `started_at` is the request's perf_counter time."""
         terminal, cancelled, first_event_ms = "-", False, None
         first_token_ms, resets, writing_at = None, 0, None
-        try:
-            yield _event(StreamEvent.status, StatusEventOut(phase=TurnPhase.received))
-            first_event_ms = _elapsed_ms(started_at)
-            reaction, outcome = None, None
-            if self.uses_interviewer(ctx):
-                assert self.interviewer is not None
-                turn = self.interviewer.stream_turn(
-                    ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
+        # One trace for the whole stream; it runs after the route returned, so it opens here, not in the route.
+        with self._answer_trace(ctx):
+            try:
+                yield _event(StreamEvent.status, StatusEventOut(phase=TurnPhase.received))
+                first_event_ms = _elapsed_ms(started_at)
+                reaction, outcome = None, None
+                if self.uses_interviewer(ctx):
+                    assert self.interviewer is not None
+                    turn = self.interviewer.stream_turn(
+                        ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
+                    )
+                    async with aclosing(turn) as events:
+                        async for event in events:
+                            match event:
+                                case PhaseChanged(phase=phase):
+                                    if phase == TurnPhase.writing:
+                                        writing_at = time.perf_counter()
+                                    yield _event(StreamEvent.status, StatusEventOut(phase=phase))
+                                # A reaction is shown before the question it introduces, so only when the action was
+                                # known before writing; a follow-up that fell back gets its reaction in `done` instead.
+                                case ActionKnown(action=action) if action != TurnAction.follow_up and writing_at is None:
+                                    reaction = self.choose_reaction(ctx, completes=action == TurnAction.complete)
+                                    yield _event(StreamEvent.reaction, reaction)
+                                case Delta(text=text):
+                                    if first_token_ms is None and writing_at is not None:
+                                        first_token_ms = _elapsed_ms(writing_at)
+                                    yield _event(StreamEvent.question_delta, QuestionDeltaOut(text=text))
+                                case Reset():
+                                    resets += 1
+                                    yield _event(StreamEvent.reset, ResetOut())
+                                case Settled(outcome=settled):
+                                    outcome = settled
+                else:
+                    reaction = self.choose_reaction(ctx, completes=self.completes_without_llm(ctx))
+                    yield _event(StreamEvent.reaction, reaction)
+                done = await anyio.to_thread.run_sync(self.finish_answer, ctx, outcome, reaction)
+                terminal = StreamEvent.done.value
+                yield _event(StreamEvent.done, done)
+            except QuestionNotCurrentError as exc:
+                # Lost the race to another submit of this question: the other one saved the turn.
+                terminal = exc.code
+                yield _error_event(exc.code, exc.message)
+            except Exception:
+                stream_logger.exception("stream_turn_failed session=%s", ctx.setup.session_id)
+                terminal = "INTERNAL_ERROR"
+                yield _error_event("INTERNAL_ERROR", "An unexpected error occurred")
+            except BaseException:
+                # The client left (the stream was cancelled or closed): nothing was saved.
+                cancelled = True
+                raise
+            finally:
+                log_stream_summary(
+                    ctx.setup.session_id,
+                    terminal=terminal,
+                    first_event_ms=first_event_ms,
+                    first_token_ms=first_token_ms,
+                    total_ms=_elapsed_ms(started_at),
+                    resets=resets,
+                    cancelled=cancelled,
                 )
-                async with aclosing(turn) as events:
-                    async for event in events:
-                        match event:
-                            case PhaseChanged(phase=phase):
-                                if phase == TurnPhase.writing:
-                                    writing_at = time.perf_counter()
-                                yield _event(StreamEvent.status, StatusEventOut(phase=phase))
-                            # A reaction is shown before the question it introduces, so only when the action was
-                            # known before writing; a follow-up that fell back gets its reaction in `done` instead.
-                            case ActionKnown(action=action) if action != TurnAction.follow_up and writing_at is None:
-                                reaction = self.choose_reaction(ctx, completes=action == TurnAction.complete)
-                                yield _event(StreamEvent.reaction, reaction)
-                            case Delta(text=text):
-                                if first_token_ms is None and writing_at is not None:
-                                    first_token_ms = _elapsed_ms(writing_at)
-                                yield _event(StreamEvent.question_delta, QuestionDeltaOut(text=text))
-                            case Reset():
-                                resets += 1
-                                yield _event(StreamEvent.reset, ResetOut())
-                            case Settled(outcome=settled):
-                                outcome = settled
-            else:
-                reaction = self.choose_reaction(ctx, completes=self.completes_without_llm(ctx))
-                yield _event(StreamEvent.reaction, reaction)
-            done = await anyio.to_thread.run_sync(self.finish_answer, ctx, outcome, reaction)
-            terminal = StreamEvent.done.value
-            yield _event(StreamEvent.done, done)
-        except QuestionNotCurrentError as exc:
-            # Lost the race to another submit of this question: the other one saved the turn.
-            terminal = exc.code
-            yield _error_event(exc.code, exc.message)
-        except Exception:
-            stream_logger.exception("stream_turn_failed session=%s", ctx.setup.session_id)
-            terminal = "INTERNAL_ERROR"
-            yield _error_event("INTERNAL_ERROR", "An unexpected error occurred")
-        except BaseException:
-            # The client left (the stream was cancelled or closed): nothing was saved.
-            cancelled = True
-            raise
-        finally:
-            log_stream_summary(
-                ctx.setup.session_id,
-                terminal=terminal,
-                first_event_ms=first_event_ms,
-                first_token_ms=first_token_ms,
-                total_ms=_elapsed_ms(started_at),
-                resets=resets,
-                cancelled=cancelled,
-            )
 
     def transcript(self, user: User, session_id: uuid.UUID) -> TranscriptOut:
         session = self._owned_session(user, session_id)
@@ -494,6 +516,7 @@ class InterviewsController:
                 built.messages,
                 max_tokens=self.llm_max_tokens,
                 budget_seconds=SUMMARY_TIME_CAP_SECONDS,
+                trace_labels={"task": SUMMARY_TASK, "prompt_version": built.prompt_version},
             )
         except LLMError as exc:
             log_llm_call(

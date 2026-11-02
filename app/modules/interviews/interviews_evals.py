@@ -612,6 +612,7 @@ def main(
     parser = _parser()
     args = parser.parse_args(argv)
     from app.core.ai.factory import build_provider
+    from app.core.ai.tracing import Tracer, build_tracer
     from app.core.config import settings
 
     context = CONTEXT_MANAGER
@@ -625,8 +626,11 @@ def main(
 
     configs = settings.llm_provider_configs
     model = args.model or (configs[0].model if configs else None)
+    # Eval calls go to Langfuse under environment "eval", apart from real traffic (only when keys are configured).
+    tracer = Tracer(None)
     if provider is None:
-        provider = build_provider(settings, model=args.model)
+        tracer = build_tracer(settings, environment="eval")
+        provider = build_provider(settings, model=args.model, tracer=tracer)
         if provider is None:
             print(
                 "LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first."
@@ -660,6 +664,7 @@ def main(
         finally:
             provider.close()
             portal.call(provider.aclose)
+            tracer.close()
     aggregate = summarize_runs(runs)
     print(
         f"\npass rate mean={aggregate.mean:.2f} min={aggregate.minimum:.2f} max={aggregate.maximum:.2f} "

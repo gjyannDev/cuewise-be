@@ -2,7 +2,7 @@
 
 import re
 from collections import deque
-from collections.abc import AsyncGenerator, Callable, Iterable, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
 from typing import NamedTuple
 
 import anyio
@@ -54,6 +54,8 @@ class FakeProvider:
         temperature: float | None = None,
         budget_seconds: float | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
+        trace_labels: Mapping[str, str | int | None] | None = None,
     ) -> LLMResult:
         reply = self._next(messages, budget_seconds, reasoning_effort)
         if isinstance(reply, FakeStream):
@@ -72,6 +74,8 @@ class FakeProvider:
         temperature: float | None = None,
         budget_seconds: float | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
+        trace_labels: Mapping[str, str | int | None] | None = None,
     ) -> AsyncGenerator[str | LLMResult]:
         """A text reply is streamed word by word; a FakeStream as scripted. An LLMError fails before any chunk."""
         reply = self._next(messages, budget_seconds, reasoning_effort)

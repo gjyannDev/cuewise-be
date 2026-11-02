@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMProvider
+from app.core.ai.tracing import Tracer
 from app.core.config import settings
 from app.db.session import get_db
 
@@ -28,6 +29,11 @@ def get_llm_provider(request: Request) -> LLMProvider | None:
     return getattr(request.app.state, "llm_provider", None)
 
 
+def get_tracer(request: Request) -> Tracer:
+    """Built once at startup (app lifespan); a disabled tracer when the lifespan didn't run."""
+    return getattr(request.app.state, "tracer", None) or Tracer(None)
+
+
 def get_clock() -> Callable[[], float]:
     """Monotonic clock for the per-turn LLM time budget; tests swap in a fake one."""
     return time.monotonic
@@ -44,6 +50,7 @@ def get_controller(
     llm: Annotated[LLMProvider | None, Depends(get_llm_provider)],
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     context: Annotated[ContextManager, Depends(get_context_manager)],
+    tracer: Annotated[Tracer, Depends(get_tracer)],
 ) -> InterviewsController:
     return InterviewsController(
         InterviewsRepository(db),
@@ -54,6 +61,7 @@ def get_controller(
         llm_budget_seconds=settings.llm_total_budget_seconds,
         clock=clock,
         context=context,
+        tracer=tracer,
     )
 
 
