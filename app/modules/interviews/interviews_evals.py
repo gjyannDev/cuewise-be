@@ -2,8 +2,9 @@
 
 Run:  uv run python -m app.modules.interviews.interviews_evals [--strategy ...] [--repeat N] [--help]
       uv run python -m app.modules.interviews.interviews_evals --task decide --repeat 3   (follow-up decisions)
-(needs OPENROUTER_API_KEY and LLM_MODEL). It costs real calls, so it never runs in `uv run pytest`; the checks
-themselves are unit-tested with the fake provider. Never imported by the app.
+      uv run python -m app.modules.interviews.interviews_evals --task stream --repeat 3   (interviewer_v5, streamed)
+(needs LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings). It costs real calls, so it never runs in
+`uv run pytest`; the checks themselves are unit-tested with the fake provider. Never imported by the app.
 
 Each case is one moment of an interview (setup, conversation so far, last answer). The checks are reference-free
 rules, because a good interview question has no single right text: is the reply valid, is it only a question,
@@ -12,16 +13,22 @@ so long-history outputs are printed with their setup for a manual review (docs/f
 
 The decide task is the opposite: a decision does have a right answer, so cases carry a label (`expect`) and the
 runner reports accuracy, over-probing (a follow-up nobody needed) and under-probing (a gap left unexplored).
+
+The stream task runs the same write cases through the streamed turn's call (interviewer_v5, read with `stream()`):
+the same rule checks as `write`, so v4 and v5 compare on one table, plus the time to the first visible token.
 """
 
 import argparse
 import re
 import sys
+import time
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, get_args
 
+import anyio
+from anyio.from_thread import BlockingPortal, start_blocking_portal
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from app.core.ai.context import ContextManager, ContextTooLargeError
@@ -30,6 +37,7 @@ from app.core.ai.provider import LLMError, LLMProvider, LLMResult, ReasoningEffo
 from .interviews_constants import (
     DECISION_TASK,
     FULL_HISTORY,
+    INTERVIEWER_STREAM_TASK,
     INTERVIEWER_TASK,
     PROMPTS_DIR,
     SUMMARY_TASK,
@@ -53,6 +61,8 @@ from .interviews_reply import (
     InvalidReplyError,
     parse_decision_reply,
     parse_interviewer_reply,
+    parse_streamed_reply,
+    split_header,
     validate_summary,
 )
 from .interviews_utils import QuestionTurn
@@ -146,6 +156,8 @@ class CaseResult(BaseModel):
     reasoning_tokens: int = 0
     latency_ms: int = 0
     finish_reason: str | None = None
+    # Streamed evals: from the call's start to the first chunk of question text (after the CATEGORY line).
+    first_token_ms: int | None = None
     # Decide evals: what the model picked against the label.
     decided: str | None = None
     decided_gap: str | None = None
@@ -168,6 +180,8 @@ class Summary(BaseModel):
     average_latency_ms: int
     # Calls cut off by max_tokens (a reasoning model out of budget): the problem this feature was started for.
     finish_length: int
+    # Streamed evals only: the average over cases that showed any text; None when none did (or not streamed).
+    average_first_token_ms: int | None = None
 
 
 class RunsSummary(BaseModel):
@@ -215,11 +229,34 @@ def check_reply(case: EvalCase, raw: str, *, expect_note: bool = False) -> list[
         question = raw
         valid = Check(name="valid_reply", passed=False, detail=exc.reason)
 
+    return _text_checks(case, valid, question, raw) + ([note] if note else [])
+
+
+def check_streamed_reply(case: EvalCase, raw: str) -> list[Check]:
+    """check_reply for interviewer_v5's streamed format: the CATEGORY line, then the question as plain text."""
+    try:
+        split = split_header(raw, final=True)
+        assert split is not None
+        question = parse_streamed_reply(
+            split.text,
+            interview_type=case.setup.interview_type,
+            earlier_questions=[turn.question for turn in case.history],
+            category=split.category,
+        ).question
+        valid = Check(name="valid_reply", passed=True)
+    except InvalidReplyError as exc:
+        question = raw
+        valid = Check(name="valid_reply", passed=False, detail=exc.reason)
+    return _text_checks(case, valid, question, raw)
+
+
+def _text_checks(case: EvalCase, valid: Check, question: str, raw: str) -> list[Check]:
+    """The checks on what the candidate would read, whatever the reply format."""
     judgement = _JUDGEMENT.search(question)
     acknowledgement = _ACKNOWLEDGEMENT.search(question)
     # The raw reply includes the note, so an injected marker leaking into the note is caught here too.
     obeyed = bool(case.marker) and case.marker.casefold() in raw.casefold()
-    checks = [
+    return [
         valid,
         Check(
             name="no_judgement",
@@ -237,7 +274,6 @@ def check_reply(case: EvalCase, raw: str, *, expect_note: bool = False) -> list[
             detail=(case.marker or "") if obeyed else "",
         ),
     ]
-    return checks + ([note] if note else [])
 
 
 def check_decision(case: EvalCase, raw: str) -> list[Check]:
@@ -353,27 +389,7 @@ def run_case(
     reasoning_effort: ReasoningEffort | None = None,
 ) -> CaseResult:
     usage = CaseResult(case_id=case.id, checks=[])
-    job_description = case.job_description
-    summary_used = False
-    if summary and job_description and len(job_description) > SUMMARY_THRESHOLD:
-        condensed = _summarize(
-            provider, context, job_description, usage, max_tokens, reasoning_effort
-        )
-        if condensed is not None:
-            job_description, summary_used = condensed, True
-
-    inputs = InterviewerInputs(
-        role=case.setup.role,
-        level=case.setup.level,
-        interview_type=case.setup.interview_type,
-        question_count=case.setup.question_count,
-        job_description=job_description,
-        turns=[
-            QuestionTurn(t.question, t.category, t.answer, t.note if notes else None, t.kind)
-            for t in case.history
-        ],
-        summary_used=summary_used,
-    )
+    inputs = _case_inputs(provider, case, usage, context, max_tokens, notes, summary, reasoning_effort)
     try:
         built = context.build(INTERVIEWER_TASK, inputs, strategy)
     except ContextTooLargeError:
@@ -396,6 +412,100 @@ def run_case(
             "question": result.text.strip(),
             "finish_reason": result.finish_reason,
         }
+    )
+
+
+def run_stream_case(
+    provider: LLMProvider,
+    case: EvalCase,
+    *,
+    max_tokens: int,
+    context: ContextManager = CONTEXT_MANAGER,
+    notes: bool = True,
+    summary: bool = False,
+    reasoning_effort: ReasoningEffort | None = None,
+    # The event loop to stream on (the CLI keeps one for the whole run); None runs this case on its own loop.
+    portal: BlockingPortal | None = None,
+) -> CaseResult:
+    """The streamed turn's write call (interviewer_stream, v5) on one case: the same checks as `run_case`, plus the
+    time to the first chunk of question text, the number the streaming slice exists for."""
+    usage = CaseResult(case_id=case.id, checks=[])
+    inputs = _case_inputs(provider, case, usage, context, max_tokens, notes, summary, reasoning_effort)
+    try:
+        built = context.build(INTERVIEWER_STREAM_TASK, inputs)
+    except ContextTooLargeError:
+        return usage.model_copy(update={"error": "context_too_large"})
+
+    async def read() -> tuple[LLMResult, int | None]:
+        start, first_token_ms, buffer, final = time.perf_counter(), None, "", None
+        async for item in provider.stream(built.messages, max_tokens=max_tokens, reasoning_effort=reasoning_effort):
+            if isinstance(item, LLMResult):
+                final = item
+                continue
+            buffer += item
+            if first_token_ms is None:
+                try:
+                    split = split_header(buffer)
+                except InvalidReplyError:
+                    split = None  # no header: no question text will be shown; the check reports it
+                if split is not None and split.text:
+                    first_token_ms = round((time.perf_counter() - start) * 1000)
+        assert final is not None
+        return final, first_token_ms
+
+    try:
+        result, first_token_ms = portal.call(read) if portal else anyio.run(read)
+    except LLMError as exc:
+        return usage.model_copy(update={"error": type(exc).__name__, "finish_reason": exc.finish_reason})
+    _add_usage(usage, result)
+    return usage.model_copy(
+        update={
+            "checks": check_streamed_reply(case, result.text),
+            "question": _streamed_question(result.text),
+            "finish_reason": result.finish_reason,
+            "first_token_ms": first_token_ms,
+        }
+    )
+
+
+def _streamed_question(raw: str) -> str:
+    try:
+        split = split_header(raw, final=True)
+    except InvalidReplyError:
+        return raw.strip()
+    return split.text.strip() if split else raw.strip()
+
+
+def _case_inputs(
+    provider: LLMProvider,
+    case: EvalCase,
+    usage: CaseResult,
+    context: ContextManager,
+    max_tokens: int,
+    notes: bool,
+    summary: bool,
+    reasoning_effort: ReasoningEffort | None,
+) -> InterviewerInputs:
+    """The write call's inputs for a case, with the job description condensed first when `summary` is on."""
+    job_description = case.job_description
+    summary_used = False
+    if summary and job_description and len(job_description) > SUMMARY_THRESHOLD:
+        condensed = _summarize(
+            provider, context, job_description, usage, max_tokens, reasoning_effort
+        )
+        if condensed is not None:
+            job_description, summary_used = condensed, True
+    return InterviewerInputs(
+        role=case.setup.role,
+        level=case.setup.level,
+        interview_type=case.setup.interview_type,
+        question_count=case.setup.question_count,
+        job_description=job_description,
+        turns=[
+            QuestionTurn(t.question, t.category, t.answer, t.note if notes else None, t.kind)
+            for t in case.history
+        ],
+        summary_used=summary_used,
     )
 
 
@@ -432,6 +542,7 @@ def _add_usage(usage: CaseResult, result: LLMResult) -> None:
 
 def summarize(results: Sequence[CaseResult]) -> Summary:
     failures = Counter(c.name for r in results for c in r.checks if not c.passed)
+    first_tokens = [r.first_token_ms for r in results if r.first_token_ms is not None]
     return Summary(
         passed=sum(r.passed for r in results),
         total=len(results),
@@ -444,6 +555,7 @@ def summarize(results: Sequence[CaseResult]) -> Summary:
         if results
         else 0,
         finish_length=sum(r.finish_reason == "length" for r in results),
+        average_first_token_ms=round(sum(first_tokens) / len(first_tokens)) if first_tokens else None,
     )
 
 
@@ -477,16 +589,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prompt", help="prompt version for the chosen strategy (ablations)"
     )
-    parser.add_argument("--model", help="override LLM_MODEL for this run")
+    parser.add_argument("--model", help="override the primary provider's model for this run")
     parser.add_argument("--reasoning-effort", choices=get_args(ReasoningEffort))
     parser.add_argument("--notes", choices=["on", "off"], default="on")
     parser.add_argument("--summary", choices=["on", "off"], default="on")
     parser.add_argument("--repeat", type=_positive, default=1)
     parser.add_argument(
         "--task",
-        choices=["write", "decide"],
+        choices=["write", "decide", "stream"],
         default="write",
-        help="write: the question rules (default); decide: the follow-up decision on the labelled cases",
+        help=(
+            "write: the question rules (default, interviewer_v4 as JSON); decide: the follow-up decision on the "
+            "labelled cases; stream: the streamed turn's write call (interviewer_v5), with time to first token"
+        ),
     )
     return parser
 
@@ -508,12 +623,13 @@ def main(
             )
         context = build_context_manager({args.strategy or WINDOW_LEDGER: args.prompt})
 
-    model = args.model or settings.llm_model
+    configs = settings.llm_provider_configs
+    model = args.model or (configs[0].model if configs else None)
     if provider is None:
-        provider = build_provider(settings.model_copy(update={"llm_model": model}))
+        provider = build_provider(settings, model=args.model)
         if provider is None:
             print(
-                "LLM is not configured: set OPENROUTER_API_KEY and LLM_MODEL in .env first."
+                "LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first."
             )
             return 1
     print(
@@ -523,24 +639,27 @@ def main(
     )
     decide = args.task == "decide"
     runs, decisions = [], []
-    try:
-        cases = load_cases(EVAL_CASES_PATH)
-        if decide:
-            cases = [c for c in cases if c.expect]
-        for run in range(1, args.repeat + 1):
-            print(f"=== run {run}/{args.repeat}")
-            results = []
-            for case in cases:
-                result = _run_one(provider, case, args, context, settings.llm_max_tokens)
-                results.append(result)
-                _print_case(case, result)
-            runs.append(summarize(results))
-            _print_summary(runs[-1])
+    # One event loop for every streamed call, so the provider's async connections are reused, never moved between loops.
+    with start_blocking_portal() as portal:
+        try:
+            cases = load_cases(EVAL_CASES_PATH)
             if decide:
-                decisions.append(summarize_decisions(results))
-                _print_decisions(decisions[-1])
-    finally:
-        provider.close()
+                cases = [c for c in cases if c.expect]
+            for run in range(1, args.repeat + 1):
+                print(f"=== run {run}/{args.repeat}")
+                results = []
+                for case in cases:
+                    result = _run_one(provider, case, args, context, settings.llm_max_tokens, portal)
+                    results.append(result)
+                    _print_case(case, result)
+                runs.append(summarize(results))
+                _print_summary(runs[-1])
+                if decide:
+                    decisions.append(summarize_decisions(results))
+                    _print_decisions(decisions[-1])
+        finally:
+            provider.close()
+            portal.call(provider.aclose)
     aggregate = summarize_runs(runs)
     print(
         f"\npass rate mean={aggregate.mean:.2f} min={aggregate.minimum:.2f} max={aggregate.maximum:.2f} "
@@ -564,6 +683,7 @@ def _print_case(case: EvalCase, result: CaseResult) -> None:
     print(
         f"      tokens={result.prompt_tokens}/{result.completion_tokens} cached={result.cached_tokens} "
         f"reasoning={result.reasoning_tokens} latency_ms={result.latency_ms} finish={result.finish_reason or '-'}"
+        + (f" first_token_ms={result.first_token_ms}" if result.first_token_ms is not None else "")
     )
     if len(case.history) >= LONG_HISTORY:
         setup = case.setup
@@ -581,16 +701,38 @@ def _print_summary(summary: Summary) -> None:
     print(
         f"tokens {summary.prompt_tokens} in ({summary.cached_tokens} cached) / {summary.completion_tokens} out "
         f"({summary.reasoning_tokens} reasoning), avg latency {summary.average_latency_ms} ms, "
-        f"finish=length {summary.finish_length}/{summary.total}\n"
+        f"finish=length {summary.finish_length}/{summary.total}"
+        + (
+            f", avg first token {summary.average_first_token_ms} ms"
+            if summary.average_first_token_ms is not None
+            else ""
+        )
+        + "\n"
     )
 
 
 def _run_one(
-    provider: LLMProvider, case: EvalCase, args: argparse.Namespace, context: ContextManager, max_tokens: int
+    provider: LLMProvider,
+    case: EvalCase,
+    args: argparse.Namespace,
+    context: ContextManager,
+    max_tokens: int,
+    portal: BlockingPortal | None = None,
 ) -> CaseResult:
     if args.task == "decide":
         return run_decide_case(
             provider, case, max_tokens=max_tokens, context=context, reasoning_effort=args.reasoning_effort
+        )
+    if args.task == "stream":
+        return run_stream_case(
+            provider,
+            case,
+            max_tokens=max_tokens,
+            context=context,
+            notes=args.notes == "on",
+            summary=args.summary == "on",
+            reasoning_effort=args.reasoning_effort,
+            portal=portal,
         )
     return run_case(
         provider,

@@ -1,13 +1,17 @@
+import time
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, status
+from fastapi.concurrency import run_in_threadpool
+from sse_starlette.sse import EventSourceResponse
 
 from app.core.errors import ErrorResponse
 from app.modules.auth.auth_constants import Permission
 from app.modules.auth.auth_dependencies import require_permissions
 from app.modules.auth.auth_model import User
 
+from .interviews_constants import STREAM_PING_SECONDS
 from .interviews_dependencies import InterviewsControllerDep
 from .interviews_schema import (
     AnswerIn,
@@ -16,6 +20,7 @@ from .interviews_schema import (
     InterviewOut,
     TranscriptOut,
 )
+from .interviews_utils import sse_frames
 
 router = APIRouter(
     prefix="/interviews",
@@ -27,6 +32,22 @@ router = APIRouter(
         500: {"model": ErrorResponse},
     },
 )
+
+# The contract for the client, shown in the OpenAPI docs of the stream route.
+STREAM_DESCRIPTION = """\
+Server-Sent Events, one per line pair (`event:` name, `data:` one line of JSON), in this order:
+
+- `status` `{"phase": "received"}` at once, then `{"phase": "deciding"}` and `{"phase": "writing"}` as the turn runs
+- `reaction` (a ReactionOut) before the next question, when the interview moves on or completes
+- `question.delta` `{"text": ...}` chunks of the next question (append them)
+- `reset` `{}`: discard the question text so far; another draft or the final question follows
+- `done` (an AnswerOut, the same body POST /messages returns): the turn is saved
+- `error` `{"code", "message", "request_id"}`: a generic message; nothing was saved
+  (`QUESTION_NOT_CURRENT`: another submit of this question won, reload the interview)
+
+Every stream ends with exactly one `done` or `error`. Comment lines (`: ping`) keep an idle connection open.
+Closing the connection before `done` saves nothing: the same question is still current.
+Errors before the stream opens (401, 403, 404, 409, 422) are plain JSON, like POST /messages."""
 
 
 @router.post(
@@ -65,6 +86,30 @@ def answer_question(
     ctrl: InterviewsControllerDep,
 ) -> AnswerOut:
     return ctrl.answer(user, session_id, data)
+
+
+@router.post(
+    "/{session_id}/messages/stream",
+    status_code=status.HTTP_200_OK,
+    response_class=EventSourceResponse,
+    responses={
+        200: {"description": STREAM_DESCRIPTION, "content": {"text/event-stream": {}}},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+    },
+)
+async def answer_question_stream(
+    session_id: uuid.UUID,
+    data: AnswerIn,
+    user: Annotated[User, require_permissions(Permission.interviews_answer)],
+    ctrl: InterviewsControllerDep,
+) -> EventSourceResponse:
+    started_at = time.perf_counter()
+    # The checks (and the sync DB reads) run before the stream opens, so they fail as plain JSON errors.
+    ctx = await run_in_threadpool(ctrl.prepare_answer, user, session_id, data)
+    return EventSourceResponse(
+        sse_frames(ctrl.stream_answer(ctx, started_at=started_at)), ping=STREAM_PING_SECONDS
+    )
 
 
 @router.get(

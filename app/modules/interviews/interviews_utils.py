@@ -2,7 +2,8 @@ import json
 import math
 import random
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
+from contextlib import aclosing
 from itertools import chain, groupby, zip_longest
 from pathlib import Path
 from typing import NamedTuple
@@ -36,7 +37,12 @@ from .interviews_constants import (
     QuestionKind,
 )
 from .interviews_model import InterviewMessage, InterviewQuestion
-from .interviews_schema import BankQuestion, QuestionBank, TranscriptItemOut
+from .interviews_schema import (
+    BankQuestion,
+    QuestionBank,
+    StreamEventOut,
+    TranscriptItemOut,
+)
 
 _bank_adapter = TypeAdapter(QuestionBank)
 
@@ -397,3 +403,16 @@ def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
 def percentile(ordered: Sequence[int], p: int) -> int:
     """Nearest rank: a value that was really measured, which reads better than an interpolated one for few turns."""
     return ordered[max(math.ceil(p / 100 * len(ordered)) - 1, 0)]
+
+
+def sse_frame(event: StreamEventOut) -> dict[str, str]:
+    """One streamed-turn event as the dict sse-starlette encodes: the event name, and its data as one line of JSON."""
+    return {"event": event.event.value, "data": event.data.model_dump_json()}
+
+
+async def sse_frames(events: AsyncGenerator[StreamEventOut]) -> AsyncGenerator[dict[str, str]]:
+    """The controller's events as SSE frames. Closing this (a client that left) closes the turn right away, so its
+    cleanup runs now and not whenever the event loop collects the abandoned generator."""
+    async with aclosing(events):
+        async for event in events:
+            yield sse_frame(event)

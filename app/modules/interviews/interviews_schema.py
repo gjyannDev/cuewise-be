@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
@@ -17,6 +17,8 @@ from .interviews_constants import (
     QuestionCategory,
     QuestionKind,
     SessionStatus,
+    StreamEvent,
+    TurnPhase,
 )
 
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -136,3 +138,40 @@ class TranscriptItemOut(BaseModel):
 class TranscriptOut(BaseModel):
     # Bounded by the 10-question cap and 2 follow-ups each (at most 90 items), so deliberately not paginated.
     items: list[TranscriptItemOut]
+
+
+# --- Streamed answer turn (POST /interviews/{id}/messages/stream): the `data` of each SSE event ---
+# The reaction event's data is a ReactionOut (the same id and text `done` returns), and `done` carries an AnswerOut.
+
+
+class _StreamEventData(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class StatusEventOut(_StreamEventData):
+    phase: TurnPhase
+
+
+class QuestionDeltaOut(_StreamEventData):
+    """The next chunk of the question being written; the client appends it to the text so far."""
+
+    text: str
+
+
+class ResetOut(_StreamEventData):
+    """Discard the question text streamed so far: that draft failed and another one (or a bank question) follows."""
+
+
+class StreamErrorOut(_StreamEventData):
+    """Terminal. A generic message and a code the client can act on; never exception, LLM or answer text."""
+
+    code: str
+    message: str
+    request_id: str | None
+
+
+class StreamEventOut(NamedTuple):
+    """One event of a streamed turn as the controller yields it; the route encodes it as SSE."""
+
+    event: StreamEvent
+    data: BaseModel

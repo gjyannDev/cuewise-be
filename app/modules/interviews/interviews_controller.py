@@ -2,8 +2,12 @@ import logging
 import random
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
+from contextlib import aclosing
 from typing import NamedTuple
+
+import anyio
+from pydantic import BaseModel
 
 from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMError, LLMProvider, LLMResult
@@ -12,6 +16,7 @@ from app.core.errors import (
     QuestionNotCurrentError,
     SessionNotInProgressError,
 )
+from app.core.logging import request_id_ctx
 from app.modules.auth.auth_model import User
 
 from .interviews_constants import (
@@ -27,6 +32,8 @@ from .interviews_constants import (
     QuestionKind,
     QuestionSource,
     SessionStatus,
+    StreamEvent,
+    TurnPhase,
 )
 from .interviews_context import CONTEXT_MANAGER, InterviewerInputs, SummaryInputs
 from .interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
@@ -38,17 +45,29 @@ from .interviews_schema import (
     BankQuestion,
     InterviewCreateIn,
     InterviewOut,
+    QuestionDeltaOut,
     QuestionOut,
     ReactionOut,
+    ResetOut,
     SessionOut,
+    StatusEventOut,
+    StreamErrorOut,
+    StreamEventOut,
     TranscriptOut,
 )
 from .interviews_turn import (
+    ActionKnown,
+    Delta,
     Interviewer,
+    PhaseChanged,
+    Reset,
+    Settled,
     TurnAction,
+    TurnOutcome,
     Written,
     log_llm_call,
     log_result,
+    log_stream_summary,
     log_turn_summary,
     sum_known,
 )
@@ -60,6 +79,9 @@ from .interviews_utils import (
     pick_reaction,
     select_questions,
 )
+
+# Streamed turns that fail after their stream opened: the client gets a generic `error` event, the details land here.
+stream_logger = logging.getLogger("app.errors")
 
 
 class InterviewSetup(NamedTuple):
@@ -81,6 +103,24 @@ class Thread(NamedTuple):
     main_id: uuid.UUID
     main_number: int
     category: QuestionCategory
+
+
+class TurnContext(NamedTuple):
+    """Everything an answer turn needs, read before its LLM calls (the read transaction has ended by then)."""
+
+    # Only used to build the response after the save (its fields reload then).
+    session: InterviewSession
+    setup: InterviewSetup
+    position: int
+    question_id: uuid.UUID
+    history: list[QuestionTurn]
+    thread: Thread
+    last_main: bool
+    used_bank_ids: set[str]
+    stored_next: InterviewQuestion | None
+    previous_reaction: str | None
+    # The candidate's answer, saved with the rest of the turn (its note is filled in by the decide call).
+    answer: InterviewMessage
 
 
 class InterviewsController:
@@ -160,6 +200,18 @@ class InterviewsController:
         )
 
     def answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> AnswerOut:
+        ctx = self.prepare_answer(user, session_id, data)
+        outcome = None
+        if self.uses_interviewer(ctx):
+            assert self.interviewer is not None
+            outcome = self.interviewer.answer_turn(
+                ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
+            )
+        return self.finish_answer(ctx, outcome)
+
+    def prepare_answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> TurnContext:
+        """Every check and read of an answer turn, before any LLM call. Raises the usual errors (404, 409), so a
+        streamed turn fails as plain HTTP before its stream opens. The read transaction is released on return."""
         session = self._owned_session(user, session_id)
         if session.status != SessionStatus.in_progress:
             raise SessionNotInProgressError("This interview is not in progress")
@@ -194,30 +246,70 @@ class InterviewsController:
             else next(q for q in asked if q.id == question.parent_question_id)
         )
         thread = Thread(main.id, main.main_number, QuestionCategory(main.category))
-        last_main = thread.main_number == setup.question_count
-        used_bank_ids = {q.bank_id for q in asked if q.bank_id}
-        # Pre-slice-2 sessions stored every question up front: no LLM, no follow-ups, the stored order.
-        stored_next = self.repo.get_question(session.id, position + 1)
-        previous_reaction = next(
-            (m.content for m in reversed(saved) if m.role == MessageRole.interviewer),
-            None,
-        )
-        answer = InterviewMessage(
-            session_id=session.id,
+        ctx = TurnContext(
+            session=session,
+            setup=setup,
+            position=position,
             question_id=question.id,
-            role=MessageRole.candidate,
-            content=data.answer,
+            history=history,
+            thread=thread,
+            last_main=thread.main_number == setup.question_count,
+            used_bank_ids={q.bank_id for q in asked if q.bank_id},
+            # Pre-slice-2 sessions stored every question up front: no LLM, no follow-ups, the stored order.
+            stored_next=self.repo.get_question(session.id, position + 1),
+            previous_reaction=next(
+                (m.content for m in reversed(saved) if m.role == MessageRole.interviewer),
+                None,
+            ),
+            answer=InterviewMessage(
+                session_id=session.id,
+                question_id=question.id,
+                role=MessageRole.candidate,
+                content=data.answer,
+            ),
         )
         self.repo.release()
+        return ctx
 
+    def uses_interviewer(self, ctx: TurnContext) -> bool:
+        """False when the LLM is off or the session's questions were all stored up front: no decide, no write."""
+        return self.interviewer is not None and ctx.stored_next is None
+
+    def turn_inputs(self, ctx: TurnContext) -> InterviewerInputs:
+        return self._inputs(ctx.setup, ctx.history)
+
+    def completes_without_llm(self, ctx: TurnContext) -> bool:
+        """For a turn that doesn't use the interviewer: a stored next question never completes; otherwise the last
+        main question does."""
+        return ctx.stored_next is None and ctx.last_main
+
+    def choose_reaction(self, ctx: TurnContext, *, completes: bool) -> ReactionOut:
+        """The predefined acknowledgement for moving on (or completing). The id is set here, so it is the same in
+        an early `reaction` event and in the saved row, and the response needs no read of the committed row."""
+        text = pick_reaction(
+            ctx.thread.category,
+            ctx.setup.level,
+            final=completes,
+            previous=ctx.previous_reaction,
+            rng=self.rng,
+        )
+        return ReactionOut(id=uuid.uuid7(), text=text)
+
+    def finish_answer(
+        self, ctx: TurnContext, outcome: TurnOutcome | None, reaction: ReactionOut | None = None
+    ) -> AnswerOut:
+        """Turn the outcome into rows and save the whole turn in one commit. `reaction` is one already picked (and
+        shown) by a streamed turn; otherwise it is picked here. Raises QuestionNotCurrentError on a lost race."""
+        setup, thread, position = ctx.setup, ctx.thread, ctx.position
+        answer = ctx.answer
         new_question: InterviewQuestion | None = None
-        if stored_next is not None:
+        if ctx.stored_next is not None:
             completes = False
             log_turn_summary(setup.session_id, decision="skipped", action=TurnAction.next_question, source="stored")
-        elif self.interviewer is None:
-            completes = last_main
+        elif outcome is None:
+            completes = ctx.last_main
             if not completes:
-                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, used_bank_ids)
+                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, ctx.used_bank_ids)
             log_turn_summary(
                 setup.session_id,
                 decision="skipped",
@@ -225,9 +317,6 @@ class InterviewsController:
                 source="-" if completes else "bank",
             )
         else:
-            outcome = self.interviewer.answer_turn(
-                setup.session_id, self._inputs(setup, history), last_main=last_main
-            )
             answer.note = outcome.note
             completes = outcome.action == TurnAction.complete
             if outcome.action == TurnAction.follow_up and outcome.written is not None:
@@ -249,29 +338,27 @@ class InterviewsController:
                     decision_version=outcome.decision_prompt_version,
                 )
             elif outcome.action == TurnAction.next_question:
-                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, used_bank_ids)
+                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, ctx.used_bank_ids)
 
         follows_up = new_question is not None and new_question.kind == QuestionKind.follow_up
-        reaction, reaction_text, reaction_id = None, "", uuid.uuid7()
         # A follow-up comes straight after the answer; moving on or completing gets the predefined acknowledgement.
-        if not follows_up:
-            reaction_text = pick_reaction(
-                thread.category,
-                setup.level,
-                final=completes,
-                previous=previous_reaction,
-                rng=self.rng,
-            )
-            # The id is set here so the response needs no read of the committed (expired) row.
-            reaction = InterviewMessage(
-                id=reaction_id,
+        if follows_up:
+            reaction = None
+        elif reaction is None:
+            reaction = self.choose_reaction(ctx, completes=completes)
+        reaction_row = (
+            None
+            if reaction is None
+            else InterviewMessage(
+                id=reaction.id,
                 session_id=setup.session_id,
-                question_id=data.question_id,
+                question_id=ctx.question_id,
                 role=MessageRole.interviewer,
-                content=reaction_text,
+                content=reaction.text,
             )
+        )
         if not self.repo.record_turn(
-            answer, reaction, new_question, position, completes=completes
+            answer, reaction_row, new_question, position, completes=completes
         ):
             # Lost a race: another submit of this question, or a newer interview, got there first.
             raise QuestionNotCurrentError(
@@ -279,10 +366,75 @@ class InterviewsController:
             )
 
         return AnswerOut(
-            session=SessionOut.model_validate(session),
-            reaction=None if reaction is None else ReactionOut(id=reaction_id, text=reaction_text),
-            current_question=self._question_out(stored_next or new_question),
+            session=SessionOut.model_validate(ctx.session),
+            reaction=reaction,
+            current_question=self._question_out(ctx.stored_next or new_question),
         )
+
+    async def stream_answer(self, ctx: TurnContext, *, started_at: float) -> AsyncGenerator[StreamEventOut]:
+        """The same turn as `answer`, as events: progress first, then the saved turn in `done`. Every stream ends with
+        exactly one `done` or `error`. Nothing is saved before `done`, so a client that leaves early (its stream is
+        cancelled) leaves the session on the same question. `started_at` is the request's perf_counter time."""
+        terminal, cancelled, first_event_ms = "-", False, None
+        first_token_ms, resets, writing_at = None, 0, None
+        try:
+            yield _event(StreamEvent.status, StatusEventOut(phase=TurnPhase.received))
+            first_event_ms = _elapsed_ms(started_at)
+            reaction, outcome = None, None
+            if self.uses_interviewer(ctx):
+                assert self.interviewer is not None
+                turn = self.interviewer.stream_turn(
+                    ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
+                )
+                async with aclosing(turn) as events:
+                    async for event in events:
+                        match event:
+                            case PhaseChanged(phase=phase):
+                                if phase == TurnPhase.writing:
+                                    writing_at = time.perf_counter()
+                                yield _event(StreamEvent.status, StatusEventOut(phase=phase))
+                            # A reaction is shown before the question it introduces, so only when the action was
+                            # known before writing; a follow-up that fell back gets its reaction in `done` instead.
+                            case ActionKnown(action=action) if action != TurnAction.follow_up and writing_at is None:
+                                reaction = self.choose_reaction(ctx, completes=action == TurnAction.complete)
+                                yield _event(StreamEvent.reaction, reaction)
+                            case Delta(text=text):
+                                if first_token_ms is None and writing_at is not None:
+                                    first_token_ms = _elapsed_ms(writing_at)
+                                yield _event(StreamEvent.question_delta, QuestionDeltaOut(text=text))
+                            case Reset():
+                                resets += 1
+                                yield _event(StreamEvent.reset, ResetOut())
+                            case Settled(outcome=settled):
+                                outcome = settled
+            else:
+                reaction = self.choose_reaction(ctx, completes=self.completes_without_llm(ctx))
+                yield _event(StreamEvent.reaction, reaction)
+            done = await anyio.to_thread.run_sync(self.finish_answer, ctx, outcome, reaction)
+            terminal = StreamEvent.done.value
+            yield _event(StreamEvent.done, done)
+        except QuestionNotCurrentError as exc:
+            # Lost the race to another submit of this question: the other one saved the turn.
+            terminal = exc.code
+            yield _error_event(exc.code, exc.message)
+        except Exception:
+            stream_logger.exception("stream_turn_failed session=%s", ctx.setup.session_id)
+            terminal = "INTERNAL_ERROR"
+            yield _error_event("INTERNAL_ERROR", "An unexpected error occurred")
+        except BaseException:
+            # The client left (the stream was cancelled or closed): nothing was saved.
+            cancelled = True
+            raise
+        finally:
+            log_stream_summary(
+                ctx.setup.session_id,
+                terminal=terminal,
+                first_event_ms=first_event_ms,
+                first_token_ms=first_token_ms,
+                total_ms=_elapsed_ms(started_at),
+                resets=resets,
+                cancelled=cancelled,
+            )
 
     def transcript(self, user: User, session_id: uuid.UUID) -> TranscriptOut:
         session = self._owned_session(user, session_id)
@@ -386,6 +538,22 @@ class InterviewsController:
     @staticmethod
     def _question_out(question: InterviewQuestion | None) -> QuestionOut | None:
         return None if question is None else QuestionOut.model_validate(question)
+
+
+def _event(name: StreamEvent, data: BaseModel) -> StreamEventOut:
+    return StreamEventOut(name, data)
+
+
+def _error_event(code: str, message: str) -> StreamEventOut:
+    request_id = request_id_ctx.get()
+    return _event(
+        StreamEvent.error,
+        StreamErrorOut(code=code, message=message, request_id=None if request_id == "-" else request_id),
+    )
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return round((time.perf_counter() - started_at) * 1000)
 
 
 def _llm_question(

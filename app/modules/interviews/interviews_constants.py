@@ -80,6 +80,25 @@ class MessageKind(StrEnum):
     reaction = "reaction"
 
 
+class TurnPhase(StrEnum):
+    """What a streamed answer turn is doing, sent as `status` events so the candidate never waits on a silent page."""
+
+    received = "received"
+    deciding = "deciding"
+    writing = "writing"
+
+
+class StreamEvent(StrEnum):
+    """The SSE event names of a streamed turn: the contract with the client. `done` and `error` are terminal."""
+
+    status = "status"
+    reaction = "reaction"
+    question_delta = "question.delta"
+    reset = "reset"
+    done = "done"
+    error = "error"
+
+
 # Bank-only role tag: a question tagged "general" is eligible for every JobRole.
 GENERAL_ROLE = "general"
 
@@ -106,6 +125,10 @@ MIN_SECONDS_FOR_WRITE = 5.0
 # Kept back from the decide call for the write call that follows it.
 WRITE_RESERVE_SECONDS = MIN_SECONDS_FOR_WRITE
 
+# --- SSE streaming of an answer turn ---
+# Comment lines sent while a stream is idle, so proxies with idle timeouts keep the connection open.
+STREAM_PING_SECONDS = 15
+
 QUESTION_BANK_PATH = Path(__file__).parent / "data" / "questions.json"
 
 # The prompt file in use. Never edit a shipped version in place: stored replies name it.
@@ -124,6 +147,10 @@ INTERVIEWER_V2_PROMPT_VERSION = "interviewer_v2"
 INTERVIEWER_V3_PROMPT_VERSION = "interviewer_v3"
 # v3 without the note (moved to the decide call) and with a follow-up mode; window_ledger's default since follow-ups.
 INTERVIEWER_V4_PROMPT_VERSION = "interviewer_v4"
+# v4's rules as plain text that can be shown while it streams: a `CATEGORY:` line (main questions only), then the
+# question. Used by the streamed turn only; the JSON turn keeps v4 until the evals compare them.
+INTERVIEWER_V5_PROMPT_VERSION = "interviewer_v5"
+INTERVIEWER_STREAM_TASK = "interviewer_stream"
 DECISION_TASK = "follow_up_decision"
 DECISION_PROMPT_VERSION = "follow_up_decision_v1"
 SUMMARY_PROMPT_VERSION = "job_description_summary_v2"

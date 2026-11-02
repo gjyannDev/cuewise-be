@@ -8,16 +8,26 @@ Every failure has a fallback, so a turn never fails because of the LLM: the cont
 
 import logging
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
+from contextlib import aclosing
 from enum import StrEnum
 from typing import NamedTuple
 
+import anyio
+
 from app.core.ai.context import ContextManager, ContextTooLargeError
-from app.core.ai.provider import LLMError, LLMProvider, LLMResult
+from app.core.ai.provider import (
+    ChatMessage,
+    LLMError,
+    LLMProvider,
+    LLMResult,
+    LLMTimeoutError,
+)
 
 from .interviews_constants import (
     DECIDE_MAX_SECONDS,
     DECISION_TASK,
+    INTERVIEWER_STREAM_TASK,
     INTERVIEWER_TASK,
     MAX_FOLLOW_UPS,
     MAX_REPLY_ATTEMPTS,
@@ -26,6 +36,7 @@ from .interviews_constants import (
     WRITE_RESERVE_SECONDS,
     FollowUpAction,
     QuestionCategory,
+    TurnPhase,
 )
 from .interviews_context import InterviewerInputs
 from .interviews_reply import (
@@ -34,6 +45,8 @@ from .interviews_reply import (
     InvalidReplyError,
     parse_decision_reply,
     parse_interviewer_reply,
+    parse_streamed_reply,
+    split_header,
 )
 from .interviews_utils import thread_start
 
@@ -76,6 +89,59 @@ class TurnOutcome(NamedTuple):
     # Every call of the turn, decide and write.
     results: list[LLMResult]
     decision_prompt_version: str | None
+
+
+class WritePlan(NamedTuple):
+    """What the turn does after the decision, before the write call: shared by the JSON and the streamed turn."""
+
+    action: TurnAction
+    # Why the code overrode the model's decision (cap_reached, no_time), or None.
+    override: str | None
+    # "no_time" when no write call is started; the write's own failure is added later by `settle`.
+    fallback: str | None
+    # The write call's inputs; None when no write call runs (the turn completes, or there is no time).
+    write_inputs: InterviewerInputs | None
+    # A follow-up inherits its main question's category; None in next-question mode.
+    follow_up_category: QuestionCategory | None
+
+
+# --- What a streamed turn yields (Interviewer.stream_turn), in order: deciding, [writing], the action, the outcome ---
+
+
+class PhaseChanged(NamedTuple):
+    phase: TurnPhase
+
+
+class ActionKnown(NamedTuple):
+    """The turn's final action, sent only once nothing can change it (a follow-up only after its write succeeded)."""
+
+    action: TurnAction
+
+
+class Settled(NamedTuple):
+    outcome: TurnOutcome
+
+
+class Delta(NamedTuple):
+    """The next chunk of the question being written (shown as it arrives)."""
+
+    text: str
+
+
+class Reset(NamedTuple):
+    """The question text streamed so far is taken back: that draft failed, another one (or the bank's) follows."""
+
+
+TurnEvent = PhaseChanged | ActionKnown | Delta | Reset | Settled
+
+
+class Draft(NamedTuple):
+    """One streamed write attempt, finished: the category (from its CATEGORY line, or a follow-up's inherited one),
+    the question text without that line, and the call's result."""
+
+    category: QuestionCategory
+    text: str
+    result: LLMResult
 
 
 def apply_limits(
@@ -132,35 +198,236 @@ class Interviewer:
         decision, decide_results, decision_version = self._decide(
             session_id, inputs, deadline
         )
+        plan = self.plan_write(decision, inputs, deadline, last_main=last_main)
+        written = None
+        if plan.write_inputs is not None:
+            written = self._write(
+                session_id, plan.write_inputs, deadline, follow_up_category=plan.follow_up_category
+            )
+        return self.settle(
+            session_id, plan, decision, decide_results, decision_version, written, deadline, last_main=last_main
+        )
+
+    async def stream_turn(
+        self, session_id: uuid.UUID, inputs: InterviewerInputs, *, last_main: bool
+    ) -> AsyncGenerator[TurnEvent]:
+        """The same turn as `answer_turn` (same decide, limits and fallbacks), telling the caller what it is doing
+        and streaming the question as it is written (interviewer_v5). The decide call is blocking, so it runs in a
+        worker thread and the event loop stays free; if the caller stops listening (the client left), it finishes in
+        its thread and its result is dropped. The write call streams, and closing this turn cancels it.
+        """
+        deadline = Deadline(self.clock, self.budget_seconds)
+        yield PhaseChanged(TurnPhase.deciding)
+        decision, decide_results, decision_version = await anyio.to_thread.run_sync(
+            self._decide, session_id, inputs, deadline, abandon_on_cancel=True
+        )
+        plan = self.plan_write(decision, inputs, deadline, last_main=last_main)
+        if plan.action != TurnAction.follow_up:
+            yield ActionKnown(plan.action)
+        written = None
+        if plan.write_inputs is not None:
+            yield PhaseChanged(TurnPhase.writing)
+            write = self._stream_write(
+                session_id, plan.write_inputs, deadline, follow_up_category=plan.follow_up_category
+            )
+            async with aclosing(write) as events:
+                async for event in events:
+                    if isinstance(event, Written):
+                        written = event
+                    else:
+                        yield event
+        outcome = self.settle(
+            session_id, plan, decision, decide_results, decision_version, written, deadline, last_main=last_main
+        )
+        if plan.action == TurnAction.follow_up:
+            yield ActionKnown(outcome.action)
+        yield Settled(outcome)
+
+    async def _stream_write(
+        self,
+        session_id: uuid.UUID,
+        inputs: InterviewerInputs,
+        deadline: Deadline,
+        *,
+        follow_up_category: QuestionCategory | None,
+    ) -> AsyncGenerator[Delta | Reset | Written]:
+        """`_write` for interviewer_v5, streamed: question text as Deltas, then the Written (last). The same attempts
+        and checks; but a draft was already shown, so one that fails is taken back (Reset) before the retry, and a
+        provider failure after some text is retried too (the provider couldn't: it had already sent text).
+        """
+        try:
+            built = self.context.build(INTERVIEWER_STREAM_TASK, inputs)
+        except ContextTooLargeError:
+            log_llm_call(
+                logging.WARNING, session_id, "context_too_large", task=INTERVIEWER_STREAM_TASK, latency_ms=0, attempts=0
+            )
+            yield Written(None, [], None)
+            return
+        version = built.prompt_version
+        earlier = [turn.question for turn in inputs.turns]
+        results: list[LLMResult] = []
+        for attempt in range(1, MAX_REPLY_ATTEMPTS + 1):
+            remaining = deadline.remaining()
+            if attempt > 1 and remaining < MIN_SECONDS_FOR_RETRY:
+                break
+            budget_left_ms = round(remaining * 1000)
+            shown = False
+            attempt_start = self.clock()
+            finished: Draft | None = None
+            try:
+                draft = self._stream_draft(built.messages, remaining, deadline, follow_up_category)
+                async with aclosing(draft) as chunks:
+                    async for item in chunks:
+                        if isinstance(item, Draft):
+                            finished = item
+                        else:
+                            shown = True
+                            yield Delta(item)
+            except LLMError as exc:
+                _log_error(session_id, exc, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
+                if shown:
+                    yield Reset()
+                if exc.after_output:
+                    continue
+                # Before any text, the provider already retried what was worth retrying.
+                break
+            except InvalidReplyError as exc:
+                # A missing or broken CATEGORY line: nothing of it was shown.
+                log_llm_call(
+                    logging.WARNING,
+                    session_id,
+                    f"invalid_reply:{exc.reason}",
+                    task=INTERVIEWER_STREAM_TASK,
+                    prompt_version=version,
+                    latency_ms=0,
+                    attempts=1,
+                    budget_left_ms=budget_left_ms,
+                )
+                continue
+            except BaseException as exc:
+                if isinstance(exc, Exception):
+                    raise
+                # The client left mid-call (closed or cancelled): the call stops, so no more tokens are generated. Its
+                # usage is unknown (it comes at the end of a stream), so the line records that it was cut off.
+                log_llm_call(
+                    logging.INFO,
+                    session_id,
+                    "cancelled",
+                    task=INTERVIEWER_STREAM_TASK,
+                    prompt_version=version,
+                    latency_ms=round((self.clock() - attempt_start) * 1000),
+                    attempts=attempt,
+                    budget_left_ms=budget_left_ms,
+                )
+                raise
+            # `_stream_draft` ends with its Draft unless it raised, and every raise above leaves the attempt.
+            assert finished is not None
+            result = finished.result
+            results.append(result)
+            try:
+                reply = parse_streamed_reply(
+                    finished.text,
+                    interview_type=inputs.interview_type,
+                    earlier_questions=earlier,
+                    category=finished.category,
+                )
+            except InvalidReplyError as exc:
+                log_result(
+                    logging.WARNING,
+                    session_id,
+                    f"invalid_reply:{exc.reason}",
+                    result,
+                    INTERVIEWER_STREAM_TASK,
+                    version,
+                    budget_left_ms,
+                )
+                if shown:
+                    yield Reset()
+                continue
+            log_result(logging.INFO, session_id, "ok", result, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
+            yield Written(reply, results, version)
+            return
+        yield Written(None, results, version)
+
+    async def _stream_draft(
+        self,
+        messages: Sequence[ChatMessage],
+        remaining: float,
+        deadline: Deadline,
+        follow_up_category: QuestionCategory | None,
+    ) -> AsyncGenerator[str | Draft]:
+        """One streamed attempt: the question's text chunks (never the CATEGORY line), then the finished Draft.
+        Raises InvalidReplyError for a bad CATEGORY line before any text, and LLMTimeoutError when the turn's deadline
+        runs out mid-stream."""
+        buffer, category, text = "", follow_up_category, ""
+        result: LLMResult | None = None
+        stream = self.llm.stream(messages, max_tokens=self.max_tokens, budget_seconds=remaining)
+        async with aclosing(stream) as items:
+            async for item in items:
+                if isinstance(item, LLMResult):
+                    result = item
+                    continue
+                if category is None:
+                    buffer += item
+                    split = split_header(buffer)
+                    if split is None:
+                        continue
+                    category, item = split.category, split.text
+                if item:
+                    text += item
+                    yield item
+                if deadline.remaining() <= 0:
+                    exc = LLMTimeoutError("the turn's time ran out mid-question")
+                    exc.after_output = bool(text)
+                    raise exc
+        if category is None:
+            # The reply ended inside its first line.
+            split = split_header(buffer, final=True)
+            assert split is not None
+            category, text = split.category, split.text
+        assert result is not None
+        yield Draft(category, text, result)
+
+    def plan_write(
+        self, decision: Decision | None, inputs: InterviewerInputs, deadline: Deadline, *, last_main: bool
+    ) -> WritePlan:
+        """After the decision: the code's limits pick the action, and whether a write call runs, with which inputs."""
         start = thread_start(inputs.turns)
         follow_ups_left = MAX_FOLLOW_UPS - (len(inputs.turns) - 1 - start)
         action, override = apply_limits(
             decision, follow_ups_left, deadline.remaining(), last_main=last_main
         )
+        if action == TurnAction.complete:
+            return WritePlan(action, override, None, None, None)
+        if deadline.remaining() < MIN_SECONDS_FOR_WRITE:
+            return WritePlan(action, override, "no_time", None, None)
+        following_up = action == TurnAction.follow_up
+        write_inputs = inputs._replace(
+            mode=FollowUpAction(action),
+            gap=decision.gap if following_up and decision else None,
+        )
+        category = QuestionCategory(inputs.turns[start].category) if following_up else None
+        return WritePlan(action, override, None, write_inputs, category)
 
-        written, fallback = None, None
-        if action != TurnAction.complete:
-            if deadline.remaining() < MIN_SECONDS_FOR_WRITE:
-                fallback = "no_time"
-            else:
-                following_up = action == TurnAction.follow_up
-                write_inputs = inputs._replace(
-                    mode=FollowUpAction(action),
-                    gap=decision.gap if following_up and decision else None,
-                )
-                category = (
-                    QuestionCategory(inputs.turns[start].category)
-                    if following_up
-                    else None
-                )
-                written = self._write(
-                    session_id, write_inputs, deadline, follow_up_category=category
-                )
-                if written.reply is None:
-                    fallback = "write_failed"
-            if fallback and action == TurnAction.follow_up:
-                # No follow-up after all: move on as if the model had said so.
-                action = TurnAction.complete if last_main else TurnAction.next_question
+    def settle(
+        self,
+        session_id: uuid.UUID,
+        plan: WritePlan,
+        decision: Decision | None,
+        decide_results: list[LLMResult],
+        decision_version: str | None,
+        written: Written | None,
+        deadline: Deadline,
+        *,
+        last_main: bool,
+    ) -> TurnOutcome:
+        """The write's result decides the outcome: a failed follow-up moves on, and the turn's summary line is logged."""
+        action, fallback = plan.action, plan.fallback
+        if written is not None and written.reply is None:
+            fallback = "write_failed"
+        if fallback and action == TurnAction.follow_up:
+            # No follow-up after all: move on as if the model had said so.
+            action = TurnAction.complete if last_main else TurnAction.next_question
 
         results = decide_results + (written.results if written else [])
         source = (
@@ -170,7 +437,7 @@ class Interviewer:
             session_id,
             decision="none" if decision is None else _decision_label(decision),
             action=action,
-            override=override,
+            override=plan.override,
             source=source,
             fallback=fallback,
             llm_ms=round((self.budget_seconds - deadline.remaining()) * 1000),
@@ -477,6 +744,31 @@ def log_turn_summary(
         source,
         fallback or "-",
         llm_ms,
+    )
+
+
+def log_stream_summary(
+    session_id: uuid.UUID,
+    *,
+    terminal: str,
+    first_event_ms: int | None,
+    first_token_ms: int | None,
+    total_ms: int,
+    resets: int,
+    cancelled: bool,
+) -> None:
+    """How a streamed turn felt and ended: time to the first event and to the first question token (from the write
+    call's start), total time, drafts taken back, and whether the client left. Metadata only, never text."""
+    llm_logger.info(
+        "stream_turn_summary session=%s terminal=%s first_event_ms=%s first_token_ms=%s total_ms=%s resets=%s "
+        "cancelled=%s",
+        session_id,
+        terminal,
+        _shown(first_event_ms),
+        _shown(first_token_ms),
+        total_ms,
+        resets,
+        str(cancelled).lower(),
     )
 
 

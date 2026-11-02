@@ -1,10 +1,15 @@
 import json
+from typing import NamedTuple
 
 import pytest
 
 from app.core.ai.fake import FakeProvider
 from app.main import app
-from app.modules.interviews.interviews_constants import DECISION_PROMPT_VERSION, Level, QuestionCategory
+from app.modules.interviews.interviews_constants import (
+    DECISION_PROMPT_VERSION,
+    Level,
+    QuestionCategory,
+)
 from app.modules.interviews.interviews_dependencies import (
     get_bank,
     get_clock,
@@ -80,6 +85,71 @@ def answer(client, auth_header):
     return _answer
 
 
+class StreamedTurn(NamedTuple):
+    status_code: int
+    headers: dict[str, str]
+    # (event name, parsed JSON data) in arrival order; comment lines (heartbeats) are counted, not listed.
+    events: list[tuple[str, dict]]
+    comments: int
+    # The JSON body, for a request that failed before any stream opened.
+    body: dict | None
+
+    def names(self) -> list[str]:
+        return [name for name, _ in self.events]
+
+    def flow(self) -> list[str]:
+        """Event names with each run of question.delta shown once: the shape of the stream, whatever the chunking."""
+        return [name for i, name in enumerate(self.names()) if name != "question.delta" or self.names()[i - 1 : i] != [name]]
+
+    def question(self) -> str:
+        """The streamed question as the client shows it: deltas appended, a reset clearing them."""
+        text = ""
+        for name, data in self.events:
+            text = "" if name == "reset" else text + data["text"] if name == "question.delta" else text
+        return text
+
+    def data(self, name: str) -> list[dict]:
+        return [data for event, data in self.events if event == name]
+
+
+def parse_sse(text: str) -> tuple[list[tuple[str, dict]], int]:
+    """Split a text/event-stream body into (event, data) pairs; returns them and the number of comment frames."""
+    events, comments = [], 0
+    for frame in text.replace("\r\n", "\n").split("\n\n"):
+        lines = [line for line in frame.split("\n") if line]
+        if not lines:
+            continue
+        if all(line.startswith(":") for line in lines):
+            comments += 1
+            continue
+        fields = dict(line.split(": ", 1) for line in lines if not line.startswith(":"))
+        events.append((fields.get("event", "message"), json.loads(fields["data"])))
+    return events, comments
+
+
+@pytest.fixture
+def stream_answer(client, auth_header):
+    """POST an answer to the streaming endpoint and read the whole stream (or the JSON error that replaced it)."""
+
+    def _stream(user, session_id, question_id, text="I built a prototype to compare both options.", **overrides):
+        body = {"question_id": str(question_id), "answer": text} | overrides
+        with client.stream(
+            "POST",
+            f"/api/v1/interviews/{session_id}/messages/stream",
+            json=body,
+            headers=auth_header(user),
+        ) as response:
+            raw = response.read().decode()
+            headers = dict(response.headers)
+            status = response.status_code
+        if headers.get("content-type", "").startswith("text/event-stream"):
+            events, comments = parse_sse(raw)
+            return StreamedTurn(status, headers, events, comments, None)
+        return StreamedTurn(status, headers, [], 0, json.loads(raw))
+
+    return _stream
+
+
 @pytest.fixture
 def llm():
     """Swap the LLM for a scripted fake: `llm.script(...)` queues replies/errors; `llm.fake.calls` records inputs.
@@ -96,11 +166,11 @@ def llm():
         return _reply_json(f"Generated question number {next(counter)}?", "behavioral")
 
     class _LLM:
-        fake = FakeProvider(default=unique_question)
+        fake = FakeProvider(default=unique_question, stream_format=as_v5_text)
         decide = FakeProvider(default=_decision_json())
 
         def script(self, *replies, on_call=None):
-            self.fake = FakeProvider(replies, on_call=on_call, default=unique_question)
+            self.fake = FakeProvider(replies, on_call=on_call, default=unique_question, stream_format=as_v5_text)
             return self.fake
 
         def script_decide(self, *replies, on_call=None, default=None):
@@ -114,7 +184,14 @@ def llm():
             fake = self.decide if _DECISION_MARKER in messages[0].content else self.fake
             return fake.complete(messages, **kwargs)
 
+        # Only write calls stream (the streamed turn's interviewer_v5); they share the write fake's script.
+        def stream(self, messages, **kwargs):
+            return self.fake.stream(messages, **kwargs)
+
         def close(self) -> None:
+            pass
+
+        async def aclose(self) -> None:
             pass
 
     handle = _LLM()
@@ -125,6 +202,18 @@ def llm():
 
 # A phrase only the decide prompt has (its role line, before the first placeholder), read from the prompt file.
 _DECISION_MARKER = load_prompt(DECISION_PROMPT_VERSION).splitlines()[1].split("{{")[0]
+
+
+def as_v5_text(reply: str) -> str:
+    """A write reply scripted in v4's JSON, as interviewer_v5 streams it (a CATEGORY line for main questions, then the
+    text). Anything else (broken JSON, plain text) streams unchanged, so an invalid script stays invalid."""
+    try:
+        data = json.loads(reply)
+    except ValueError:
+        return reply
+    if not isinstance(data, dict) or not isinstance(data.get("question"), str) or set(data) - {"question", "category"}:
+        return reply
+    return f"CATEGORY: {data['category']}\n{data['question']}" if "category" in data else data["question"]
 
 
 def _decision_json(action="next_question", gap=None, note=None) -> str:
@@ -167,3 +256,9 @@ def clock():
     app.dependency_overrides[get_clock] = lambda: fake
     yield fake
     app.dependency_overrides.pop(get_clock, None)
+
+
+@pytest.fixture
+def anyio_backend():
+    """Async tests (`pytest.mark.anyio`, anyio's own pytest plugin) run on asyncio only, like the app."""
+    return "asyncio"

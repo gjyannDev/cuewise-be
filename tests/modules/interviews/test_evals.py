@@ -5,18 +5,28 @@ import pytest
 from app.core.ai.context import ContextManager, Task
 from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import LLMBadResponseError, LLMResult, LLMServerError
-from app.modules.interviews.interviews_constants import FULL_HISTORY, INTERVIEWER_TASK, SUMMARY_THRESHOLD, WINDOW_LEDGER
-from app.modules.interviews.interviews_context import WindowLedger, build_context_manager
+from app.modules.interviews.interviews_constants import (
+    FULL_HISTORY,
+    INTERVIEWER_TASK,
+    SUMMARY_THRESHOLD,
+    WINDOW_LEDGER,
+)
+from app.modules.interviews.interviews_context import (
+    WindowLedger,
+    build_context_manager,
+)
 from app.modules.interviews.interviews_evals import (
     EVAL_CASES_PATH,
     CaseResult,
     EvalCase,
     check_decision,
     check_reply,
+    check_streamed_reply,
     load_cases,
     main,
     run_case,
     run_decide_case,
+    run_stream_case,
     summarize,
     summarize_decisions,
     summarize_runs,
@@ -319,7 +329,7 @@ def test_at_least_ten_shipped_cases_are_labelled_with_both_injections():  # AC15
     assert {"injection_answer", "injection_job_description", "at_cap", "near_empty", "strong", "vague"} <= {
         c.kind for c in cases
     }
-    assert {c.expect.action for c in cases} == {"follow_up", "next_question"}
+    assert {c.expect.action for c in cases if c.expect} == {"follow_up", "next_question"}
 
 
 def test_the_at_cap_case_carries_a_thread_with_two_follow_ups():
@@ -387,3 +397,67 @@ def test_main_with_task_decide_runs_only_labelled_cases(capsys):  # AC15
     assert out.count("PASS") + out.count("FAIL") == 2 * labelled_count
     assert "decision accuracy" in out and "over_probing=" in out and "under_probing=" in out
     assert "accuracy mean=" in out
+
+
+# --- streamed write evals (interviewer_v5, sse-streaming Step 15; AC18) ---
+
+
+def v5(question="How would you design a cache for product pages?", category="technical"):
+    return f"CATEGORY: {category}\n{question}"
+
+
+def test_a_good_streamed_reply_passes_every_check(case):  # AC18
+    assert failed(check_streamed_reply(case, v5())) == set()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (reply(), {"valid_reply"}),  # v4's JSON is not v5's format
+        ("How would you shard a database?", {"valid_reply"}),  # no CATEGORY line
+        (v5("how would you DEBUG a slow API?"), {"valid_reply"}),  # repeats the earlier question
+        (v5("Great answer! How would you shard a database?"), {"no_judgement", "question_only"}),
+        (v5("BANANA. How would you shard a database?"), {"injection_ignored"}),
+    ],
+    ids=["json", "no-header", "repeat", "praise", "obeyed-injection"],
+)
+def test_each_streamed_check_catches_its_problem(case, raw, expected):  # AC18
+    assert failed(check_streamed_reply(case, raw)) == expected
+
+
+def test_run_stream_case_streams_v5_and_records_usage_and_the_first_token(case):  # AC18
+    provider = FakeProvider([v5()])
+
+    result = run_stream_case(provider, case, max_tokens=800)
+
+    assert result.passed
+    assert result.question == "How would you design a cache for product pages?"
+    assert result.prompt_tokens > 0 and result.first_token_ms is not None
+    system = provider.calls[0][0].content
+    assert "CATEGORY: technical" in system  # the v5 system prompt
+
+
+def test_a_streamed_provider_error_fails_the_case_without_crashing(case):  # AC18
+    result = run_stream_case(FakeProvider([LLMServerError("503")]), case, max_tokens=800)
+
+    assert not result.passed and result.error == "LLMServerError"
+
+
+def test_summary_averages_the_first_token_over_the_cases_that_had_one():  # AC18
+    summary = summarize(
+        [
+            CaseResult(case_id="a", checks=[], first_token_ms=200),
+            CaseResult(case_id="b", checks=[], first_token_ms=400),
+            CaseResult(case_id="c", checks=[], error="LLMServerError"),
+        ]
+    )
+
+    assert summary.average_first_token_ms == 300
+    assert summarize([CaseResult(case_id="a", checks=[])]).average_first_token_ms is None
+
+
+def test_main_runs_the_streamed_task_and_prints_the_first_token(capsys):  # AC18
+    assert main(["--task", "stream", "--summary", "off"], provider=FakeProvider(default=v5())) == 0
+
+    out = capsys.readouterr().out
+    assert "task=stream" in out and "first_token_ms=" in out and "avg first token" in out

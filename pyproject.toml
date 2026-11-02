@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.16.1",
     "pyjwt>=2.15.1",
     "sqlalchemy>=2.1.6",
+    "sse-starlette>=3.6.0",
 ]
 
 [dependency-groups]

@@ -25,6 +25,10 @@ from .interviews_utils import APP_TAG
 # One optional ```json fence around the whole reply; anything before or after it makes the reply invalid.
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 _QUESTION_MARKS = ("?", "？")
+# interviewer_v5's first line in next-question mode. "CATEGORY: behavioral" is 20 characters; a longer first line
+# with no newline yet is question text, not a header.
+_HEADER = re.compile(r"^\s*category\s*:\s*(\w+)\s*$", re.IGNORECASE)
+_HEADER_MAX_LENGTH = 32
 
 
 class InvalidReplyError(Exception):
@@ -79,12 +83,7 @@ def parse_interviewer_reply(
     except ValidationError as exc:
         raise InvalidReplyError("schema") from exc
 
-    if sum(reply.question.count(mark) for mark in _QUESTION_MARKS) > 1:
-        raise InvalidReplyError("multiple_questions")
-    if interview_type != InterviewType.mixed and category != QuestionCategory(interview_type):
-        raise InvalidReplyError("category")
-    if _normalized(reply.question) in {_normalized(q) for q in earlier_questions}:
-        raise InvalidReplyError("repeat")
+    _check_question(reply.question, category, interview_type, earlier_questions)
 
     if reply.note is None:
         return InterviewerReply(reply.question, category)
@@ -92,6 +91,62 @@ def parse_interviewer_reply(
         return InterviewerReply(reply.question, category, note=validate_note(reply.note))
     except InvalidReplyError as exc:
         return InterviewerReply(reply.question, category, note_dropped=exc.reason)
+
+
+class HeaderSplit(NamedTuple):
+    category: QuestionCategory
+    # The question text after the header line, so far.
+    text: str
+
+
+def split_header(buffer: str, *, final: bool = False) -> HeaderSplit | None:
+    """interviewer_v5's `CATEGORY: <value>` first line (next-question mode), read before any text is shown.
+
+    `buffer` is every chunk so far. None while the line isn't complete; `final` = the reply ended, so its end ends the
+    line. Raises InvalidReplyError("header") as soon as the first line can't be a header, so no text of a reply
+    without one is ever streamed.
+    """
+    end = buffer.find("\n")
+    if end < 0 and not final:
+        if len(buffer.lstrip()) > _HEADER_MAX_LENGTH:
+            raise InvalidReplyError("header")
+        return None
+    line, rest = (buffer, "") if end < 0 else (buffer[:end], buffer[end + 1 :])
+    match = _HEADER.match(line)
+    if match is None or match.group(1).lower() not in set(QuestionCategory):
+        raise InvalidReplyError("header")
+    return HeaderSplit(QuestionCategory(match.group(1).lower()), rest.lstrip())
+
+
+def parse_streamed_reply(
+    text: str,
+    *,
+    interview_type: InterviewType,
+    earlier_questions: Sequence[str],
+    # From the header (next-question mode) or the main question's (a follow-up inherits it).
+    category: QuestionCategory,
+) -> InterviewerReply:
+    """interviewer_v5's finished question text, checked like a v4 reply. It was already shown while it streamed, so a
+    reply that fails here is taken back (a `reset` event) by the caller."""
+    question = text.strip()
+    if question.startswith(("{", "```")):
+        raise InvalidReplyError("not_text")
+    if not question or len(question) > MAX_QUESTION_LENGTH:
+        raise InvalidReplyError("schema")
+    _check_question(question, category, interview_type, earlier_questions)
+    return InterviewerReply(question, category)
+
+
+def _check_question(
+    question: str, category: QuestionCategory, interview_type: InterviewType, earlier_questions: Sequence[str]
+) -> None:
+    """The rules every written question must pass, whatever format it came in."""
+    if sum(question.count(mark) for mark in _QUESTION_MARKS) > 1:
+        raise InvalidReplyError("multiple_questions")
+    if interview_type != InterviewType.mixed and category != QuestionCategory(interview_type):
+        raise InvalidReplyError("category")
+    if _normalized(question) in {_normalized(q) for q in earlier_questions}:
+        raise InvalidReplyError("repeat")
 
 
 def _normalized(question: str) -> str:

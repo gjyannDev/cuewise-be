@@ -6,6 +6,8 @@ is today's send-everything payload, never trimmed: the honest baseline and the f
 `job_description_summary` condenses a long job description once, at interview start.
 `follow_up_decision` judges the latest answer within its thread (the main question and its follow-ups): follow up or
 move on. Both it and window_ledger keep the current thread whole.
+`interviewer_stream` is the streamed turn's write call: window_ledger on interviewer_v5, whose plain-text reply can be
+shown while it streams.
 """
 
 import json
@@ -20,8 +22,10 @@ from .interviews_constants import (
     DECISION_TASK,
     FULL_HISTORY,
     INTERVIEWER_PROMPT_VERSION,
+    INTERVIEWER_STREAM_TASK,
     INTERVIEWER_TASK,
     INTERVIEWER_V4_PROMPT_VERSION,
+    INTERVIEWER_V5_PROMPT_VERSION,
     MAX_FOLLOW_UPS,
     SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
@@ -114,12 +118,15 @@ class WindowLedger:
         window: int = WINDOW_TURNS,
         cap: int = WINDOW_ANSWER_CAP,
         limit: int | None = WINDOW_INPUT_LIMIT,
+        # Earlier questions are replayed in the format the prompt asks for: JSON (v2-v4), or v5's streamable text.
+        text_replies: bool = False,
     ):
         self.version = version
         self.template = load_prompt(version)
         self.window = window
         self.cap = cap
         self.limit = limit
+        self.text_replies = text_replies
 
     def droppable(self, inputs: InterviewerInputs) -> int:
         # Everything older than the current thread: the model must see the whole thread it is writing for.
@@ -148,11 +155,7 @@ class WindowLedger:
             answer = neutralize_app_tags(turn.answer)
             if i != len(turns) - 1 and len(answer) > self.cap:
                 answer = answer[: self.cap] + TRUNCATION_MARKER
-            replay = {"question": turn.question}
-            # A follow-up was written without a category (it inherits its main question's).
-            if turn.kind == QuestionKind.main:
-                replay["category"] = turn.category
-            messages.append(ChatMessage(role="assistant", content=json.dumps(replay)))
+            messages.append(ChatMessage(role="assistant", content=self._replay(turn)))
             messages.append(ChatMessage(role="user", content=answer))
         if numbered:
             status = self._status(inputs, numbered[-1][0], ledger)
@@ -166,6 +169,17 @@ class WindowLedger:
             self.version,
             _counts(len(recent), len(ledger), notes, inputs.summary_used),
         )
+
+    def _replay(self, turn: QuestionTurn) -> str:
+        """An earlier question as the model would have written it. A follow-up was written without a category (it
+        inherits its main question's)."""
+        main = turn.kind == QuestionKind.main
+        if self.text_replies:
+            return f"CATEGORY: {turn.category}\n{turn.question}" if main else turn.question
+        replay = {"question": turn.question}
+        if main:
+            replay["category"] = turn.category
+        return json.dumps(replay)
 
     @staticmethod
     def _status(
@@ -284,6 +298,11 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
                 },
             ),
             DECISION_TASK: Task(default=DECIDE, strategies={DECIDE: FollowUpDecision()}),
+            # The streamed turn's write call (v5, shown while it streams); its own task keeps v4's cache prefix intact.
+            INTERVIEWER_STREAM_TASK: Task(
+                default=WINDOW_LEDGER,
+                strategies={WINDOW_LEDGER: WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True)},
+            ),
             SUMMARY_TASK: Task(
                 default=SUMMARY, strategies={SUMMARY: JobDescriptionSummary()}
             ),
