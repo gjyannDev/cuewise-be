@@ -4,6 +4,12 @@ import os
 # Tests must not depend on a developer's .env; engine creation doesn't connect.
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@localhost:5432/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-" + "x" * 64)
+# Nor on their real LLM config (from the shell or .env): an env var beats .env, so blank ones switch it off. Live tests
+# (LLM_LIVE_TEST=1) keep the configured provider list.
+for _name in ("OPENROUTER_API_KEY", "LLM_MODEL", "LLM_BASE_URL"):
+    os.environ[_name] = ""
+if os.getenv("LLM_LIVE_TEST") != "1":
+    os.environ["LLM_PROVIDERS"] = ""
 
 import pytest
 from fastapi import APIRouter

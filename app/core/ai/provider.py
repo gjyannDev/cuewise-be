@@ -3,7 +3,7 @@
 Nothing here knows about HTTP or a vendor, so a controller can handle "the LLM failed" without importing httpx.
 """
 
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -51,6 +51,8 @@ class LLMError(Exception):
         # Filled in by the provider once it stops trying, so callers can log them.
         self.attempts = 1
         self.latency_ms = 0
+        # Streaming only: text had already been yielded when this happened, so it was not retried.
+        self.after_output = False
 
 
 class LLMTimeoutError(LLMError):
@@ -87,4 +89,23 @@ class LLMProvider(Protocol):
         reasoning_effort: ReasoningEffort | None = None,
     ) -> LLMResult: ...
 
+    def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int,
+        temperature: float | None = None,
+        budget_seconds: float | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
+    ) -> AsyncGenerator[str | LLMResult]:
+        """The reply as it is generated: text chunks, then one final LLMResult (the joined text, usage, timing).
+
+        Retries (and, later, switching to a fallback provider) may only happen before the first chunk: the caller
+        may already have shown it. After that, a failure raises an LLMError with `after_output` set. Closing the
+        iterator early cancels the call.
+        """
+        ...
+
     def close(self) -> None: ...
+
+    async def aclose(self) -> None: ...

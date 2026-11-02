@@ -1,10 +1,11 @@
 import logging
+import os
 
 import pytest
 
 from app.core.ai.factory import build_provider
 from app.core.ai.fake import FakeProvider
-from app.core.ai.openrouter import OpenRouterProvider
+from app.core.ai.openai_compatible import OpenAICompatibleProvider
 from app.core.ai.provider import ChatMessage, LLMResult, LLMTimeoutError
 from app.core.config import Settings
 
@@ -12,8 +13,9 @@ from app.core.config import Settings
 @pytest.fixture
 def settings_with(monkeypatch):
     def _settings(**env):
-        for name in ("OPENROUTER_API_KEY", "LLM_MODEL"):
-            monkeypatch.delenv(name, raising=False)
+        for name in list(os.environ):
+            if name.upper().startswith(("LLM_", "OPENROUTER_")):
+                monkeypatch.delenv(name, raising=False)
         for name, value in env.items():
             monkeypatch.setenv(name, value)
         return Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
@@ -30,12 +32,29 @@ def test_no_key_and_model_means_no_provider_and_one_warning(settings_with, app_l
     assert "questions will come from the question bank" in warning.getMessage()
 
 
-def test_key_and_model_build_the_openrouter_provider(settings_with, app_logs):  # AC13, AC16
-    provider = build_provider(settings_with(OPENROUTER_API_KEY="test-key-123", LLM_MODEL="vendor/model-x"))
+GOOGLE = {
+    "LLM_PROVIDERS": "google",
+    "LLM_GOOGLE_API_KEY": "test-key-123",
+    "LLM_GOOGLE_MODEL": "vendor/model-x",
+    "LLM_GOOGLE_BASE_URL": "https://google.test/v1beta/openai/",
+}
 
-    assert isinstance(provider, OpenRouterProvider)
+
+def test_listed_provider_builds_an_openai_compatible_provider(settings_with, app_logs):  # AC13, AC16, Step 0
+    provider = build_provider(settings_with(**GOOGLE))
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.model == "vendor/model-x"
     assert not [r for r in app_logs.records if r.name == "app.llm"]
     assert all("test-key-123" not in r.getMessage() for r in app_logs.records)
+    provider.close()
+
+
+def test_model_override_replaces_the_primary_providers_model(settings_with):  # evals --model, Step 0
+    provider = build_provider(settings_with(**GOOGLE), model="vendor/other")
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider.model == "vendor/other"
     provider.close()
 
 

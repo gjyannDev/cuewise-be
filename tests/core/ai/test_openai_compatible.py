@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from app.core.ai.openrouter import OpenRouterProvider
+from app.core.ai.openai_compatible import OpenAICompatibleProvider
 from app.core.ai.provider import (
     ChatMessage,
     LLMBadResponseError,
@@ -22,8 +22,13 @@ MESSAGES = [
 ]
 
 
-def completion(content="Nice, a prototype settles it.", finish_reason="stop", usage=True, model="vendor/model-x"):
-    """A chat-completions body in the OpenAI-compatible shape OpenRouter returns."""
+def completion(
+    content: str | None = "Nice, a prototype settles it.",
+    finish_reason="stop",
+    usage=True,
+    model="vendor/model-x",
+):
+    """A chat-completions body in the OpenAI-compatible shape that Google AI Studio, OpenRouter and Groq return."""
     body = {
         "id": "gen-1",
         "model": model,
@@ -68,10 +73,12 @@ def make_provider(clock):
             if isinstance(step, Exception):
                 raise step
             if callable(step):
-                return step(request)
+                response = step(request)
+                assert isinstance(response, httpx.Response)
+                return response
             return step
 
-        provider = OpenRouterProvider(
+        provider = OpenAICompatibleProvider(
             api_key=API_KEY,
             model="vendor/model-x",
             base_url="https://llm.test/api/v1",

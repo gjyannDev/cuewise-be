@@ -1,8 +1,8 @@
-"""Opt-in: real calls to OpenRouter. Costs a tiny amount of money, so it never runs by default.
+"""Opt-in: real calls to the configured (primary) LLM provider. Costs real calls, so it never runs by default.
 
 Run it with:  LLM_LIVE_TEST=1 uv run pytest tests/live -q -s
-(needs OPENROUTER_API_KEY and LLM_MODEL in .env). It confirms the response-shape assumptions in the spec and that the
-configured model can follow the interviewer's JSON contract.
+(needs LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env). It confirms the response-shape assumptions in
+the spec and that the configured model can follow the interviewer's JSON contract.
 """
 
 import os
@@ -13,11 +13,15 @@ from app.core.ai.factory import build_provider
 from app.core.config import settings
 from app.modules.interviews.interviews_constants import InterviewType, JobRole, Level
 from app.modules.interviews.interviews_reply import parse_interviewer_reply
-from app.modules.interviews.interviews_utils import QuestionTurn, build_interviewer_messages, render_interviewer_prompt
+from app.modules.interviews.interviews_utils import (
+    QuestionTurn,
+    build_interviewer_messages,
+    render_interviewer_prompt,
+)
 
 pytestmark = pytest.mark.skipif(
     os.getenv("LLM_LIVE_TEST") != "1" or not settings.llm_configured,
-    reason="real LLM call: set LLM_LIVE_TEST=1 and configure OPENROUTER_API_KEY + LLM_MODEL",
+    reason="real LLM call: set LLM_LIVE_TEST=1 and configure LLM_PROVIDERS + its LLM_<VENDOR>_* settings",
 )
 
 

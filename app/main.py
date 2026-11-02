@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if provider is not None:
             provider.close()
+            await provider.aclose()
 
 
 app = FastAPI(title="Cuewise API", version="1.0.0", lifespan=lifespan)
