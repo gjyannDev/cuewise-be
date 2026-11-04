@@ -1,7 +1,6 @@
-"""OpenAI-compatible chat completions over plain httpx (Google AI Studio, OpenRouter, Groq, ...). The only module that
-imports httpx.
+"""OpenAI-compatible chat completions over plain httpx (Google AI Studio, OpenRouter, Groq, ...).
 
-Deliberately no SDK: the request body, the response shape and the retry rules are all visible here.
+Deliberately no SDK: the request body and the response shape are all visible here; the retry rules are in `retry.py`.
 """
 
 import json
@@ -17,15 +16,13 @@ from .provider import (
     ChatMessage,
     LLMBadResponseError,
     LLMError,
-    LLMRateLimitError,
-    LLMRequestError,
     LLMResult,
     LLMServerError,
     LLMTimeoutError,
     ReasoningEffort,
 )
+from .retry import raise_for_status, retry_delay
 
-BACKOFF_BASE_SECONDS = 0.5
 # The SSE line prefix of a streamed chunk, and the sentinel that ends the stream.
 _DATA = "data:"
 _DONE = "[DONE]"
@@ -166,13 +163,14 @@ class OpenAICompatibleProvider:
 
     def _retry_delay(self, exc: LLMError, attempt: int, start: float, budget: float) -> float | None:
         """How long to wait before retrying, or None to give up."""
-        if not exc.retryable or attempt > self._max_retries:
-            return None
-        delay = self._backoff(attempt)
-        # Give up rather than start a retry the user would wait for past the budget.
-        if self._clock() - start + delay >= budget:
-            return None
-        return delay
+        return retry_delay(
+            exc,
+            attempt=attempt,
+            max_retries=self._max_retries,
+            elapsed=self._clock() - start,
+            budget=budget,
+            rng=self._rng,
+        )
 
     def _attempt(self, body: dict[str, Any], *, remaining: float) -> LLMResult:
         try:
@@ -182,7 +180,7 @@ class OpenAICompatibleProvider:
             raise LLMTimeoutError("LLM request timed out") from exc
         except httpx.TransportError as exc:
             raise LLMServerError("LLM connection failed") from exc
-        _raise_for_status(response.status_code)
+        raise_for_status(response.status_code)
         return self._parse(response)
 
     async def _stream_attempt(
@@ -198,7 +196,7 @@ class OpenAICompatibleProvider:
             async with self._async_client.stream("POST", "chat/completions", json=body, timeout=timeout) as response:
                 if response.status_code != 200:
                     await response.aread()
-                    _raise_for_status(response.status_code)
+                    raise_for_status(response.status_code)
                 async for line in response.aiter_lines():
                     if not line.startswith(_DATA):
                         continue  # blank separators and SSE comments (keep-alives)
@@ -211,7 +209,7 @@ class OpenAICompatibleProvider:
                         raise LLMBadResponseError("LLM stream sent a malformed chunk") from exc
                     if "error" in data:
                         # An error that arrived after the 200: the status line can't carry it any more.
-                        _raise_for_status(_int_or_none((data["error"] or {}).get("code")) or 500)
+                        raise_for_status(_int_or_none((data["error"] or {}).get("code")) or 500)
                     model = data.get("model") or model
                     usage = data.get("usage") or usage
                     for choice in data.get("choices") or []:
@@ -253,22 +251,8 @@ class OpenAICompatibleProvider:
             **_usage(data.get("usage") or {}),
         )
 
-    def _backoff(self, attempt: int) -> float:
-        # Exponential (0.5s, 1s, 2s, ...) plus jitter, so many clients don't retry in lockstep.
-        delay = BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
-        return delay + self._rng.uniform(0, delay / 2)
-
     def _elapsed_ms(self, start: float) -> int:
         return round((self._clock() - start) * 1000)
-
-
-def _raise_for_status(status: int) -> None:
-    if status == 429:
-        raise LLMRateLimitError("LLM rate limited", status_code=status)
-    if status >= 500:
-        raise LLMServerError("LLM provider error", status_code=status)
-    if status != 200:
-        raise LLMRequestError("LLM request rejected", status_code=status)
 
 
 def _usage(usage: dict[str, Any]) -> dict[str, int | None]:
