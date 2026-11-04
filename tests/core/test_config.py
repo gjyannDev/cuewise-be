@@ -265,3 +265,73 @@ def test_env_example_lists_langfuse_and_app_env():  # AC14
 
     for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL", "APP_ENV"):
         assert name in text
+
+
+@pytest.fixture
+def no_stt_env(monkeypatch):
+    """Settings without a developer's real Deepgram key or transcription limits."""
+    for name in list(os.environ):
+        if name.upper().startswith(("DEEPGRAM_", "TRANSCRIPTION_")):
+            monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def test_transcription_is_off_without_a_key_with_documented_defaults(no_stt_env):  # voice AC6, EC22
+    s = _settings()
+
+    assert s.deepgram_api_key is None
+    assert s.transcription_configured is False
+    assert (s.deepgram_model, s.deepgram_base_url) == ("nova-3", "https://api.deepgram.com/")
+    assert (s.transcription_timeout_seconds, s.transcription_max_retries, s.transcription_total_budget_seconds) == (
+        15,
+        1,
+        20,
+    )
+
+
+def test_a_blank_deepgram_key_counts_as_unset(no_stt_env):  # EC22: .env.example ships it blank
+    no_stt_env.setenv("DEEPGRAM_API_KEY", "  ")
+
+    assert _settings().transcription_configured is False
+
+
+def test_a_deepgram_key_turns_transcription_on_and_never_shows(no_stt_env):  # voice AC8, AC9
+    no_stt_env.setenv("DEEPGRAM_API_KEY", "dg-very-secret")
+
+    s = _settings()
+
+    assert s.transcription_configured is True
+    assert "dg-very-secret" not in repr(s)
+    no_stt_env.setenv("TRANSCRIPTION_TIMEOUT_SECONDS", "0")
+    with pytest.raises(ValidationError) as exc:
+        _settings()
+    assert "dg-very-secret" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("TRANSCRIPTION_TIMEOUT_SECONDS", "0"),
+        ("TRANSCRIPTION_MAX_RETRIES", "-1"),
+        ("TRANSCRIPTION_TOTAL_BUDGET_SECONDS", "0"),
+    ],
+)
+def test_transcription_limits_must_be_positive(no_stt_env, name, value):  # inferred: a zero budget disables voice
+    no_stt_env.setenv(name, value)
+
+    with pytest.raises(ValidationError):
+        _settings()
+
+
+def test_env_example_lists_every_transcription_setting():  # voice AC8
+    with open(".env.example", encoding="utf-8") as f:
+        keys = {line.split("=", 1)[0] for line in f if "=" in line and not line.startswith("#")}
+
+    assert {
+        "DEEPGRAM_API_KEY",
+        "DEEPGRAM_MODEL",
+        "DEEPGRAM_BASE_URL",
+        "TRANSCRIPTION_TIMEOUT_SECONDS",
+        "TRANSCRIPTION_MAX_RETRIES",
+        "TRANSCRIPTION_TOTAL_BUDGET_SECONDS",
+    } <= keys

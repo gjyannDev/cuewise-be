@@ -3,7 +3,8 @@ import os
 
 import pytest
 
-from app.core.ai.factory import build_provider
+from app.core.ai.deepgram import DeepgramTranscriber
+from app.core.ai.factory import build_provider, build_transcriber
 from app.core.ai.fake import FakeProvider
 from app.core.ai.openai_compatible import OpenAICompatibleProvider
 from app.core.ai.provider import ChatMessage, LLMResult, LLMTimeoutError
@@ -14,13 +15,37 @@ from app.core.config import Settings
 def settings_with(monkeypatch):
     def _settings(**env):
         for name in list(os.environ):
-            if name.upper().startswith(("LLM_", "OPENROUTER_")):
+            if name.upper().startswith(("LLM_", "OPENROUTER_", "DEEPGRAM_", "TRANSCRIPTION_")):
                 monkeypatch.delenv(name, raising=False)
         for name, value in env.items():
             monkeypatch.setenv(name, value)
         return Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
 
     return _settings
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def test_no_deepgram_key_means_no_transcriber_and_one_warning(settings_with, app_logs):  # voice AC6, EC22
+    assert build_transcriber(settings_with()) is None
+
+    [warning] = [r for r in app_logs.records if r.name == "app.stt"]
+    assert warning.levelno == logging.WARNING
+    assert "voice answers are off" in warning.getMessage()
+
+
+@pytest.mark.anyio
+async def test_a_deepgram_key_builds_a_deepgram_transcriber(settings_with, app_logs):  # voice AC8
+    transcriber = build_transcriber(settings_with(DEEPGRAM_API_KEY="dg-secret-123", DEEPGRAM_MODEL="nova-3-medical"))
+
+    assert isinstance(transcriber, DeepgramTranscriber)
+    assert transcriber.model == "nova-3-medical"
+    assert not [r for r in app_logs.records if r.name == "app.stt"]
+    assert all("dg-secret-123" not in r.getMessage() for r in app_logs.records)
+    await transcriber.aclose()
 
 
 def test_no_key_and_model_means_no_provider_and_one_warning(settings_with, app_logs):  # EC18, AC16

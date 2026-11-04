@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     llm_total_budget_seconds: float = Field(default=30, gt=0)
     llm_max_tokens: int = Field(default=4000, gt=0)
 
+    # Speech-to-text for voice answers (Deepgram). No key = voice answers off; everything else still works.
+    deepgram_api_key: SecretStr | None = None
+    deepgram_model: str = "nova-3"
+    deepgram_base_url: str = "https://api.deepgram.com/"
+    transcription_timeout_seconds: float = Field(default=15, gt=0)
+    transcription_max_retries: int = Field(default=1, ge=0)
+    # Kept under the web app's 25 s forwarder timeout, so a slow transcription fails here with a clean 503.
+    transcription_total_budget_seconds: float = Field(default=20, gt=0)
+
     # Langfuse tracing: both keys set = on, anything less = off (see `langfuse_enabled`).
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
@@ -76,6 +85,7 @@ class Settings(BaseSettings):
         "llm_google_api_key",
         "llm_google_model",
         "llm_google_base_url",
+        "deepgram_api_key",
         "langfuse_public_key",
         "langfuse_secret_key",
         "langfuse_base_url",
@@ -135,6 +145,10 @@ class Settings(BaseSettings):
     @property
     def llm_configured(self) -> bool:
         return bool(self.llm_providers)
+
+    @property
+    def transcription_configured(self) -> bool:
+        return self.deepgram_api_key is not None
 
 
 # Values come from env vars / .env at runtime, which Pyright can't see.

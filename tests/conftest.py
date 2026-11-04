@@ -10,6 +10,8 @@ for _name in ("OPENROUTER_API_KEY", "LLM_MODEL", "LLM_BASE_URL"):
     os.environ[_name] = ""
 if os.getenv("LLM_LIVE_TEST") != "1":
     os.environ["LLM_PROVIDERS"] = ""
+# Same for speech-to-text: tests never call the real Deepgram API.
+os.environ["DEEPGRAM_API_KEY"] = ""
 
 import pytest
 from fastapi import APIRouter

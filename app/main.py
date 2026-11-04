@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
-from app.core.ai.factory import build_provider
+from app.core.ai.factory import build_provider, build_transcriber
 from app.core.ai.tracing import build_tracer
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
@@ -21,14 +21,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # One LLM client for the whole app (connection reuse); None when no key is configured.
     tracer = build_tracer(settings)
     provider = build_provider(settings, tracer=tracer)
+    transcriber = build_transcriber(settings)
     app.state.tracer = tracer
     app.state.llm_provider = provider
+    app.state.transcriber = transcriber
     try:
         yield
     finally:
         if provider is not None:
             provider.close()
             await provider.aclose()
+        if transcriber is not None:
+            await transcriber.aclose()
         # After the provider: its last calls are recorded by now, so this flush sends them too.
         tracer.close()
 

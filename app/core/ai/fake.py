@@ -1,4 +1,4 @@
-"""Test double for LLMProvider: scripted replies or errors, records every call. Never touches the network."""
+"""Test doubles for LLMProvider and Transcriber: scripted replies or errors, record every call. No network."""
 
 import re
 from collections import deque
@@ -9,6 +9,7 @@ import anyio
 
 from .context import CHARS_PER_TOKEN
 from .provider import ChatMessage, LLMError, LLMResult, ReasoningEffort
+from .transcriber import TranscriptionResult
 
 
 class FakeStream(NamedTuple):
@@ -134,3 +135,31 @@ class FakeProvider:
             finish_reason="stop",
             attempts=1,
         )
+
+
+class FakeTranscriber:
+    """Scripted transcripts (text, a full result, or an error), one per call; records each call's audio, type and
+    keyterms."""
+
+    DEFAULT_TEXT = "I would cache the results and invalidate them on write."
+
+    def __init__(self, replies: Iterable[str | TranscriptionResult | LLMError] = (), *, duration: float | None = 12.5):
+        self._replies = deque(replies)
+        self._duration = duration
+        self.calls: list[tuple[bytes, str, tuple[str, ...]]] = []
+
+    async def transcribe(
+        self, audio: bytes, *, content_type: str, keyterms: Sequence[str] = ()
+    ) -> TranscriptionResult:
+        self.calls.append((audio, content_type, tuple(keyterms)))
+        reply = self._replies.popleft() if self._replies else self.DEFAULT_TEXT
+        if isinstance(reply, LLMError):
+            raise reply
+        if isinstance(reply, TranscriptionResult):
+            return reply
+        return TranscriptionResult(
+            text=reply, duration_seconds=self._duration, model="fake-stt", latency_ms=0, attempts=1
+        )
+
+    async def aclose(self) -> None:
+        pass
