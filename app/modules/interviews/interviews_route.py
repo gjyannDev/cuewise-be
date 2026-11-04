@@ -2,7 +2,7 @@ import time
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sse_starlette.sse import EventSourceResponse
 
@@ -11,13 +11,14 @@ from app.modules.auth.auth_constants import Permission
 from app.modules.auth.auth_dependencies import require_permissions
 from app.modules.auth.auth_model import User
 
-from .interviews_constants import STREAM_PING_SECONDS
-from .interviews_dependencies import InterviewsControllerDep
+from .interviews_constants import STREAM_PING_SECONDS, TRANSCRIPTION_MAX_BYTES
+from .interviews_dependencies import InterviewsControllerDep, limit_transcriptions
 from .interviews_schema import (
     AnswerIn,
     AnswerOut,
     InterviewCreateIn,
     InterviewOut,
+    TranscriptionOut,
     TranscriptOut,
 )
 from .interviews_utils import sse_frames
@@ -123,3 +124,31 @@ def get_transcript(
     ctrl: InterviewsControllerDep,
 ) -> TranscriptOut:
     return ctrl.transcript(user, session_id)
+
+
+@router.post(
+    "/{session_id}/transcriptions",
+    status_code=status.HTTP_200_OK,
+    response_model=TranscriptionOut,
+    dependencies=[Depends(limit_transcriptions)],
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
+        415: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def transcribe_answer(
+    session_id: uuid.UUID,
+    audio: UploadFile,
+    user: Annotated[User, require_permissions(Permission.interviews_answer)],
+    ctrl: InterviewsControllerDep,
+) -> TranscriptionOut:
+    """A recorded answer (multipart part `audio`: WebM, OGG, MP4 or WAV, up to 3 MB) as text for the candidate to
+    review. Nothing is saved; the text becomes an answer only if they send it to /messages."""
+    role = await run_in_threadpool(ctrl.prepare_transcription, user, session_id)
+    # One byte past the cap is enough to know it's too large, and the rest is never held in memory.
+    data = await audio.read(TRANSCRIPTION_MAX_BYTES + 1)
+    return await ctrl.transcribe(user, session_id, role, data, audio.content_type or "")

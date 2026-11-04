@@ -3,10 +3,12 @@ from typing import NamedTuple
 
 import pytest
 
-from app.core.ai.fake import FakeProvider
+from app.core.ai.fake import FakeProvider, FakeTranscriber
+from app.core.rate_limit import RateLimiter
 from app.main import app
 from app.modules.interviews.interviews_constants import (
     DECISION_PROMPT_VERSION,
+    TRANSCRIPTIONS_PER_MINUTE,
     Level,
     QuestionCategory,
 )
@@ -14,6 +16,8 @@ from app.modules.interviews.interviews_dependencies import (
     get_bank,
     get_clock,
     get_llm_provider,
+    get_transcriber,
+    get_transcription_limiter,
 )
 from app.modules.interviews.interviews_schema import BankQuestion
 from app.modules.interviews.interviews_utils import load_prompt
@@ -262,3 +266,46 @@ def clock():
 def anyio_backend():
     """Async tests (`pytest.mark.anyio`, anyio's own pytest plugin) run on asyncio only, like the app."""
     return "asyncio"
+
+
+WEBM_AUDIO = b"\x1a\x45\xdf\xa3" + b"\x00" * 256
+
+
+class _Stt:
+    """The speech-to-text seam of a test: a scripted transcriber and a fresh per-test rate limiter."""
+
+    def __init__(self):
+        self.fake: FakeTranscriber | None = FakeTranscriber()
+        self.limiter = RateLimiter(limit=TRANSCRIPTIONS_PER_MINUTE, window_seconds=60)
+
+    def script(self, *replies, duration: float | None = 12.5) -> None:
+        self.fake = FakeTranscriber(replies, duration=duration)
+
+    def disable(self) -> None:
+        """No transcriber configured (DEEPGRAM_API_KEY blank)."""
+        self.fake = None
+
+
+@pytest.fixture
+def stt():
+    state = _Stt()
+    app.dependency_overrides[get_transcriber] = lambda: state.fake
+    app.dependency_overrides[get_transcription_limiter] = lambda: state.limiter
+    yield state
+    app.dependency_overrides.pop(get_transcriber, None)
+    app.dependency_overrides.pop(get_transcription_limiter, None)
+
+
+@pytest.fixture
+def transcribe(client, auth_header, stt):
+    """POST a recording to the transcription endpoint; `audio=None` sends no file part at all."""
+
+    def _transcribe(user, session_id, audio=WEBM_AUDIO, content_type="audio/webm;codecs=opus", headers=None):
+        files = None if audio is None else {"audio": ("answer.webm", audio, content_type)}
+        return client.post(
+            f"/api/v1/interviews/{session_id}/transcriptions",
+            files=files,
+            headers=auth_header(user) if headers is None else headers,
+        )
+
+    return _transcribe

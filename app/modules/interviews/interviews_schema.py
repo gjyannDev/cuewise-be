@@ -140,6 +140,14 @@ class TranscriptOut(BaseModel):
     items: list[TranscriptItemOut]
 
 
+class TranscriptionOut(BaseModel):
+    """POST /interviews/{id}/transcriptions: what the candidate said, for them to review. Not saved as an answer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+
+
 # --- Streamed answer turn (POST /interviews/{id}/messages/stream): the `data` of each SSE event ---
 # The reaction event's data is a ReactionOut (the same id and text `done` returns), and `done` carries an AnswerOut.
 

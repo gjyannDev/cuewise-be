@@ -46,6 +46,32 @@ class QuestionNotCurrentError(ConflictError):
     code = "QUESTION_NOT_CURRENT"
 
 
+class AudioTooLargeError(AppError):
+    status_code, code = 413, "AUDIO_TOO_LARGE"
+
+
+class UnsupportedAudioError(AppError):
+    status_code, code = 415, "UNSUPPORTED_AUDIO"
+
+
+class AudioTooLongError(AppError):
+    status_code, code = 422, "AUDIO_TOO_LONG"
+
+
+class NoSpeechError(AppError):
+    status_code, code = 422, "NO_SPEECH"
+
+
+class RateLimitedError(AppError):
+    """Raise with `headers={"Retry-After": "<seconds>"}`."""
+
+    status_code, code = 429, "RATE_LIMITED"
+
+
+class TranscriptionUnavailableError(AppError):
+    status_code, code = 503, "TRANSCRIPTION_UNAVAILABLE"
+
+
 class UnauthorizedError(AppError):
     status_code, code = 401, "UNAUTHORIZED"
     headers = {"WWW-Authenticate": "Bearer"}

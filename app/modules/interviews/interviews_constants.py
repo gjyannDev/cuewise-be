@@ -99,6 +99,15 @@ class StreamEvent(StrEnum):
     error = "error"
 
 
+class AudioContainer(StrEnum):
+    """Recording containers a voice answer may arrive in (what browsers' MediaRecorder produces, plus WAV)."""
+
+    webm = "webm"
+    ogg = "ogg"
+    mp4 = "mp4"
+    wav = "wav"
+
+
 # Bank-only role tag: a question tagged "general" is eligible for every JobRole.
 GENERAL_ROLE = "general"
 
@@ -128,6 +137,150 @@ WRITE_RESERVE_SECONDS = MIN_SECONDS_FOR_WRITE
 # --- SSE streaming of an answer turn ---
 # Comment lines sent while a stream is idle, so proxies with idle timeouts keep the connection open.
 STREAM_PING_SECONDS = 15
+
+# --- Voice answers (speech-to-text) ---
+# Declared upload type (without codec parameters) -> the container it must really be.
+AUDIO_CONTENT_TYPES = {
+    "audio/webm": AudioContainer.webm,
+    "audio/ogg": AudioContainer.ogg,
+    "audio/mp4": AudioContainer.mp4,
+    "audio/x-m4a": AudioContainer.mp4,
+    "audio/m4a": AudioContainer.mp4,
+    "audio/wav": AudioContainer.wav,
+    "audio/x-wav": AudioContainer.wav,
+    "audio/wave": AudioContainer.wav,
+}
+# Compressed audio can't be measured without decoding, so size bounds a clip (and its cost): 120 s of browser Opus or
+# AAC is about 1-2 MB. The web app also stops recording at 120 s.
+TRANSCRIPTION_MAX_BYTES = 3 * 1024 * 1024
+# Checked against the duration the vendor reports; a little over the web app's 120 s for encoder rounding.
+TRANSCRIPTION_MAX_SECONDS = 125
+TRANSCRIPTIONS_PER_MINUTE = 10
+
+# Terms Deepgram should favour when it transcribes an answer (keyterm prompting, Nova-3). Without them the spike heard
+# "useEffect" as "use event" and "Redis" as "Redix"; keyterms only help the terms listed, so domain phrases are here too.
+# Plain text, no weights; each role's list stays far below Deepgram's 500-token cap.
+SHARED_KEYTERMS = (
+    "API",
+    "REST",
+    "GraphQL",
+    "JSON",
+    "OAuth",
+    "JWT",
+    "CI/CD",
+    "Docker",
+    "Kubernetes",
+    "AWS",
+    "PostgreSQL",
+    "Redis",
+    "TypeScript",
+    "microservices",
+    "row-level security",
+    "QR code",
+    "push notification",
+    "unit tests",
+)
+_ROLE_ONLY_KEYTERMS = {
+    JobRole.frontend: (
+        "React",
+        "useEffect",
+        "useState",
+        "useMemo",
+        "TanStack Query",
+        "Next.js",
+        "Tailwind",
+        "Redux",
+        "Zustand",
+        "Vite",
+        "webpack",
+        "hydration",
+        "server-side rendering",
+        "ARIA",
+        "flexbox",
+        "Core Web Vitals",
+        "Storybook",
+        "Playwright",
+        "Vitest",
+    ),
+    JobRole.backend: (
+        "FastAPI",
+        "Django",
+        "Flask",
+        "Node.js",
+        "Express",
+        "NestJS",
+        "SQLAlchemy",
+        "Alembic",
+        "MySQL",
+        "MongoDB",
+        "Kafka",
+        "RabbitMQ",
+        "Celery",
+        "gRPC",
+        "nginx",
+        "Terraform",
+        "idempotency",
+        "sharding",
+        "N+1 query",
+        "rate limiting",
+    ),
+    JobRole.fullstack: (
+        "React",
+        "useEffect",
+        "TanStack Query",
+        "Next.js",
+        "Tailwind",
+        "Node.js",
+        "Express",
+        "FastAPI",
+        "Prisma",
+        "tRPC",
+        "Supabase",
+        "Vercel",
+        "nginx",
+        "server-side rendering",
+        "rate limiting",
+    ),
+    JobRole.mobile: (
+        "React Native",
+        "Expo",
+        "Flutter",
+        "Swift",
+        "SwiftUI",
+        "Kotlin",
+        "Jetpack Compose",
+        "Xcode",
+        "Android Studio",
+        "TestFlight",
+        "App Store",
+        "Google Play",
+        "Reanimated",
+        "deep link",
+        "offline-first",
+    ),
+    JobRole.data: (
+        "pandas",
+        "NumPy",
+        "PySpark",
+        "Apache Spark",
+        "Airflow",
+        "dbt",
+        "Snowflake",
+        "BigQuery",
+        "Databricks",
+        "ETL",
+        "Kafka",
+        "Parquet",
+        "Jupyter",
+        "scikit-learn",
+        "PyTorch",
+        "data warehouse",
+        "data lake",
+    ),
+}
+ROLE_KEYTERMS: dict[JobRole, tuple[str, ...]] = {
+    role: SHARED_KEYTERMS + terms for role, terms in _ROLE_ONLY_KEYTERMS.items()
+}
 
 QUESTION_BANK_PATH = Path(__file__).parent / "data" / "questions.json"
 

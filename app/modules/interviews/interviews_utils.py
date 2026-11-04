@@ -14,6 +14,7 @@ from app.core.ai.provider import ChatMessage
 from app.core.errors import NotEnoughQuestionsError
 
 from .interviews_constants import (
+    AUDIO_CONTENT_TYPES,
     CLOSING_REACTIONS,
     DECISION_PROMPT_VERSION,
     GENERAL_ROLE,
@@ -28,6 +29,7 @@ from .interviews_constants import (
     SUMMARY_MAX_LENGTH,
     SUMMARY_MAX_WORDS,
     SUMMARY_PROMPT_VERSION,
+    AudioContainer,
     InterviewType,
     JobRole,
     Level,
@@ -416,3 +418,24 @@ async def sse_frames(events: AsyncGenerator[StreamEventOut]) -> AsyncGenerator[d
     async with aclosing(events):
         async for event in events:
             yield sse_frame(event)
+
+
+def _has_signature(container: AudioContainer, head: bytes) -> bool:
+    match container:
+        case AudioContainer.webm:
+            return head[:4] == b"\x1a\x45\xdf\xa3"  # EBML header
+        case AudioContainer.ogg:
+            return head[:4] == b"OggS"
+        case AudioContainer.mp4:
+            return head[4:8] == b"ftyp"
+        case AudioContainer.wav:
+            return head[:4] == b"RIFF" and head[8:12] == b"WAVE"
+
+
+def audio_container(declared_type: str, head: bytes) -> AudioContainer | None:
+    """The container of an uploaded recording, or None when its declared type isn't allowed or its first bytes don't
+    match that type. Checked before anything is sent to the vendor, so junk never costs a transcription."""
+    container = AUDIO_CONTENT_TYPES.get(declared_type.split(";", 1)[0].strip().lower())
+    if container is None or not _has_signature(container, head):
+        return None
+    return container
