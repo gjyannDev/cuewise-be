@@ -22,6 +22,7 @@ LABELS = {"task": "interviewer", "prompt_version": "v3", "budget_left_ms": 12000
 class FakeObservation:
     def __init__(self, client, kwargs):
         self.kwargs, self.updates, self.ended = kwargs, [], 0
+        self.trace_id = "trace-1"
         self._client = client
 
     def update(self, **kwargs):
@@ -45,6 +46,10 @@ class FakeClient:
         self.fail = fail
         self.generations: list[FakeObservation] = []
         self.traces: list[FakeObservation] = []
+        self.scores: list[dict] = []
+        self.datasets: list[dict] = []
+        self.dataset_items: list[dict] = []
+        self.span_updates: list[dict] = []
         self.flushed = self.shut_down = 0
 
     def start_observation(self, **kwargs):
@@ -67,6 +72,26 @@ class FakeClient:
         self.flushed += 1
         if self.fail:
             raise RuntimeError("flush failed")
+
+    def create_score(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("langfuse down")
+        self.scores.append(kwargs)
+
+    def create_dataset(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("langfuse down")
+        self.datasets.append(kwargs)
+
+    def create_dataset_item(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("langfuse down")
+        self.dataset_items.append(kwargs)
+
+    def update_current_span(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("langfuse down")
+        self.span_updates.append(kwargs)
 
     def shutdown(self):
         self.shut_down += 1
@@ -285,6 +310,102 @@ def test_trace_with_a_broken_sdk_still_runs_the_body_and_keeps_its_exception(): 
             raise ValueError("business error")
 
     assert ran == [True]
+
+
+def test_trace_yields_the_trace_id_so_scores_can_attach_to_it(tracer):  # eval-langfuse AC1
+    with tracer.trace("eval-case", user_id="eval", session_id="run-1") as trace_id:
+        assert trace_id == "trace-1"
+
+
+def test_trace_yields_none_when_tracing_is_off_or_broken():  # eval-langfuse AC7, EC1
+    broken = Tracer(FakeClient(fail=True), propagate=lambda **_: contextlib.nullcontext())
+
+    with Tracer(None).trace("eval-case", user_id="eval", session_id="run-1") as off:
+        pass
+    with broken.trace("eval-case", user_id="eval", session_id="run-1") as failed:
+        pass
+
+    assert (off, failed) == (None, None)
+
+
+def test_trace_passes_tags_and_metadata_to_every_observation_under_it(tracer, propagated):  # eval-langfuse AC4
+    with tracer.trace(
+        "eval-case", user_id="eval", session_id="run-1", tags=["prompt:v4"], metadata={"repeat": "1"}
+    ):
+        pass
+
+    assert propagated == [
+        {"user_id": "eval", "session_id": "run-1", "tags": ["prompt:v4"], "metadata": {"repeat": "1"}}
+    ]
+
+
+# --- scores and datasets (eval runs) ----------------------------------------------------------------------------
+
+
+def test_a_check_becomes_a_boolean_score_on_the_trace_with_its_detail(tracer, client):  # eval-langfuse AC1
+    tracer.score("trace-1", "no_judgement", False, comment="great")
+    tracer.score("trace-1", "case_passed", True)
+
+    assert client.scores == [
+        {"trace_id": "trace-1", "name": "no_judgement", "value": 0.0, "data_type": "BOOLEAN", "comment": "great"},
+        {"trace_id": "trace-1", "name": "case_passed", "value": 1.0, "data_type": "BOOLEAN", "comment": None},
+    ]
+
+
+def test_score_makes_no_call_without_a_trace_id_or_when_tracing_is_off(client):  # eval-langfuse AC7
+    Tracer(client).score(None, "case_passed", True)
+    Tracer(None).score("trace-1", "case_passed", True)
+
+    assert client.scores == []
+
+
+def test_score_failure_is_swallowed(app_logs):  # eval-langfuse EC1
+    Tracer(FakeClient(fail=True)).score("trace-1", "case_passed", True)
+
+    [warning] = [r for r in app_logs.records if r.name == "app.llm"]
+    assert "score" in warning.getMessage() and "RuntimeError" in warning.getMessage()
+
+
+def test_the_trace_output_is_set_on_the_current_trace(tracer, client):  # eval-langfuse readable traces
+    with tracer.trace("eval-case", user_id="eval", session_id="run-1"):
+        tracer.set_trace_output({"verdict": "PASS"})
+
+    assert client.span_updates == [{"output": {"verdict": "PASS"}}]
+
+
+def test_setting_the_trace_output_is_a_no_op_when_off_and_never_raises(app_logs):
+    Tracer(None).set_trace_output({"verdict": "PASS"})
+    Tracer(FakeClient(fail=True)).set_trace_output({"verdict": "PASS"})
+
+    [warning] = [r for r in app_logs.records if r.name == "app.llm"]
+    assert "RuntimeError" in warning.getMessage()
+
+
+ITEMS = [
+    {"id": "write:strong-1", "input": {"answer": "a"}, "expected_output": None, "metadata": {"kind": "strong"}},
+    {"id": "write:vague-1", "input": {"answer": "b"}, "expected_output": None, "metadata": {"kind": "vague"}},
+]
+
+
+def test_upsert_dataset_creates_the_dataset_then_each_item_with_its_own_id(tracer, client):  # eval-langfuse AC5, AC6
+    assert tracer.upsert_dataset("interviews-eval/write", ITEMS) is True
+
+    assert [d["name"] for d in client.datasets] == ["interviews-eval/write"]
+    assert [i["id"] for i in client.dataset_items] == ["write:strong-1", "write:vague-1"]
+    assert all(i["dataset_name"] == "interviews-eval/write" for i in client.dataset_items)
+
+
+def test_upserting_twice_sends_the_same_ids_so_nothing_duplicates(tracer, client):  # eval-langfuse AC5
+    tracer.upsert_dataset("interviews-eval/write", ITEMS)
+    tracer.upsert_dataset("interviews-eval/write", ITEMS)
+
+    ids = [i["id"] for i in client.dataset_items]
+    assert ids == ["write:strong-1", "write:vague-1"] * 2
+
+
+def test_upsert_dataset_reports_false_when_off_or_failing_and_never_raises():  # eval-langfuse AC7, EC2
+    assert Tracer(None).upsert_dataset("d", ITEMS) is False
+    assert Tracer(FakeClient(fail=True)).upsert_dataset("d", ITEMS) is False
 
 
 # --- flush / shutdown -------------------------------------------------------------------------------------------

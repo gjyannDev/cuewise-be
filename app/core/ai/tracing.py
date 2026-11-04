@@ -52,7 +52,7 @@ class Generation:
 
     @_safe("generation update")
     def _finish(self, **fields: Any) -> None:
-        if self._done:
+        if self._done or self._obs is None:
             return
         self._done = True
         try:
@@ -119,7 +119,7 @@ class Tracer:
     ):
         self._client = client
         if propagate is None and client is not None:
-            from langfuse import propagate_attributes as propagate  # noqa: PLC0415 - only needed when tracing is on
+            from langfuse import propagate_attributes as propagate
         self._propagate = propagate
 
     @property
@@ -128,30 +128,85 @@ class Tracer:
 
     @contextmanager
     def trace(
-        self, name: str, *, user_id: str, session_id: str, input: Any | None = None
-    ) -> Iterator[None]:
+        self,
+        name: str,
+        *,
+        user_id: str,
+        session_id: str,
+        input: Any | None = None,
+        tags: Sequence[str] | None = None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> Iterator[str | None]:
         """One trace for one request: everything started inside it (the generations) nests under it, and carries the
-        user and interview session. Start/stop failures are swallowed; the body's own exceptions are not."""
+        user and interview session (plus tags and metadata when given). Yields the trace id (None when tracing is
+        off or failed to start) so scores can attach to it. Start/stop failures are swallowed; the body's own
+        exceptions are not."""
         stack = ExitStack()
+        trace_id: str | None = None
         if self._client is not None:
+            attrs: dict[str, Any] = {"user_id": user_id, "session_id": session_id}
+            if tags:
+                attrs["tags"] = list(tags)
+            if metadata:
+                attrs["metadata"] = dict(metadata)
             try:
-                stack.enter_context(
+                span = stack.enter_context(
                     self._client.start_as_current_observation(
                         name=name, as_type="span", input=input
                     )
                 )
-                stack.enter_context(
-                    self._propagate(user_id=user_id, session_id=session_id)
-                )  # type: ignore[misc]
+                trace_id = getattr(span, "trace_id", None)
+                stack.enter_context(self._propagate(**attrs))  # type: ignore[misc]
             except Exception as exc:
                 logger.warning("langfuse trace start failed (%s)", type(exc).__name__)
         try:
-            yield
+            yield trace_id
         finally:
             try:
                 stack.close()
             except Exception as exc:
                 logger.warning("langfuse trace end failed (%s)", type(exc).__name__)
+
+    @_safe("trace output")
+    def set_trace_output(self, output: Any) -> None:
+        """Set the output of the trace being built (call it inside `trace()`): what a reader sees in the trace list."""
+        if self._client is not None:
+            self._client.update_current_span(output=output)
+
+    @_safe("score")
+    def score(
+        self,
+        trace_id: str | None,
+        name: str,
+        value: bool | float,
+        *,
+        comment: str | None = None,
+    ) -> None:
+        """Attach a score to a trace (a bool becomes a Langfuse BOOLEAN). No-op when off or without a trace id."""
+        if self._client is None or trace_id is None:
+            return
+        is_bool = isinstance(value, bool)
+        self._client.create_score(
+            trace_id=trace_id,
+            name=name,
+            value=float(value),
+            data_type="BOOLEAN" if is_bool else "NUMERIC",
+            comment=comment,
+        )
+
+    def upsert_dataset(self, name: str, items: Sequence[Mapping[str, Any]]) -> bool:
+        """Create the dataset if needed and upsert its items (each carries its own `id`, so re-runs never duplicate).
+        Returns whether everything was sent; failures are logged by class name and never raised."""
+        if self._client is None:
+            return False
+        try:
+            self._client.create_dataset(name=name)
+            for item in items:
+                self._client.create_dataset_item(dataset_name=name, **item)
+        except Exception as exc:
+            logger.warning("langfuse dataset upsert failed (%s)", type(exc).__name__)
+            return False
+        return True
 
     def start_generation(
         self, messages: Sequence[ChatMessage], labels: TraceLabels
@@ -193,7 +248,7 @@ def build_tracer(settings: Any, *, environment: str | None = None) -> Tracer:
             )
         return Tracer(None)
     try:
-        from langfuse import Langfuse  # noqa: PLC0415 - imported after settings, so keys come from Settings
+        from langfuse import Langfuse
 
         client = Langfuse(
             public_key=settings.langfuse_public_key.get_secret_value(),

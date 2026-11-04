@@ -16,14 +16,23 @@ runner reports accuracy, over-probing (a follow-up nobody needed) and under-prob
 
 The stream task runs the same write cases through the streamed turn's call (interviewer_v5, read with `stream()`):
 the same rule checks as `write`, so v4 and v5 compare on one table, plus the time to the first visible token.
+
+With LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY set, a run is also sent to Langfuse (environment "eval"): each case is
+one trace in a session named after the run (task/prompt/strategy/model/effort/time), tagged with those same values, and
+every check is a boolean score on it (`case_passed`, plus `over_probing` / `under_probing` for decide). The cases are
+mirrored into the datasets `interviews-eval/write` and `interviews-eval/decide` (ids `write:<case id>`), so re-runs
+replace items instead of duplicating them. In Langfuse, compare runs by filtering traces on a tag (e.g. `prompt:...`)
+and grouping scores. Without keys nothing changes and nothing is sent. A Langfuse failure never fails the run.
 """
 
 import argparse
+import contextvars
 import re
 import sys
 import time
 from collections import Counter
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -33,6 +42,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from app.core.ai.context import ContextManager, ContextTooLargeError
 from app.core.ai.provider import LLMError, LLMProvider, LLMResult, ReasoningEffort
+from app.core.ai.tracing import Tracer
 
 from .interviews_constants import (
     DECISION_TASK,
@@ -68,6 +78,9 @@ from .interviews_reply import (
 from .interviews_utils import QuestionTurn
 
 EVAL_CASES_PATH = Path(__file__).parent / "data" / "eval_cases.json"
+# In Langfuse: the user every eval trace belongs to, and the prefix of the dataset each task's cases are mirrored to.
+EVAL_USER = "eval"
+DATASET_PREFIX = "interviews-eval"
 # Cases this long are printed with their setup, for the manual quality review.
 LONG_HISTORY = 8
 
@@ -436,7 +449,13 @@ def run_stream_case(
     except ContextTooLargeError:
         return usage.model_copy(update={"error": "context_too_large"})
 
+    # The portal runs `read` on its own loop thread with its own context, so carry the caller's over: that is what
+    # keeps the call under this case's Langfuse trace.
+    caller = contextvars.copy_context()
+
     async def read() -> tuple[LLMResult, int | None]:
+        for var, value in caller.items():
+            var.set(value)
         start, first_token_ms, buffer, final = time.perf_counter(), None, "", None
         async for item in provider.stream(built.messages, max_tokens=max_tokens, reasoning_effort=reasoning_effort):
             if isinstance(item, LLMResult):
@@ -570,6 +589,146 @@ def summarize_runs(runs: Sequence[Summary]) -> RunsSummary:
     )
 
 
+def verdict_for(result: CaseResult) -> str:
+    """One line a reader can scan in Langfuse: PASS, FAIL with each failed check and its detail, or ERROR."""
+    if result.error:
+        return f"ERROR: {result.error}"
+    failed = [f"{c.name}({c.detail})" if c.detail else c.name for c in result.checks if not c.passed]
+    return f"FAIL: {', '.join(failed)}" if failed else "PASS"
+
+
+def trace_input(case: EvalCase) -> dict:
+    """What the case judged, for the trace list: its kind, the last question and the candidate's answer (and the job
+    description when there is one, since some cases attack through it)."""
+    last = case.history[-1] if case.history else None
+    shown = {"kind": case.kind, "question": last.question if last else None, "answer": last.answer if last else None}
+    if case.job_description:
+        shown["job_description"] = case.job_description[:300]
+    return shown
+
+
+def _action_and_gap(action: str | None, gap: str | None) -> str | None:
+    return None if action is None else f"{action} / {gap}" if gap else str(action)
+
+
+_ERROR_HINTS = {
+    "context_too_large": "The built context was over the limit, so no call was made: check the strategy and its limits.",
+}
+_PROVIDER_ERROR_HINT = (
+    "The provider call failed, which is not a quality problem: check the provider, key and timeout, then rerun."
+)
+_CHECK_HINTS = {
+    "valid_reply": (
+        "The reply did not parse or repeated an earlier question: read `reply` and the check's detail for the reason."
+    ),
+    "no_judgement": "The question contains praise or a score: look at the prompt's rule against judging the candidate.",
+    "question_only": "The question opens with an acknowledgement; the app adds its own, so the prompt should forbid it.",
+    "injection_ignored": (
+        "The injected marker appeared in the reply: the model followed text that came from the answer or job description."
+    ),
+    "note": "This prompt asks for a note and the reply had none, or it was dropped: read the check's detail.",
+    "gap": (
+        "The action matched but the gap differs. If both gaps fit the answer, the label is ambiguous or two gap "
+        "definitions overlap (fix the case); if not, sharpen the gap definitions in the prompt."
+    ),
+}
+
+
+def hints_for(case: EvalCase, result: CaseResult) -> list[str]:
+    """Where to look first when a case fails: rules of thumb from which check failed, which way a wrong decision
+    went, the case kind and the finish reason. They narrow the search; they are not a diagnosis."""
+    if result.error:
+        return [_ERROR_HINTS.get(result.error, _PROVIDER_ERROR_HINT)]
+    failed = {c.name for c in result.checks if not c.passed}
+    hints = []
+    if result.finish_reason == "length" and failed:
+        hints.append(
+            "The reply was cut off by max_tokens: raise it or lower the reasoning effort before judging the quality."
+        )
+    for name in ("valid_reply", "no_judgement", "question_only", "injection_ignored", "note"):
+        if name in failed:
+            hints.append(_CHECK_HINTS[name])
+    if "decision" in failed and result.decided is not None:
+        over = result.decided == FollowUpAction.follow_up
+        hints.append(
+            "Over-probing: the model asked for more when the label says move on. Is the answer complete, empty, "
+            "off-topic or not an answer? Find the prompt rule for that case and check it covers this one."
+            if over
+            else "Under-probing: the model moved on although the label expects a follow-up. Check the prompt's gap "
+            "definitions and its 'when unsure, prefer next_question' rule."
+        )
+        if over and case.kind.startswith("injection"):
+            hints.append(
+                "This is an injection case: compare `reply.note` with the real answer. If the note describes things "
+                "the candidate never said, the model invented an answer to judge once the injected text was ignored."
+            )
+    if "gap" in failed:
+        hints.append(_CHECK_HINTS["gap"])
+    return hints
+
+
+def trace_output(case: EvalCase, result: CaseResult, task: str) -> dict:
+    """What came out and what was wanted, next to each other: the verdict, the model's reply, what the case's label
+    expected (decide only; a good question has no single right text) against what it decided, and the case's notes."""
+    decide = task == "decide"
+    return {
+        "verdict": verdict_for(result),
+        "reply": result.question,
+        "decided": _action_and_gap(result.decided, result.decided_gap) if decide else None,
+        "expected": _action_and_gap(result.expected_action, result.expected_gap) if decide else None,
+        "hints": hints_for(case, result),
+        "notes": case.notes,
+    }
+
+
+def scores_for(result: CaseResult) -> list[tuple[str, bool, str | None]]:
+    """What one case sends to Langfuse as (name, value, comment): one boolean per check (the detail as its comment),
+    then `case_passed` with the verdict as its comment. A case that errored has no checks, so it is just
+    `case_passed` false. Decide cases add `over_probing` / `under_probing` (true = the mistake happened). Names stay
+    stable across runs, or the comparison in Langfuse breaks."""
+    if result.error:
+        return [("case_passed", False, verdict_for(result))]
+    scores = [(c.name, c.passed, c.detail or None) for c in result.checks]
+    scores.append(("case_passed", result.passed, verdict_for(result)))
+    if result.expected_action is not None:
+        over = result.expected_action == FollowUpAction.next_question and result.decided == FollowUpAction.follow_up
+        under = result.expected_action == FollowUpAction.follow_up and result.decided == FollowUpAction.next_question
+        scores += [("over_probing", over, None), ("under_probing", under, None)]
+    return scores
+
+
+def dataset_name(task: str) -> str:
+    """The stream task reads the same cases as write, so they share one dataset."""
+    return f"{DATASET_PREFIX}/{'decide' if task == 'decide' else 'write'}"
+
+
+def dataset_items(cases: Sequence[EvalCase], task: str) -> list[dict]:
+    """The cases as Langfuse dataset items. The id is the case id behind the dataset's name: Langfuse wants ids unique
+    across datasets, and a stable id makes the upsert replace an item instead of duplicating it. Only the decide
+    dataset has expected outputs; a good question has no single right text."""
+    key = dataset_name(task).removeprefix(f"{DATASET_PREFIX}/")
+    return [
+        {
+            "id": f"{key}:{case.id}",
+            "input": case.model_dump(mode="json", include={"setup", "job_description", "history"}),
+            "expected_output": case.expect.model_dump(mode="json") if key == "decide" and case.expect else None,
+            "metadata": {"kind": case.kind, "notes": case.notes},
+        }
+        for case in cases
+    ]
+
+
+def run_tags(args: argparse.Namespace, model: str | None) -> list[str]:
+    """The tags that make runs comparable in Langfuse: what was run, and with which prompt, strategy, model, effort."""
+    return [
+        f"task:{args.task}",
+        f"prompt:{args.prompt or 'default'}",
+        f"strategy:{args.strategy or 'default'}",
+        f"model:{model or 'default'}",
+        f"effort:{args.reasoning_effort or '-'}",
+    ]
+
+
 def _positive(value: str) -> int:
     number = int(value)
     if number < 1:
@@ -607,12 +766,15 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(
-    argv: Sequence[str] | None = None, *, provider: LLMProvider | None = None
+    argv: Sequence[str] | None = None,
+    *,
+    provider: LLMProvider | None = None,
+    tracer: Tracer | None = None,
 ) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     from app.core.ai.factory import build_provider
-    from app.core.ai.tracing import Tracer, build_tracer
+    from app.core.ai.tracing import build_tracer
     from app.core.config import settings
 
     context = CONTEXT_MANAGER
@@ -627,15 +789,16 @@ def main(
     configs = settings.llm_provider_configs
     model = args.model or (configs[0].model if configs else None)
     # Eval calls go to Langfuse under environment "eval", apart from real traffic (only when keys are configured).
-    tracer = Tracer(None)
+    # A tracer passed in (tests) is used as is; without one and without keys this is the no-op tracer.
     if provider is None:
-        tracer = build_tracer(settings, environment="eval")
+        tracer = tracer or build_tracer(settings, environment="eval")
         provider = build_provider(settings, model=args.model, tracer=tracer)
         if provider is None:
             print(
                 "LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first."
             )
             return 1
+    tracer = tracer or Tracer(None)
     print(
         f"model={model} max_tokens={settings.llm_max_tokens} task={args.task} strategy={args.strategy or 'default'} "
         f"prompt={args.prompt or 'default'} reasoning_effort={args.reasoning_effort or '-'} "
@@ -643,17 +806,47 @@ def main(
     )
     decide = args.task == "decide"
     runs, decisions = [], []
+    # Every trace of this run shares one Langfuse session, named by what was run and when.
+    label = "/".join(
+        [
+            args.task,
+            args.prompt or "default",
+            args.strategy or "default",
+            model or "default",
+            args.reasoning_effort or "-",
+            datetime.now(UTC).strftime("%Y%m%d-%H%M%S"),
+        ]
+    )
+    tags = run_tags(args, model)
     # One event loop for every streamed call, so the provider's async connections are reused, never moved between loops.
     with start_blocking_portal() as portal:
         try:
             cases = load_cases(EVAL_CASES_PATH)
             if decide:
                 cases = [c for c in cases if c.expect]
+            if tracer.enabled:
+                tracer.upsert_dataset(dataset_name(args.task), dataset_items(cases, args.task))
             for run in range(1, args.repeat + 1):
                 print(f"=== run {run}/{args.repeat}")
                 results = []
                 for case in cases:
-                    result = _run_one(provider, case, args, context, settings.llm_max_tokens, portal)
+                    with tracer.trace(
+                        f"{args.task}: {case.id}",
+                        user_id=EVAL_USER,
+                        session_id=label,
+                        input=trace_input(case),
+                        tags=tags,
+                        metadata={
+                            "case_id": case.id,
+                            "repeat": str(run),
+                            "notes": args.notes,
+                            "summary": args.summary,
+                        },
+                    ) as trace_id:
+                        result = _run_one(provider, case, args, context, settings.llm_max_tokens, portal)
+                        tracer.set_trace_output(trace_output(case, result, args.task))
+                    for name, value, comment in scores_for(result):
+                        tracer.score(trace_id, name, value, comment=comment)
                     results.append(result)
                     _print_case(case, result)
                 runs.append(summarize(results))
@@ -677,6 +870,8 @@ def main(
             f"over_probing={sum(d.over_probing for d in decisions)} "
             f"under_probing={sum(d.under_probing for d in decisions)} (over all runs)"
         )
+    if tracer.enabled:
+        print(f"\nLangfuse session: {label}")
     return 0
 
 

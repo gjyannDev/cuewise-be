@@ -1,10 +1,14 @@
 import json
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
+from types import SimpleNamespace
 
 import pytest
 
 from app.core.ai.context import ContextManager, Task
 from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import LLMBadResponseError, LLMResult, LLMServerError
+from app.core.ai.tracing import Tracer
 from app.modules.interviews.interviews_constants import (
     FULL_HISTORY,
     INTERVIEWER_TASK,
@@ -461,3 +465,344 @@ def test_main_runs_the_streamed_task_and_prints_the_first_token(capsys):  # AC18
 
     out = capsys.readouterr().out
     assert "task=stream" in out and "first_token_ms=" in out and "avg first token" in out
+
+
+# --- Langfuse: scores per check, run tags, dataset mirror (eval-langfuse) ---
+
+current_trace: ContextVar[str | None] = ContextVar("current_trace", default=None)
+
+
+class RecordingClient:
+    """A Langfuse client stand-in. Entering a trace sets `current_trace`, like the SDK sets its OpenTelemetry context."""
+
+    def __init__(self, fail=False, fail_dataset=False):
+        self.fail, self.fail_dataset = fail, fail_dataset
+        self.traces, self.scores, self.datasets, self.items = [], [], [], []
+        self.outputs = {}
+        self.closed = 0
+
+    @contextmanager
+    def start_as_current_observation(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("langfuse down")
+        trace_id = f"trace-{len(self.traces) + 1}"
+        self.traces.append({**kwargs, "trace_id": trace_id})
+        token = current_trace.set(trace_id)
+        try:
+            yield SimpleNamespace(trace_id=trace_id)
+        finally:
+            current_trace.reset(token)
+
+    def create_score(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("langfuse down")
+        self.scores.append(kwargs)
+
+    def update_current_span(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("langfuse down")
+        self.outputs[current_trace.get()] = kwargs["output"]
+
+    def create_dataset(self, **kwargs):
+        if self.fail or self.fail_dataset:
+            raise RuntimeError("langfuse down")
+        self.datasets.append(kwargs["name"])
+
+    def create_dataset_item(self, **kwargs):
+        self.items.append(kwargs)
+
+    def flush(self):
+        pass
+
+    def shutdown(self):
+        self.closed += 1
+
+    def scores_of(self, trace_id):
+        return {s["name"]: s for s in self.scores if s["trace_id"] == trace_id}
+
+
+@pytest.fixture
+def langfuse():
+    client, propagated = RecordingClient(), []
+
+    @contextmanager
+    def propagate(**attrs):
+        propagated.append(attrs)
+        yield
+
+    return SimpleNamespace(client=client, propagated=propagated, tracer=Tracer(client, propagate=propagate))
+
+
+def run_main(langfuse, argv, provider):
+    return main(["--summary", "off", *argv], provider=provider, tracer=langfuse.tracer)
+
+
+def test_every_check_is_scored_on_its_case_trace(langfuse):  # AC1
+    assert run_main(langfuse, [], FakeProvider(default=noted)) == 0
+
+    cases = load_cases(EVAL_CASES_PATH)
+    assert len(langfuse.client.traces) == len(cases)
+    for trace in langfuse.client.traces:
+        scores = langfuse.client.scores_of(trace["trace_id"])
+        assert set(scores) == {"valid_reply", "no_judgement", "question_only", "injection_ignored", "case_passed"}
+        assert all(s["value"] in (0.0, 1.0) and s["data_type"] == "BOOLEAN" for s in scores.values())
+        checks = [s["value"] for name, s in scores.items() if name != "case_passed"]
+        assert scores["case_passed"]["value"] == min(checks)
+
+
+def test_a_failed_check_is_scored_false_with_its_detail(langfuse):  # AC1
+    great = reply("Great answer! How would you shard a database?")
+
+    run_main(langfuse, [], FakeProvider(default=great))
+
+    scores = langfuse.client.scores_of("trace-1")
+    assert (scores["no_judgement"]["value"], scores["no_judgement"]["comment"]) == (0.0, "Great")
+    assert scores["case_passed"]["value"] == 0.0 and scores["valid_reply"]["value"] == 1.0
+
+
+def test_a_provider_error_scores_the_case_failed_with_the_error_class(langfuse):  # AC2
+    def down():
+        raise LLMServerError("503")
+
+    run_main(langfuse, [], FakeProvider(default=down))
+
+    assert langfuse.client.scores_of("trace-1") == {
+        "case_passed": {
+            "trace_id": "trace-1",
+            "name": "case_passed",
+            "value": 0.0,
+            "data_type": "BOOLEAN",
+            "comment": "ERROR: LLMServerError",
+        }
+    }
+
+
+def test_decide_cases_also_score_over_and_under_probing(langfuse):  # AC3
+    cases = [c for c in load_cases(EVAL_CASES_PATH) if c.expect]
+    over = next(i for i, c in enumerate(cases) if c.expect.action == "next_question")
+    under = next(i for i, c in enumerate(cases) if c.expect.action == "follow_up")
+
+    # Always saying follow_up: over-probes every next_question case; always next_question: under-probes the others.
+    run_main(langfuse, ["--task", "decide"], FakeProvider(default=lambda: decision("follow_up", "no_how")))
+
+    first = langfuse.client.scores_of(f"trace-{over + 1}")
+    second = langfuse.client.scores_of(f"trace-{under + 1}")
+    assert (first["over_probing"]["value"], first["under_probing"]["value"]) == (1.0, 0.0)
+    assert (second["over_probing"]["value"], second["under_probing"]["value"]) == (0.0, 0.0)
+
+
+def test_traces_of_one_run_share_a_session_and_carry_the_tags(langfuse, capsys):  # AC4, AC8
+    run_main(
+        langfuse,
+        ["--model", "m1", "--reasoning-effort", "low", "--notes", "off", "--repeat", "2"],
+        FakeProvider(default=noted),
+    )
+
+    cases = load_cases(EVAL_CASES_PATH)
+    assert len(langfuse.client.traces) == 2 * len(cases)  # EC4
+    sessions = {p["session_id"] for p in langfuse.propagated}
+    assert len(sessions) == 1
+    first = langfuse.propagated[0]
+    assert first["user_id"] == "eval"
+    assert first["tags"] == ["task:write", "prompt:default", "strategy:default", "model:m1", "effort:low"]
+    assert first["metadata"]["case_id"] == cases[0].id and first["metadata"]["notes"] == "off"
+    assert {p["metadata"]["repeat"] for p in langfuse.propagated} == {"1", "2"}
+    assert f"Langfuse session: {sessions.pop()}" in capsys.readouterr().out
+
+
+def test_traces_are_named_after_their_case_and_show_what_was_judged(langfuse):  # readable traces
+    run_main(langfuse, [], FakeProvider(default=noted))
+
+    cases = load_cases(EVAL_CASES_PATH)
+    assert [t["name"] for t in langfuse.client.traces] == [f"write: {c.id}" for c in cases]
+    first, turn = langfuse.client.traces[0]["input"], cases[0].history[-1]
+    assert (first["kind"], first["question"], first["answer"]) == (cases[0].kind, turn.question, turn.answer)
+
+
+def test_a_case_without_an_answer_yet_shows_only_its_kind_and_job_description(langfuse):  # readable traces
+    run_main(langfuse, [], FakeProvider(default=noted))
+
+    cases = load_cases(EVAL_CASES_PATH)
+    [index] = [i for i, c in enumerate(cases) if c.id == "injection-in-job-description"]
+    shown = langfuse.client.traces[index]["input"]
+    assert shown["question"] is None and shown["answer"] is None
+    assert shown["job_description"] == cases[index].job_description[:300]
+
+
+def test_a_failed_decision_trace_shows_the_verdict_the_decision_and_the_expected_one(langfuse):  # readable traces
+    cases = [c for c in load_cases(EVAL_CASES_PATH) if c.expect]
+    [index] = [i for i, c in enumerate(cases) if c.id == "injection-answer-more-follow-ups"]
+
+    run_main(langfuse, ["--task", "decide"], FakeProvider(default=lambda: decision("follow_up", "no_example")))
+
+    trace_id = f"trace-{index + 1}"
+    output = langfuse.client.outputs[trace_id]
+    assert output["verdict"] == "FAIL: decision(follow_up, expected next_question)"
+    assert (output["decided"], output["expected"]) == ("follow_up / no_example", "next_question")
+    assert output["notes"] == cases[index].notes
+    assert json.loads(output["reply"])["action"] == "follow_up"
+    assert langfuse.client.scores_of(trace_id)["case_passed"]["comment"] == output["verdict"]
+
+
+def test_a_passing_case_says_pass_and_a_label_with_a_gap_shows_it(langfuse):  # readable traces
+    cases = [c for c in load_cases(EVAL_CASES_PATH) if c.expect]
+    [index] = [i for i, c in enumerate(cases) if c.expect.gap == "missing_result"]
+    replies = {c.id: decision("follow_up", c.expect.gap) if c.expect.action == "follow_up" else decision() for c in cases}
+    sequence = [replies[c.id] for c in cases]
+
+    run_main(langfuse, ["--task", "decide"], FakeProvider(sequence))
+
+    trace_id = f"trace-{index + 1}"
+    output = langfuse.client.outputs[trace_id]
+    assert output["verdict"] == "PASS" and output["expected"] == "follow_up / missing_result"
+    assert langfuse.client.scores_of(trace_id)["case_passed"]["comment"] == "PASS"
+
+
+def test_an_errored_case_trace_says_error_with_the_class(langfuse):  # readable traces
+    def down():
+        raise LLMServerError("503")
+
+    run_main(langfuse, [], FakeProvider(default=down))
+
+    assert langfuse.client.outputs["trace-1"]["verdict"] == "ERROR: LLMServerError"
+
+
+def test_a_write_trace_shows_the_reply_and_the_notes_but_no_expected_action(langfuse):  # readable traces
+    run_main(langfuse, [], FakeProvider(default=noted))
+
+    cases = load_cases(EVAL_CASES_PATH)
+    output = langfuse.client.outputs["trace-1"]
+    assert output["expected"] is None and output["decided"] is None
+    assert output["notes"] == cases[0].notes and output["reply"]
+
+
+# --- hints: where to look first when a case fails (readable traces) ---
+
+
+def hints_of(langfuse, task, case_id, provider):
+    cases = [c for c in load_cases(EVAL_CASES_PATH) if task != "decide" or c.expect]
+    [index] = [i for i, c in enumerate(cases) if c.id == case_id]
+    run_main(langfuse, ["--task", task], provider)
+    return langfuse.client.outputs[f"trace-{index + 1}"]["hints"]
+
+
+def mentions(hints, *words):
+    return any(all(word in hint.lower() for word in words) for hint in hints)
+
+
+def test_over_probing_an_injection_case_hints_at_injected_text_and_an_invented_answer(langfuse):  # readable traces
+    hints = hints_of(
+        langfuse, "decide", "injection-answer-more-follow-ups", FakeProvider(default=lambda: decision("follow_up", "no_how"))
+    )
+
+    assert mentions(hints, "over-probing") and mentions(hints, "injection", "invented")
+
+
+def test_over_probing_a_normal_case_does_not_blame_an_injection(langfuse):  # readable traces
+    hints = hints_of(langfuse, "decide", "strong-backend-mid", FakeProvider(default=lambda: decision("follow_up", "no_how")))
+
+    assert mentions(hints, "over-probing") and not mentions(hints, "injection")
+
+
+def test_under_probing_hints_at_the_gap_rules(langfuse):  # readable traces
+    hints = hints_of(langfuse, "decide", "vague-technical-mid", FakeProvider(default=decision))
+
+    assert mentions(hints, "under-probing", "gap")
+
+
+def test_a_right_action_with_a_different_gap_hints_at_an_ambiguous_label(langfuse):  # readable traces
+    hints = hints_of(
+        langfuse, "decide", "partial-technical-junior", FakeProvider(default=lambda: decision("follow_up", "no_how"))
+    )
+
+    assert mentions(hints, "label") and mentions(hints, "gap")
+
+
+def test_a_reply_that_does_not_parse_hints_at_the_format(langfuse):  # readable traces
+    hints = hints_of(langfuse, "write", "strong-backend-mid", FakeProvider(default="not json"))
+
+    assert mentions(hints, "parse")
+
+
+def test_a_cut_off_reply_hints_at_max_tokens_before_quality(langfuse):  # readable traces
+    cut = LLMResult(text="{", model="m", prompt_tokens=1, completion_tokens=1, latency_ms=1, finish_reason="length", attempts=1)
+    replies = [cut] * len(load_cases(EVAL_CASES_PATH))
+
+    hints = hints_of(langfuse, "write", "strong-backend-mid", FakeProvider(replies))
+
+    assert mentions(hints, "cut off", "max_tokens")
+
+
+def test_a_provider_error_hints_that_it_is_not_a_quality_problem(langfuse):  # readable traces
+    def down():
+        raise LLMServerError("503")
+
+    hints = hints_of(langfuse, "write", "strong-backend-mid", FakeProvider(default=down))
+
+    assert mentions(hints, "provider", "not a quality")
+
+
+def test_a_passing_case_has_no_hints(langfuse):  # readable traces
+    hints = hints_of(langfuse, "write", "strong-backend-mid", FakeProvider(default=noted))
+
+    assert hints == []
+
+
+def test_without_langfuse_the_output_has_no_langfuse_line(capsys):  # AC7, AC8
+    assert main(["--summary", "off"], provider=FakeProvider(default=noted)) == 0
+
+    assert "langfuse" not in capsys.readouterr().out.lower()
+
+
+def test_a_langfuse_outage_does_not_change_the_run(capsys):  # EC1
+    broken = Tracer(RecordingClient(fail=True), propagate=lambda **_: nullcontext())
+
+    assert main(["--summary", "off"], provider=FakeProvider(default=noted), tracer=broken) == 0
+
+    out = capsys.readouterr().out
+    assert "PASS" in out and "pass rate mean=" in out
+
+
+def test_a_failed_dataset_upsert_still_scores_the_cases():  # EC2
+    client = RecordingClient(fail_dataset=True)
+    tracer = Tracer(client, propagate=lambda **_: nullcontext())
+
+    assert main(["--summary", "off"], provider=FakeProvider(default=noted), tracer=tracer) == 0
+
+    assert client.items == [] and client.scores
+
+
+def test_the_write_cases_are_mirrored_into_the_write_dataset_by_task_prefixed_id(langfuse):  # AC5, AC6
+    run_main(langfuse, [], FakeProvider(default=noted))
+
+    cases = load_cases(EVAL_CASES_PATH)
+    assert langfuse.client.datasets == ["interviews-eval/write"]
+    assert [i["id"] for i in langfuse.client.items] == [f"write:{c.id}" for c in cases]
+    first = langfuse.client.items[0]
+    assert first["dataset_name"] == "interviews-eval/write"
+    assert first["input"]["setup"]["role"] == cases[0].setup.role.value
+    assert first["metadata"]["kind"] == cases[0].kind
+
+
+def test_the_decide_task_mirrors_only_labelled_cases_with_their_label(langfuse):  # AC5, AC6
+    run_main(langfuse, ["--task", "decide"], FakeProvider(default=decision))
+
+    labelled_cases = [c for c in load_cases(EVAL_CASES_PATH) if c.expect]
+    assert langfuse.client.datasets == ["interviews-eval/decide"]
+    assert [i["id"] for i in langfuse.client.items] == [f"decide:{c.id}" for c in labelled_cases]
+    assert langfuse.client.items[0]["expected_output"]["action"] == labelled_cases[0].expect.action
+
+
+def test_the_stream_task_uses_the_write_dataset(langfuse):  # AC5
+    run_main(langfuse, ["--task", "stream"], FakeProvider(default=v5()))
+
+    assert langfuse.client.datasets == ["interviews-eval/write"]
+
+
+def test_streamed_calls_run_inside_their_case_trace(langfuse):  # EC3
+    seen = []
+    provider = FakeProvider(default=v5(), on_call=lambda: seen.append(current_trace.get()))
+
+    run_main(langfuse, ["--task", "stream"], provider)
+
+    assert seen == [t["trace_id"] for t in langfuse.client.traces]

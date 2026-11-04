@@ -534,8 +534,8 @@
     "semantic_hash": ""
   },
   "docs/ai-engineering-learning-path.md": {
-    "mtime": 1793585521.5894983,
-    "seen": 1793609289.8741777,
+    "mtime": 1793706187.9059546,
+    "seen": 1793762734.755083,
     "ast_hash": "e0a91359bb5a8fbb91c2a8adfdd60cea",
     "semantic_hash": ""
   },
@@ -576,9 +576,9 @@
     "semantic_hash": ""
   },
   "app/modules/interviews/interviews_evals.py": {
-    "mtime": 1793609081.5330918,
-    "seen": 1793609289.8740554,
-    "ast_hash": "bdb277483d8fb6c3456da568c5b1cd21",
+    "mtime": 1793768429.1188166,
+    "seen": 1793768476.597793,
+    "ast_hash": "e1b220a911d2ffb5dc33856b1b7a83e7",
     "semantic_hash": ""
   },
   "app/modules/interviews/interviews_reply.py": {
@@ -588,9 +588,9 @@
     "semantic_hash": ""
   },
   "tests/modules/interviews/test_evals.py": {
-    "mtime": 1793590839.1245596,
-    "seen": 1793609289.8741105,
-    "ast_hash": "f6164351faa82f159c6adfab10ed5bbe",
+    "mtime": 1793768413.038638,
+    "seen": 1793768476.5978503,
+    "ast_hash": "ebc1c51771915c01e7bcf5f1576df298",
     "semantic_hash": ""
   },
   "tests/modules/interviews/test_fallback_pick.py": {
@@ -666,9 +666,9 @@
     "semantic_hash": ""
   },
   "app/modules/interviews/interviews_context.py": {
-    "mtime": 1793584589.240914,
-    "seen": 1793585512.9195647,
-    "ast_hash": "6814f9467d690b20134d42cdbf66f735",
+    "mtime": 1793758427.4769523,
+    "seen": 1793762734.7549467,
+    "ast_hash": "ee711be1f5bbb9a54cecddf183707364",
     "semantic_hash": ""
   },
   "app/scripts/usage_report.py": {
@@ -948,9 +948,9 @@
     "semantic_hash": ""
   },
   "app/core/ai/tracing.py": {
-    "mtime": 1793609098.1268492,
-    "seen": 1793609289.8740227,
-    "ast_hash": "a929b81b3d1fe07acbdd2c47f55df4f7",
+    "mtime": 1793766268.9207788,
+    "seen": 1793766359.1726155,
+    "ast_hash": "4485fd9140c30242057378bb4dd6cda2",
     "semantic_hash": ""
   },
   "skills-lock.json": {
@@ -960,9 +960,9 @@
     "semantic_hash": ""
   },
   "tests/core/ai/test_tracing.py": {
-    "mtime": 1793608871.4255743,
-    "seen": 1793609289.8740869,
-    "ast_hash": "963dd043c85e8977b485cf650619b3f2",
+    "mtime": 1793766261.2800927,
+    "seen": 1793766359.1726866,
+    "ast_hash": "65e1773836d72f8f5e6d8e7fdb47f16e",
     "semantic_hash": ""
   },
   "tests/modules/interviews/test_tracing_routes.py": {
@@ -1014,8 +1014,8 @@
     "semantic_hash": ""
   },
   ".agents/skills/langfuse/references/instrumentation.md": {
-    "mtime": 1793608762.4458685,
-    "seen": 1793609289.8741436,
+    "mtime": 1793659345.938151,
+    "seen": 1793762734.7550454,
     "ast_hash": "cd7fd8af217e9b3966eddcc87fc924d2",
     "semantic_hash": ""
   },
@@ -1098,8 +1098,8 @@
     "semantic_hash": ""
   },
   ".claude/skills/langfuse/references/instrumentation.md": {
-    "mtime": 1793608762.4458685,
-    "seen": 1793609289.874158,
+    "mtime": 1793659345.938151,
+    "seen": 1793762734.755061,
     "ast_hash": "cd7fd8af217e9b3966eddcc87fc924d2",
     "semantic_hash": ""
   },
@@ -1161,6 +1161,24 @@
     "mtime": 1793585566.5811908,
     "seen": 1793609289.8742044,
     "ast_hash": "731f92114b371c356893777e6a138d59",
+    "semantic_hash": ""
+  },
+  "docs/features/eval-langfuse/plan.md": {
+    "mtime": 1793762704.524227,
+    "seen": 1793762734.7550914,
+    "ast_hash": "a3c4e7c74cd16a9889fc45e17cd838a1",
+    "semantic_hash": ""
+  },
+  "docs/features/eval-langfuse/task.md": {
+    "mtime": 1793768471.0047905,
+    "seen": 1793768476.5979328,
+    "ast_hash": "d35905cc9b06f2f8781e5524dcd3f455",
+    "semantic_hash": ""
+  },
+  "docs/features/langfuse-tracing/task.md": {
+    "mtime": 1793609302.8569,
+    "seen": 1793762734.7551055,
+    "ast_hash": "14b1d875e558b7c98a008d830a56541a",
     "semantic_hash": ""
   }
 }
