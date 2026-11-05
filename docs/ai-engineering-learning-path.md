@@ -312,9 +312,30 @@ Every later AI feature reuses these, so a new feature mostly means a new prompt,
 For each slice:
 
 1. **Before coding:** read the concepts for the slice and predict what will go wrong.
-2. **After coding:** answer each concept's **Proof** question in `docs/features/<slice>/learnings.md`.
+2. **After coding:** write `docs/features/<slice>/learnings.md` as a short tutorial for your future self, using the
+   template below. Reference sample: `docs/features/sse-streaming/learnings.md`.
 
 That turns "it works" into "I understand why it works".
+
+### `learnings.md` template (tutorial style)
+
+```markdown
+# Learn: <concept> (Slice N)
+
+## 1. Why it exists          the problem, with real numbers from your app
+## 2. What it is             plain words, 3-5 sentences, one diagram or small example
+## 3. When to use it         table: use it when / skip it when (with thresholds), and "I'd revisit this if ..."
+## 4. How it works           options considered (table, which won and why), then one request walked through the real code with file:line
+## 5. What can go wrong      failure modes: what the user sees, how the code reacts, which test proves it
+## 6. Try it yourself        hands-on steps; write a prediction first, then run and compare
+## 7. What surprised me      real measurements and wrong predictions; the most valuable part
+## 8. Check your understanding    the concept's Proof question + a why, a when, a how and a what-if question; answers in a <details> block
+## 9. Go deeper / Still open     spec and plan links, the next concept this unlocks, and runs or measurements not done yet
+```
+
+Rules: keep real numbers (with model, date and command), keep file:line references current when the code moves, and
+never paste raw question, answer or job-description text. Write your own answers to section 8 before opening the
+reference answers.
 
 ## Progress
 
