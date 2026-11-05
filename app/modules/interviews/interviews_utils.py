@@ -37,6 +37,7 @@ from .interviews_constants import (
     MessageRole,
     QuestionCategory,
     QuestionKind,
+    SessionStatus,
 )
 from .interviews_model import InterviewMessage, InterviewQuestion
 from .interviews_schema import (
@@ -439,3 +440,14 @@ def audio_container(declared_type: str, head: bytes) -> AudioContainer | None:
     if container is None or not _has_signature(container, head):
         return None
     return container
+
+
+def answered_main_questions(status: SessionStatus, question_count: int, current_main_number: int | None) -> int:
+    """Main questions finished ("answered 2 of 5"): every one once completed, else every one before the question the
+    interview waits on. A pending follow-up belongs to a main question that isn't finished yet; follow-ups never count.
+    """
+    if status == SessionStatus.completed:
+        return question_count
+    if current_main_number is None:
+        return 0
+    return max(0, min(current_main_number - 1, question_count))

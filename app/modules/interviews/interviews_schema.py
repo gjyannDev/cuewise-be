@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
+from app.core.pagination import Page
+
 from .interviews_constants import (
     JOB_DESCRIPTION_MAX_LENGTH,
     MAX_ANSWER_LENGTH,
@@ -94,6 +96,24 @@ class InterviewOut(BaseModel):
     session: SessionOut
     # None once the session is completed.
     current_question: QuestionOut | None
+
+
+class InterviewListItemOut(BaseModel):
+    """One row of the history table. No job description or interview content: the row is all the table needs."""
+
+    id: UUID
+    role: JobRole
+    level: Level
+    interview_type: InterviewType
+    status: SessionStatus
+    question_count: int
+    # Main questions finished, 0..question_count; follow-ups don't count ("answered 2 of 5").
+    answered_count: int
+    created_at: datetime
+
+
+class InterviewListOut(Page[InterviewListItemOut]):
+    pass
 
 
 class AnswerIn(BaseModel):

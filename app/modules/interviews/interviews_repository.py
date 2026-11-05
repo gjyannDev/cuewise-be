@@ -1,11 +1,45 @@
 import uuid
 from typing import cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import (
+    ColumnElement,
+    CursorResult,
+    UnaryExpression,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.orm import Session
 
-from .interviews_constants import SessionStatus
+from .interviews_constants import HistorySortColumn, SessionStatus, SortDirection
 from .interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
+
+# UUIDv7 ids are time-ordered, so `created_at` sorts by id: start order, served by ix_interview_sessions_user_id_id.
+_HISTORY_SORT_COLUMNS = {
+    HistorySortColumn.created_at: InterviewSession.id,
+    HistorySortColumn.role: InterviewSession.role,
+    HistorySortColumn.level: InterviewSession.level,
+    HistorySortColumn.interview_type: InterviewSession.interview_type,
+    HistorySortColumn.status: InterviewSession.status,
+}
+
+
+def _history_filter(user_id: uuid.UUID, status: SessionStatus | None) -> list[ColumnElement[bool]]:
+    """The rows one user's history lists and counts: always only their own, optionally of one status."""
+    conditions = [InterviewSession.user_id == user_id]
+    if status is not None:
+        conditions.append(InterviewSession.status == status)
+    return conditions
+
+
+def _history_order(sort_by: HistorySortColumn, sort_dir: SortDirection) -> list[UnaryExpression]:
+    """The requested column (its stored value, not the label), then `id desc` so ties are newest first and pages
+    never overlap or skip a row."""
+    column = _HISTORY_SORT_COLUMNS[sort_by]
+    order = [column.asc() if sort_dir == SortDirection.asc else column.desc()]
+    if sort_by != HistorySortColumn.created_at:
+        order.append(InterviewSession.id.desc())
+    return order
 
 
 class InterviewsRepository:
@@ -40,6 +74,41 @@ class InterviewsRepository:
         # Keyed on the owner too, so "missing" and "someone else's" are indistinguishable.
         return self.db.scalar(
             select(InterviewSession).where(InterviewSession.id == session_id, InterviewSession.user_id == user_id)
+        )
+
+    def list_for_user(
+        self,
+        user_id: uuid.UUID,
+        status: SessionStatus | None,
+        sort_by: HistorySortColumn,
+        sort_dir: SortDirection,
+        limit: int,
+        offset: int,
+    ) -> list[tuple[InterviewSession, int | None]]:
+        """A page of the user's sessions in the requested order, each with the main-question number of the question it
+        waits on (None if that row is missing). One query: the number comes from a correlated subquery, not a query per
+        row."""
+        current_main_number = (
+            select(InterviewQuestion.main_number)
+            .where(
+                InterviewQuestion.session_id == InterviewSession.id,
+                InterviewQuestion.position == InterviewSession.current_position,
+            )
+            .scalar_subquery()
+        )
+        rows = self.db.execute(
+            select(InterviewSession, current_main_number)
+            .where(*_history_filter(user_id, status))
+            .order_by(*_history_order(sort_by, sort_dir))
+            .limit(limit)
+            .offset(offset)
+        )
+        return [(session, main_number) for session, main_number in rows]
+
+    def count_for_user(self, user_id: uuid.UUID, status: SessionStatus | None) -> int:
+        return (
+            self.db.scalar(select(func.count()).select_from(InterviewSession).where(*_history_filter(user_id, status)))
+            or 0
         )
 
     def get_question(self, session_id: uuid.UUID, position: int) -> InterviewQuestion | None:

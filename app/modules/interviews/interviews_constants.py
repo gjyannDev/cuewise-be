@@ -34,6 +34,21 @@ class SessionStatus(StrEnum):
     completed = "completed"
 
 
+class HistorySortColumn(StrEnum):
+    """The history columns GET /interviews sorts by; the values are the response's field names."""
+
+    created_at = "created_at"
+    role = "role"
+    level = "level"
+    interview_type = "interview_type"
+    status = "status"
+
+
+class SortDirection(StrEnum):
+    asc = "asc"
+    desc = "desc"
+
+
 class MessageRole(StrEnum):
     candidate = "candidate"
     interviewer = "interviewer"

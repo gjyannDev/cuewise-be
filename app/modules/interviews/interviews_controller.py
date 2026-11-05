@@ -25,6 +25,7 @@ from app.core.errors import (
     UnsupportedAudioError,
 )
 from app.core.logging import request_id_ctx
+from app.core.pagination import PageParams
 from app.modules.auth.auth_model import User
 
 from .interviews_constants import (
@@ -36,6 +37,7 @@ from .interviews_constants import (
     SUMMARY_TIME_CAP_SECONDS,
     TRANSCRIPTION_MAX_BYTES,
     TRANSCRIPTION_MAX_SECONDS,
+    HistorySortColumn,
     InterviewType,
     JobRole,
     Level,
@@ -44,6 +46,7 @@ from .interviews_constants import (
     QuestionKind,
     QuestionSource,
     SessionStatus,
+    SortDirection,
     StreamEvent,
     TurnPhase,
 )
@@ -56,6 +59,8 @@ from .interviews_schema import (
     AnswerOut,
     BankQuestion,
     InterviewCreateIn,
+    InterviewListItemOut,
+    InterviewListOut,
     InterviewOut,
     QuestionDeltaOut,
     QuestionOut,
@@ -86,6 +91,7 @@ from .interviews_turn import (
 )
 from .interviews_utils import (
     QuestionTurn,
+    answered_main_questions,
     audio_container,
     build_transcript,
     interviewer_history,
@@ -225,6 +231,34 @@ class InterviewsController:
         return InterviewOut(
             session=SessionOut.model_validate(session),
             current_question=self._question_out(self._current_question(session)),
+        )
+
+    def list_interviews(
+        self,
+        user: User,
+        status: SessionStatus | None,
+        sort_by: HistorySortColumn,
+        sort_dir: SortDirection,
+        page: PageParams,
+    ) -> InterviewListOut:
+        """The user's own interviews in the requested order: the history table. Under the default order (newest first)
+        the in-progress one (at most one) is first."""
+        rows = self.repo.list_for_user(user.id, status, sort_by, sort_dir, page.limit, page.offset)
+        items = [
+            InterviewListItemOut(
+                id=s.id,
+                role=JobRole(s.role),
+                level=Level(s.level),
+                interview_type=InterviewType(s.interview_type),
+                status=SessionStatus(s.status),
+                question_count=s.question_count,
+                answered_count=answered_main_questions(SessionStatus(s.status), s.question_count, main_number),
+                created_at=s.created_at,
+            )
+            for s, main_number in rows
+        ]
+        return InterviewListOut(
+            items=items, total=self.repo.count_for_user(user.id, status), limit=page.limit, offset=page.offset
         )
 
     def answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> AnswerOut:

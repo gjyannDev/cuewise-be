@@ -32,6 +32,8 @@ class InterviewSession(UUIDPrimaryKeyMixin, Base):
             postgresql_where=_IN_PROGRESS,
             sqlite_where=_IN_PROGRESS,
         ),
+        # The history list: one user's interviews, newest first (UUIDv7 id order; a btree scans either direction).
+        Index("ix_interview_sessions_user_id_id", "user_id", "id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))

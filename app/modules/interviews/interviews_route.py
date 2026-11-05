@@ -2,21 +2,29 @@ import time
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, UploadFile, status
+from fastapi import APIRouter, Depends, Query, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.errors import ErrorResponse
+from app.core.pagination import PageDep
 from app.modules.auth.auth_constants import Permission
 from app.modules.auth.auth_dependencies import require_permissions
 from app.modules.auth.auth_model import User
 
-from .interviews_constants import STREAM_PING_SECONDS, TRANSCRIPTION_MAX_BYTES
+from .interviews_constants import (
+    STREAM_PING_SECONDS,
+    TRANSCRIPTION_MAX_BYTES,
+    HistorySortColumn,
+    SessionStatus,
+    SortDirection,
+)
 from .interviews_dependencies import InterviewsControllerDep, limit_transcriptions
 from .interviews_schema import (
     AnswerIn,
     AnswerOut,
     InterviewCreateIn,
+    InterviewListOut,
     InterviewOut,
     TranscriptionOut,
     TranscriptOut,
@@ -60,6 +68,22 @@ def start_interview(
     ctrl: InterviewsControllerDep,
 ) -> InterviewOut:
     return ctrl.start(user, data)
+
+
+@router.get("", status_code=status.HTTP_200_OK)
+def list_interviews(
+    user: Annotated[User, require_permissions(Permission.interviews_read_self)],
+    ctrl: InterviewsControllerDep,
+    page: PageDep,
+    # Named apart from `fastapi.status`; the client still sends `?status=`.
+    status_filter: Annotated[SessionStatus | None, Query(alias="status")] = None,
+    sort_by: HistorySortColumn = HistorySortColumn.created_at,
+    sort_dir: SortDirection = SortDirection.desc,
+) -> InterviewListOut:
+    """The caller's own interviews (every status), newest first by default. `sort_by` / `sort_dir` sort the whole
+    history, not just the page; ties are newest first. Under the default order the `in_progress` one, if any, is the
+    first item; it can be continued with GET /interviews/{id} and its /messages."""
+    return ctrl.list_interviews(user, status_filter, sort_by, sort_dir, page)
 
 
 @router.get(
