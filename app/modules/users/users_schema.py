@@ -2,6 +2,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+from app.core.pagination import Page
+
 
 class UserAdminOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -12,8 +14,5 @@ class UserAdminOut(BaseModel):
     is_active: bool
 
 
-class UserListOut(BaseModel):
-    items: list[UserAdminOut]
-    total: int
-    limit: int
-    offset: int
+class UserListOut(Page[UserAdminOut]):
+    pass

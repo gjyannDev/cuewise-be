@@ -1,14 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.errors import ErrorResponse
+from app.core.pagination import PageDep
 from app.db.session import get_db
 from app.modules.auth.auth_constants import Permission
 from app.modules.auth.auth_dependencies import require_permissions
 
-from .users_constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .users_controller import UsersController
 from .users_repository import UsersRepository
 from .users_schema import UserListOut
@@ -37,9 +37,5 @@ UsersControllerDep = Annotated[UsersController, Depends(get_controller)]
     status_code=status.HTTP_200_OK,
     dependencies=[require_permissions(Permission.users_read)],
 )
-def list_users(
-    ctrl: UsersControllerDep,
-    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
-    offset: Annotated[int, Query(ge=0)] = 0,
-) -> UserListOut:
-    return ctrl.list_users(limit, offset)
+def list_users(ctrl: UsersControllerDep, page: PageDep) -> UserListOut:
+    return ctrl.list_users(page)
