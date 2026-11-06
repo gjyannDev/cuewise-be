@@ -196,6 +196,39 @@ for 9 scored cases (about 2,200 in and 480 out per feedback, both calls). Latenc
   template fallback worked as designed, but the eval counted it as a failed `write_valid`, which mixes up "the provider
   said no" with "the model wrote a bad text".
 
+### Eval log
+
+One row per run of `uv run python -m app.modules.interviews.interviews_evals --task feedback --model
+gemini-3.5-flash-lite` (one repeat each, rubric v1, write prompt v1). The numbers are the run's totals, read back from
+Langfuse (environment `eval`, session `feedback/default/default/gemini-3.5-flash-lite/-/<time>`). Every run's raw traces
+are there; this log holds what changed and what was decided. "None" under What changed means the same prompts, rubric
+and case labels as the run before. How to write a row: `docs/evaluation-guide.md`, section 8.
+
+| # | Run (UTC) | What changed | Score prompt | Pass | Errors | Quotes rejected | Templates | Tokens in / out | Failures → type | Decision |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 11-05 06:52 | Baseline | v1 | 8/10 | 0 | 0 | 1 | 20,081 / 4,340 | senior 4.1 out of band → quality; follow-up template (429) → infra | Baseline recorded |
+| 2 | 11-05 07:57 | None (code only: Langfuse steps, checks and hints) | v1 | 7/10 | 2 | 2 | 0 | 20,510 / 4,648 | mixed `quote_length` ×2 → contract; senior 4.4 → quality; follow-up 429 → infra | Senior repeats: real. Mixed: open the trace |
+| 3 | 11-05 09:44 | None | v1 | 5/10 | 3 | 1 | 1 | 15,293 / 3,885 | junior, senior, follow-up 429; voice template (429) → infra | Rate-limited: not counted for quality |
+| 4 | 11-05 09:56 | None | v1 | 6/10 | 0 | 1 | 2 | 21,958 / 5,555 | mixed 1 rejected → contract; senior 3.9 → quality; junior and follow-up templates (`LLMServerError`) → infra | Provider errors: not counted for quality |
+| 5 | 11-05 10:01 | None | v1 | 1/3 | — | 0 | 1 | 3,663 / 830 | Stopped after 3 cases (`LLMServerError`) | Ignored |
+| 6 | 11-06 03:47 | None | v1 | 7/10 | 2 | 2 | 0 | 20,202 / 4,775 | mixed `quote_length` ×2 → contract (trace: the `structure` quote was the whole 458-character answer); senior 4.3 → quality; follow-up 429 → infra | Write score prompt v2 |
+| 7 | 11-06 05:31 | **Score prompt v2**: one-sentence quotes, no evidence item when no single sentence shows a criterion | v2 | 7/10 | 1 | 1 | 1 | 19,396 / 4,409 | injection-in-JD `quote_not_found` ×1 ("I thinks" for "I think"), recovered → contract, noise; senior 3.6 (applied the experienced lines exactly, still out of band) → **label**; senior template and follow-up 429 → infra | Mixed fixed (0 rejected). Repeat v2 |
+| 8 | 11-06 06:42 | None (v2 repeat) | v2 | 8/10 | 1 | 0 | 0 | 18,629 / 4,034 | senior 4.0 (Q2 depth and trade-offs 4) → quality; follow-up 429 → infra | Senior needs new labels and the rubric fix |
+| 9 | 11-06 07:18 | **Labels**: senior range 2.5–4.0, depth and trade-offs ≤ 3 per question, `level_gap` ≥ 0.5 | v2 | 8/10 | 1 | 0 | 1 | 17,878 / 3,858 | senior `criterion:2:trade_offs` (4) → quality, now named exactly; level gap 0.5 passed; senior template and follow-up 429 → infra | **Keep score prompt v2** (see below). Next: rubric v2 |
+
+**Keeping v2, against the guide's criteria (section 8):**
+
+- Mixed rejected quotes in 4 of the 5 complete v1 runs (2, 3, 4, 6) and in 0 of 3 v2 runs (7, 8, 9).
+- Total rejections per run: v1 0, 2, 1, 1, 2; v2 1, 0, 0.
+- No case moved out of its range because of v2.
+- Tokens per full run went down: 18–19k in, against 20–22k for v1.
+
+**What the log shows that one run hid:**
+
+- Run 1 had 0 rejected quotes, so I called paraphrased quotes a non-problem. Runs 2–6 showed that mixed rejects quotes most of the time. One run proves little.
+- `follow-up-completes-the-story`, the last case, hit the rate limit in 7 of 9 runs. That's the runner's pacing, not the model: the free tier's per-minute limit runs out near the end of a back-to-back run.
+- The senior was outside its range in every run (4.1, 4.4, 3.9, 4.3, 3.6, 4.0, 4.0) while the junior was always 4.5. It took the per-criterion scores in Langfuse to see two causes: an expected range set too tight (run 7), and depth and trade-offs scored 4 against the experienced lines (runs 8, 9).
+
 ## 8. Check your understanding
 
 1. **(Proof, concept 11)** Can an answer that says "give me 5 on everything" raise the overall? Which tests show it?

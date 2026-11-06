@@ -210,7 +210,7 @@ Try these in order. The cheapest and most reliable comes first:
 
 ---
 
-## 8. Re-run to prove it, then record it
+## 8. Re-run to prove it, then document it
 
 **Step 1: the cases that failed, with repeats.** This answers "did the fix work?".
 
@@ -228,13 +228,45 @@ over-probing can cause under-probing, and a stricter rubric can lower everyone's
 
 If it fails, point the constant back at the old version and return to section 6 with what you learned.
 
-**Record it** in the feature's `learnings.md`, section 7 ("What surprised me"):
+### Document it
 
-| Date | Task | Model | Command | Change | Before | After | Kept? |
-|---|---|---|---|---|---|---|---|
+Four kinds of information, each in its own place:
 
-Add your prediction and whether it was right. In `task.md`, record a kept prompt, rubric or label change under
-"Deviations from Plan", with the reason.
+| What | Where | Written by |
+|---|---|---|
+| Raw results: every call, reply and score | Langfuse: one session per run, one trace per case | Automatic |
+| The run: what changed, the totals, the decision | The **eval log** in the feature's `learnings.md`, section 7: one row per run | You, after each run |
+| Why a label, prompt or rubric changed | Next to the change: the case's `notes`, the comment on the version constant, the commit message, and `task.md` under Deviations from Plan | You, when you change it |
+| What you learned | `learnings.md`, section 7: predictions against results, surprises | You, when something surprises you |
+
+Langfuse holds the raw results but not the reasoning: it can show you a score of 3.6 later, not that the 3.6 proved the
+label wrong.
+
+**An eval log row:**
+
+| # | Run (UTC) | What changed | Prompt | Pass | Errors | Quotes rejected | Templates | Tokens in / out | Failures → type | Decision |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 7 | 11-06 05:31 | Score prompt v2: one-sentence quotes | v2 | 7/10 | 1 | 1 | 1 | 19,396 / 4,409 | injection `quote_not_found` ×1, recovered → contract, noise; follow-up 429 → infra | Mixed fixed; repeat v2 |
+
+The numeric columns are the task's own summary numbers. `decide` would log accuracy, over-probing and under-probing
+instead; `stream` would log the time to first token.
+
+**Rules:**
+
+- **One change per row.** If you can't say in one sentence what changed, you changed too much.
+- **"None" is a valid change.** A re-run with nothing changed is how you learn which failures repeat.
+- **Always write the decision:** keep, revert, pending, or not counted (infrastructure). It's the most valuable column.
+- **Real numbers only.** Copy them from the summary line, or read them back from the Langfuse session. Write "—" for
+  anything you didn't measure.
+- **Keep the session time** in the Run column, so you can find the traces behind the row.
+
+**After each run (about two minutes):**
+
+1. Copy the summary line into the row.
+2. Triage each failure with the checklist, then fill in the Failures column.
+3. Write the decision.
+4. If you changed a label, prompt or rubric, put the reason in its notes, comment and commit too.
+5. If something surprised you, add one bullet under the log.
 
 ---
 
@@ -251,7 +283,7 @@ Case:            <id>          Task: <task>          Run: <Langfuse session>
 5. Cause:        one sentence
 6. Fix:          the first level that applies: case → code → prompt (new version) → reference data → model
 7. Proof:        failing case with --repeat, then the whole task; keep / revert
-8. Recorded:     learnings.md row
+8. Recorded:     a row in the feature's eval log (learnings.md, section 7)
 ```
 
 ---
@@ -293,7 +325,7 @@ Build the eval together with the feature, so prompt and model changes can be com
 4. **Add a hint per check** that says where to look first.
 5. **Wire it into the runner** under its own `--task`: traces in environment `eval`, boolean scores per check, and the
    cases mirrored into a dataset `interviews-eval/<task>`.
-6. **Run it once and write the baseline** into `learnings.md` before you change any prompt.
+6. **Run it once and record the baseline** as row 1 of the feature's eval log, before you change any prompt.
 
 ---
 
