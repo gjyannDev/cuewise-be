@@ -84,6 +84,27 @@ Each concept has: **What** it is, **Why** it matters, where it shows up **In Cue
 - **In Cuewise:** 15–20 sample answers (strong, vague, off-topic, injection attempt) run against each prompt version and model.
 - **Proof:** You change the prompt and can show with numbers whether it got better or worse.
 
+### 11. Rubrics, scoring and LLM-as-judge
+
+- **What:** A rubric breaks "quality" into a few criteria, and each criterion has anchored levels ("a 2 looks like this, a 4 looks like that"). The model scores each criterion; your code combines them. Consistency is measured by scoring the same input several times.
+- **Why:** "Rate this 1–10" is noise. The same model gives different scores for the same input, and has its own biases (lenient, prefers long answers, prefers the first option). A number you can't repeat can't be compared across prompts or models.
+- **In Cuewise:** The end-of-interview feedback scores each criterion. The same technique, as a judge, grades replies in the evals.
+- **Proof:** You score one interview 5 times and can state the spread, and you compare the judge's grades with your own on about 10 cases.
+
+### 12. Embeddings and retrieval (RAG)
+
+- **What:** Text becomes a vector; similar meaning means nearby vectors. Retrieval fetches the top-k most relevant pieces for the prompt instead of sending a whole knowledge base. Ingestion, chunking, embedding, retrieval and generation are separate steps, each testable alone.
+- **Why:** You can't put everything in the context (concept 2). But retrieval can fail silently, and the model then answers confidently from the wrong text. Retrieved text is also untrusted input (concept 8).
+- **In Cuewise:** Retrieve questions by role, level and job description, and good-answer examples to ground the feedback.
+- **Proof:** You report retrieval quality (recall@k) separately from answer quality, and can show a query where retrieval failed and why.
+
+### 13. Tool use and agents
+
+- **What:** The model returns a request to call a function (a name and arguments). Your code validates it, runs it and returns the result, and the loop repeats until the model is done. An agent is that loop, with a limit on its steps.
+- **Why:** The model can fetch what it needs instead of you guessing what to send. But every step adds latency and cost, a new way to fail, and a new injection path through the tool results.
+- **In Cuewise:** The model can call `search_questions` or `get_rubric`, while the code still decides what is allowed.
+- **Proof:** A test where the model asks for tools forever and the turn still stops at the limit, and you can say when a fixed pipeline beats an agent.
+
 ### Model choice (runs through everything)
 
 Cheaper models are faster but worse; better models are slower and cost more. The provider abstraction plus evals let you **measure** that trade-off instead of guessing.
@@ -104,6 +125,24 @@ Two rules for this path:
 
 - **Start evals early, not at slice 5.** Begin in slice 1–2 with about 5 sample answers run by hand, and grow the set as you go.
 - **Don't polish each slice.** Build the minimum that works end to end and move on. Tune context strategy, summarization etc. when you actually hit the problem; hitting it teaches more than preventing it.
+
+## Build order: scoring, retrieval and tools
+
+The interview works and can be measured. These slices add what it still can't do: judge a whole interview, find the right content, call functions, and survive a provider outage.
+
+| Slice                             | What gets built                                                                                                                                              | Concepts            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- |
+| 6. Feedback and scoring           | A separate endpoint that generates structured, rubric-based feedback once and stores it; scores combined in code; consistency measured                        | 4, 5, 11            |
+| 7. Eval maturity                  | LLM-as-judge with a rubric, calibrated against your own grades; a regression gate that fails when the pass rate drops                                        | 10, model choice    |
+| 8. Embeddings and RAG             | pgvector in Postgres; ingestion, chunking, embedding, retrieval as separate steps; retrieved questions and good-answer examples; retrieval evals              | 12, 8               |
+| 9. Tool use and agents            | Tool-call support behind `LLMProvider`; a few read-only tools; a bounded loop under the turn's deadline                                                      | 13, 5, 8            |
+| 10. Provider fallback chain       | `LLM_PROVIDERS` with a second and third vendor behind the factory; the same eval set run on each                                                             | 6, model choice     |
+
+Three rules for this part of the path:
+
+- **Close the open evals first.** Run the pending real-model runs (the follow-up decide evals and the v4 vs v5 comparison) and a live time to first token, so every later change has a baseline.
+- **Each slice ends with a number against the previous behavior.** Spread of scores, judge agreement, recall@k, tool-loop cost, eval pass rate per provider. No number, not done.
+- **Reuse the foundation.** A new slice should mostly be a new prompt, schema, eval cases and `learnings.md`, not new plumbing.
 
 ## Slices in detail
 
@@ -291,6 +330,144 @@ There's no single right answer. You make the call based on speed vs complexity.
 
 **Done when:** you can say "strategy X keeps eval pass rate at N/6 and cuts tokens per interview from A to B", and the chosen strategy is in the code.
 
+### The next slices
+
+Each one adds a layer on top of the previous one:
+
+```
+Slice 6   judgment: score a whole interview, consistently
+   └─ Slice 7   trust: prove the judge and catch regressions
+         └─ Slice 8   knowledge: retrieve instead of hard-coding
+               └─ Slice 9   action: the model calls your functions, the code stays in charge
+                     └─ Slice 10  resilience: another vendor answers when one fails
+```
+
+### Slice 6: Feedback and scoring
+
+**Goal:** After an interview, generate structured, rubric-based feedback once, store it, and make its scores repeatable enough to compare across prompts and models.
+
+**What the user sees:** When the interview is completed, a feedback page: a short summary, strengths, what to improve, a note on each question, and a score per criterion.
+
+**What you build:**
+- **Data:** an `interview_feedback` table (session, rubric version, prompt version, status `generated` / `failed`, the validated JSON, token usage and latency). UUID primary key like every table.
+- **A rubric as data:** a versioned file (`feedback_rubric_v1`) with a few criteria, each with anchored levels ("a 2 means..., a 4 means..."). You pick the criteria in the spec.
+- **An output schema validated with Pydantic:** strengths, improvements, one note per question, one score per criterion.
+- **Code enforces:** scores are range-checked, every question gets a note, and the overall score is **computed by the code** from the criteria, not taken from the model. An invalid reply is retried once; then the feedback is marked `failed` and can be retried. A made-up score is never shown.
+- **A separate endpoint** that generates feedback once and stores it (calling it twice doesn't pay twice), plus one that reads it. Ownership checks in the controller.
+- **Its own context strategy:** feedback sees the whole interview, so it gets its own task in the `ContextManager` (answer cap, input limit) and a token budget. The cost of one feedback is logged.
+- **Evals:** labelled cases (strong, weak, mixed, an injection inside an answer) with the score band you expect, plus a consistency run: the same interview scored N times.
+
+**You learn:**
+- rubric design and score consistency (concept 11)
+- richer structured output, and still never trusting what the model returns (concept 4)
+- the code computes the number that matters (concept 5)
+- a long-context call and its cost (concepts 2, 9). Output is long here, so this is also where streaming pays off most.
+
+**Not included:** streaming the feedback (reuse Slice 4 later), exporting it, comparing candidates, anything that looks like a hiring decision.
+
+**Done when:**
+- one interview scored 5 times stays within a spread you can state (for example ±1 per criterion)
+- a test where the fake provider returns garbage leaves the interview completed and the feedback `failed` and retryable
+- you can say what one feedback costs, in tokens and money
+
+### Slice 7: Eval maturity (trust the judge, catch regressions)
+
+**Goal:** Know that the judge is right often enough to rely on, and fail loudly when a change makes things worse. This finishes what Slice 5 started.
+
+**What the user sees:** Nothing. This is for you.
+
+**What you build:**
+- **An LLM-as-judge** with its own versioned prompt and rubric ("is this follow-up relevant to the answer?", "is this feedback specific?"), run by a separate model or prompt from the one being judged.
+- **A calibration set:** about 10 cases you grade by hand. Compare the judge's grades with yours (agreement, and bias: does it favour long replies, or the first option?).
+- **A bigger labelled cases file** and a runner that compares a run with a stored baseline (the Langfuse datasets and scores are already wired in), with repeats to see the variance.
+- **A regression gate:** a command that exits non-zero when the pass rate drops below the baseline minus a tolerance. A cheap rule-based subset runs on the fake provider in normal CI; the real-model run stays opt-in because it costs money.
+
+**You learn:**
+- the limits of LLM-as-judge: bias, variance, and agreeing with you on easy cases only (concept 10)
+- the cost of evaluating (concept 9) and when a rule check is enough
+- model choice backed by a number you trust
+
+**Not included:** online evals on live traffic and user thumbs up/down (see Later stages).
+
+**Done when:** you can say "the judge agrees with my grade on N/10 cases, it is biased toward X", and a deliberate prompt regression makes the gate fail.
+
+### Slice 8: Embeddings and RAG
+
+**Goal:** Retrieve the right content instead of hard-coding it, and prove retrieval works on its own before judging the answers built on it.
+
+**What the user sees:** Questions that fit their role, level and job description better, and feedback that can point to what a strong answer looks like.
+
+**What you build:**
+- **pgvector in Postgres** through an Alembic migration (never `create_all`), and an embeddings table with UUID keys.
+- **Five separate, individually testable steps:**
+  - **Ingestion:** load the question bank and a small set of good-answer examples
+  - **Chunking:** decide what one chunk is (probably one question or one example with its metadata; you may not need to split at all)
+  - **Embedding:** an `Embedder` behind an interface in `app/core/ai/`, like `Transcriber`, with a fake for tests
+  - **Retrieval:** top-k with filters (role, level), replacing or feeding `select_questions` while the bank stays the fallback
+  - **Generation:** the retrieved items go into the prompt as delimited data
+- **Retrieval evals:** labelled queries with the item that should come back; report recall@k and MRR, separately from the quality of the generated question or feedback.
+- **Privacy:** embed the knowledge base, not candidate answers, unless a spec says why.
+
+**You learn:**
+- embeddings and retrieval (concept 12), and why retrieval quality and answer quality are measured apart
+- chunking as a real decision
+- retrieved text is untrusted input too: the injection defences from Slice 2 apply (concept 8)
+- the cost of embedding (concept 9)
+
+**Not included:** reranking, hybrid keyword + vector search, uploading résumés.
+
+**Done when:** you can say "recall@5 is X on N labelled queries", show one query where retrieval failed and why, and show the judge score of the generated output with and without retrieval.
+
+### Slice 9: Tool use and agents
+
+**Goal:** Let the model call a few of your functions, while the code stays in charge of what is allowed.
+
+**What the user sees:** Nothing new directly. Behind the scenes, the model can look things up (a rubric, matching questions) instead of you guessing what to put in the prompt.
+
+**What you build:**
+- **Tool support behind `LLMProvider`** (OpenAI-compatible tool calls), plus scripted tool calls in `FakeProvider`.
+- **A few read-only tools** with Pydantic argument schemas, for example `search_questions(role, level, topic)` and `get_rubric(criterion)`. This is what the empty `# Capabilities` part of the prompts is for.
+- **A bounded loop:** a maximum number of tool calls per turn, a timeout per tool, and the turn's shared `Deadline`.
+- **Code enforces:** an allowlist of tools, validated arguments, everything scoped to the session and user (the model can't name ids outside them), and tool results treated as untrusted data.
+- **Tracing and logs:** each tool call traced in Langfuse; log the tool name and duration, not the arguments' text.
+- **Evals:** does the model pick the right tool, and does it stop?
+
+**You learn:**
+- the tool-call loop and bounded autonomy (concept 13)
+- indirect injection: instructions hiding in a tool result (concept 8)
+- when **not** to use an agent: compare it with the fixed decide / write pipeline on cost, latency and quality (concepts 5, 9)
+
+**Not included:** write tools (anything that changes data), multiple agents, long-running autonomy.
+
+**Done when:**
+- a test where the fake provider asks for tools forever still ends the turn at the limit
+- a tool result containing an instruction doesn't change behavior
+- you can say whether the tool version beats the pipeline version, with numbers
+
+### Slice 10: Provider fallback chain
+
+**Goal:** When one provider fails, the next one answers, and you can see what each vendor does on the same cases.
+
+**What the user sees:** Fewer bank fallbacks and fewer errors during a provider outage.
+
+**What you build:**
+- **Config:** `LLM_PROVIDERS=google,...` as an ordered list, plus a block per vendor: `LLM_<VENDOR>_API_KEY`, `_MODEL`, `_BASE_URL`. No positional names, so reordering never renames keys.
+- **The chain in the factory:** build the providers in order and fall through on failure. Retries and switches happen only **before the first streamed chunk**, because after that the candidate may have read text.
+- **Tracing:** which provider answered each call, and the cost per vendor.
+- **The same eval set run on each provider**, with the numbers side by side.
+
+**You learn:**
+- reliability beyond one vendor (concept 6)
+- the same prompt behaves differently across vendors; model choice with evidence, not a guess
+- the cost of redundancy
+
+**Not included:** a circuit breaker, load balancing, routing by difficulty (see Later stages).
+
+**Done when:**
+- a test where the first provider times out shows the second answering, and the log says which
+- a stream that fails after its first chunk doesn't switch providers
+- you can say "provider B scores N/M on the cases, at X times the cost of A"
+
 ## The foundation this leaves behind
 
 Every later AI feature reuses these, so a new feature mostly means a new prompt, schema and eval cases, not new plumbing:
@@ -303,9 +480,12 @@ Every later AI feature reuses these, so a new feature mostly means a new prompt,
 
 ## Later stages (after the core is solid)
 
-- **Feedback and scoring:** rubrics, LLM-as-judge, keeping scores consistent.
-- **Embeddings and RAG:** search over resumes, job descriptions and a knowledge base of good answers.
-- **Tool use and agents:** the model calls your functions (e.g. "fetch next question").
+- **Prompt caching:** `cached_tokens` is already tracked. Restructure prompts so the stable prefix is cached, then measure the savings.
+- **Model routing and semantic caching:** send easy turns to a cheap model and hard ones to a strong model, using evals to justify the split.
+- **Guardrails on output:** a second pass that checks replies for leaked prompts, scores given when they shouldn't be, and off-topic drift.
+- **Online evals and feedback loops:** score live traces in Langfuse and add user thumbs up/down.
+- **Resume parsing:** extraction with structured output, plus a PII-minimization step before anything goes to the provider.
+- **Fine-tuning vs prompting:** a cost and quality analysis only, not a build.
 
 ## How to make it stick
 
@@ -343,12 +523,13 @@ reference answers.
 - [x] Slice 2 (revised): LLM as the interviewer: built; `docs/features/llm-interviewer` (the LLM asks every question, predefined reactions, structured JSON + bank fallback, job description as untrusted data, first evals; real-model runs recorded in its learnings). Both injection cases re-checked on `interviewer_v3`: 3/3 each (context-management Checkpoint D)
 - [x] Context management: built and measured; `docs/features/context-management` (ContextManager with `window_ledger` + `interviewer_v3` live and `full_history` as baseline, running notes, job-description summary, input limit, usage report, eval flags with repeats). Real-model comparison on `gemini-3.5-flash-lite`, 3 repeats: `full_history` v1 20/21 vs `window_ledger` v3 26/26 on returned replies, injection 3/3 on both, about +53% input tokens on short cases and near parity at question 9 (a cap on input, not a saving at 10 questions). Still open, optional: `cached_tokens` in a live interview, v2 vs v3 ablation, summary/notes/reasoning-effort ablations, the long-history checklist grades and the Proof answers
 - [ ] Follow-up questions: the LLM probes deeper into an answer, questions are marked as follow-ups, limits per question. Built 2026-10-31 as a decide / write split (`docs/features/follow-up-questions/`): a decide call with closed actions and gaps, a code-enforced cap of 2 per main question and one shared turn deadline, then the write call (`interviewer_v4`). Unit-tested end to end with fakes; still open before ticking: the real-model decide evals (`--task decide --repeat 3`), the v4 write evals, and p50/p95 per turn from a live interview
-- [ ] Slice 3 (revised): End-of-interview feedback: a separate endpoint that generates structured feedback once and stores it (strengths, improvements, per-question notes, maybe a score); richer structured output, its own evals
 - [ ] Slice 4: SSE streaming: built 2026-11-02 (`docs/features/sse-streaming/`). `POST /interviews/{id}/messages/stream` sends the turn as typed SSE events over sse-starlette (progress, reaction, the question token by token through an async provider `stream()`, reset on a rejected draft, one terminal `done`/`error`). It shares the JSON turn's rules and its single atomic save, so a client that leaves saves nothing, and `interviewer_v5` is plain text with a `CATEGORY:` line. Unit-tested end to end with fakes. Still open before ticking: the 3-repeat v4 vs v5 eval comparison and the time to first token from a live interview (see its learnings)
 - [ ] Slice 5: Evals (grow the first set from Slice 2 into a repeatable model/prompt comparison)
-- [ ] Next: feedback and scoring
-- [ ] Next: embeddings and RAG
-- [ ] Next: tool use and agents
+- [ ] Slice 6: Feedback and scoring (earlier called "Slice 3 (revised)"): a separate endpoint that generates rubric-based structured feedback once and stores it (strengths, improvements, per-question notes, scores combined in code); consistency measured
+- [ ] Slice 7: Eval maturity (LLM-as-judge calibrated against your own grades, a regression gate)
+- [ ] Slice 8: Embeddings and RAG (pgvector, retrieval evals)
+- [ ] Slice 9: Tool use and agents (a bounded tool loop, read-only tools)
+- [ ] Slice 10: Provider fallback chain (`LLM_PROVIDERS`, the same evals on each vendor)
 
 ## Slices
 
@@ -366,4 +547,14 @@ reference answers.
 │ 4. SSE streaming                  │ 7                             │
 ├───────────────────────────────────┼───────────────────────────────┤
 │ 5. Evals                          │ 10, model comparison          │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 6. Feedback and scoring           │ 4, 5, 11                      │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 7. Eval maturity                  │ 10, model choice              │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 8. Embeddings and RAG             │ 12, 8                         │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 9. Tool use and agents            │ 13, 5, 8                      │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 10. Provider fallback chain       │ 6, model choice               │
 └───────────────────────────────────┴───────────────────────────────┘

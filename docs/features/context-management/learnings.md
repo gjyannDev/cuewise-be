@@ -15,7 +15,7 @@ The baseline (`uv run python -m app.scripts.usage_report` on the dev DB, 2026-10
 history):
 
 ```
-interviews=16 llm_interviews=2
+interviews=16 llm_interviews=2l
 interview 01a1869f-...  questions=3 llm=3 bank=0
   q1 prompt=523 completion=261 latency_ms=2677
   q2 prompt=580 completion=474 latency_ms=4624
