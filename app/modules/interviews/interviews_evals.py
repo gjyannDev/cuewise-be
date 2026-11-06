@@ -3,6 +3,8 @@
 Run:  uv run python -m app.modules.interviews.interviews_evals [--strategy ...] [--repeat N] [--help]
       uv run python -m app.modules.interviews.interviews_evals --task decide --repeat 3   (follow-up decisions)
       uv run python -m app.modules.interviews.interviews_evals --task stream --repeat 3   (interviewer_v5, streamed)
+      uv run python -m app.modules.interviews.interviews_evals --task feedback --repeat 5 (end-of-interview scoring;
+      its cases and checks live in interviews_feedback_evals.py)
 (needs LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings). It costs real calls, so it never runs in
 `uv run pytest`; the checks themselves are unit-tested with the fake provider. Never imported by the app.
 
@@ -755,11 +757,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repeat", type=_positive, default=1)
     parser.add_argument(
         "--task",
-        choices=["write", "decide", "stream"],
+        choices=["write", "decide", "stream", "feedback"],
         default="write",
         help=(
             "write: the question rules (default, interviewer_v4 as JSON); decide: the follow-up decision on the "
-            "labelled cases; stream: the streamed turn's write call (interviewer_v5), with time to first token"
+            "labelled cases; stream: the streamed turn's write call (interviewer_v5), with time to first token; "
+            "feedback: end-of-interview scoring on labelled interviews (bands, quotes, spread with --repeat)"
         ),
     )
     return parser
@@ -821,6 +824,12 @@ def main(
     # One event loop for every streamed call, so the provider's async connections are reused, never moved between loops.
     with start_blocking_portal() as portal:
         try:
+            if args.task == "feedback":
+                # Its own cases, checks and summary (interviews_feedback_evals.py); imported here to avoid a cycle.
+                from .interviews_feedback_evals import run_feedback
+
+                run_feedback(args, provider, tracer, settings, label=label, tags=tags)
+                return 0
             cases = load_cases(EVAL_CASES_PATH)
             if decide:
                 cases = [c for c in cases if c.expect]
