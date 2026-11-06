@@ -219,6 +219,53 @@ def test_call_without_labels_still_gets_a_name(tracer, client):  # EC9
     assert client.generations[0].final["name"] == "llm-call"
 
 
+def test_the_generation_records_its_model_parameters(tracer, client):  # interview-feedback: clearer generations
+    traced(tracer, result(), result()).complete(MESSAGES, max_tokens=100, temperature=0.2)
+    traced(tracer, result()).complete(MESSAGES, max_tokens=50)
+
+    assert client.generations[0].final["model_parameters"] == {"max_tokens": 100, "temperature": 0.2}
+    assert client.generations[1].final["model_parameters"] == {"max_tokens": 50}  # no temperature sent, none shown
+
+
+# --- steps and checks inside a trace (interview-feedback) -----------------------------------------------------------
+
+
+def test_a_step_is_a_named_observation_that_ends_with_its_output(tracer, client):
+    with tracer.step("feedback-score", metadata={"prompt_version": "v1"}) as step:
+        step.finish(output={"outcome": "ok"})
+
+    [span] = client.traces
+    assert (span.final["name"], span.final["as_type"], span.final["metadata"]) == ("feedback-score", "chain", {"prompt_version": "v1"})
+    assert span.final["output"] == {"outcome": "ok"} and span.ended == 1
+
+
+def test_a_failed_step_carries_a_level_and_a_status_message(tracer, client):
+    with tracer.step("feedback-write") as step:
+        step.finish(output={"text_source": "template"}, level="WARNING", status_message="template used")
+
+    final = client.traces[0].final
+    assert (final["level"], final["status_message"]) == ("WARNING", "template used")
+
+
+def test_a_check_records_the_codes_verdict_as_a_guardrail(tracer, client):
+    tracer.check("check-score-reply", passed=False, verdict="invalid_reply:quote_not_found", metadata={"attempt": 1}, hint="Compare the quote.")
+    tracer.check("check-score-reply", passed=True, verdict="ok", metadata={"attempt": 2})
+
+    rejected, accepted = client.generations
+    assert rejected.final["as_type"] == "guardrail" and rejected.final["name"] == "check-score-reply"
+    assert rejected.final["output"] == {"passed": False, "verdict": "invalid_reply:quote_not_found", "hint": "Compare the quote."}
+    assert (rejected.final["level"], rejected.final["status_message"]) == ("WARNING", "invalid_reply:quote_not_found")
+    assert rejected.final["metadata"] == {"attempt": 1} and rejected.ended == 1
+    assert "level" not in accepted.final and accepted.final["output"]["passed"] is True
+
+
+def test_steps_and_checks_are_no_ops_when_off_and_never_raise_when_langfuse_fails():
+    for tracer in (Tracer(None), Tracer(FakeClient(fail=True), propagate=lambda **_: contextlib.nullcontext())):
+        with tracer.step("feedback-score") as step:
+            step.finish(output={"outcome": "ok"}, level="WARNING", status_message="x")
+        tracer.check("check-score-reply", passed=True, verdict="ok")
+
+
 # --- stream -----------------------------------------------------------------------------------------------------
 
 

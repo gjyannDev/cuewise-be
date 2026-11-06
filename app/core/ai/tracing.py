@@ -100,6 +100,30 @@ class Generation:
         )
 
 
+class Step:
+    """One step of a trace as Langfuse sees it; `finish` sets its outcome. Safe when tracing is off or failed."""
+
+    def __init__(self, observation: Any | None):
+        self._obs = observation
+
+    @_safe("step update")
+    def finish(
+        self,
+        *,
+        output: Any,
+        level: str | None = None,
+        status_message: str | None = None,
+    ) -> None:
+        if self._obs is None:
+            return
+        fields: dict[str, Any] = {"output": output}
+        if level is not None:
+            fields["level"] = level
+        if status_message is not None:
+            fields["status_message"] = status_message
+        self._obs.update(**fields)
+
+
 def _usage_details(result: LLMResult) -> dict[str, int]:
     pairs = {
         "input": result.prompt_tokens,
@@ -209,7 +233,10 @@ class Tracer:
         return True
 
     def start_generation(
-        self, messages: Sequence[ChatMessage], labels: TraceLabels
+        self,
+        messages: Sequence[ChatMessage],
+        labels: TraceLabels,
+        model_parameters: Mapping[str, int | float] | None = None,
     ) -> Generation:
         if self._client is None:
             return Generation(None, labels)
@@ -219,11 +246,66 @@ class Tracer:
                 as_type="generation",
                 input=[m.model_dump() for m in messages],
                 metadata=dict(labels),
+                model_parameters=dict(model_parameters or {}),
             )
         except Exception as exc:
             logger.warning("langfuse generation start failed (%s)", type(exc).__name__)
             return Generation(None, labels)
         return Generation(observation, labels)
+
+    @contextmanager
+    def step(
+        self, name: str, *, metadata: Mapping[str, Any] | None = None
+    ) -> Iterator["Step"]:
+        """A named step inside the current trace (a Langfuse `chain`): the generations and checks started inside it
+        nest under it, so a trace reads score -> attempts -> checks instead of a flat list of calls. Start/stop
+        failures are swallowed; the body's own exceptions are not."""
+        stack = ExitStack()
+        observation = None
+        if self._client is not None:
+            try:
+                observation = stack.enter_context(
+                    self._client.start_as_current_observation(
+                        name=name, as_type="chain", metadata=dict(metadata or {})
+                    )
+                )
+            except Exception as exc:
+                logger.warning("langfuse step start failed (%s)", type(exc).__name__)
+        try:
+            yield Step(observation)
+        finally:
+            try:
+                stack.close()
+            except Exception as exc:
+                logger.warning("langfuse step end failed (%s)", type(exc).__name__)
+
+    @_safe("check")
+    def check(
+        self,
+        name: str,
+        *,
+        passed: bool,
+        verdict: str,
+        metadata: Mapping[str, Any] | None = None,
+        hint: str | None = None,
+    ) -> None:
+        """The code's verdict on one reply, as a Langfuse `guardrail` right after the generation it checked: a reply
+        the model sent but the code rejected shows as a WARNING (with a hint on where to look) instead of looking like
+        a success."""
+        if self._client is None:
+            return
+        output: dict[str, Any] = {"passed": passed, "verdict": verdict}
+        if hint:
+            output["hint"] = hint
+        fields: dict[str, Any] = {
+            "name": name,
+            "as_type": "guardrail",
+            "output": output,
+            "metadata": dict(metadata or {}),
+        }
+        if not passed:
+            fields |= {"level": "WARNING", "status_message": verdict}
+        self._client.start_observation(**fields).end()
 
     def close(self) -> None:
         """Send what is still buffered, then stop the background exporter. Called once at app shutdown."""
@@ -279,7 +361,9 @@ class TracingProvider:
         reasoning_effort: ReasoningEffort | None = None,
         trace_labels: TraceLabels | None = None,
     ) -> LLMResult:
-        generation = self._tracer.start_generation(messages, trace_labels or {})
+        generation = self._tracer.start_generation(
+            messages, trace_labels or {}, _model_parameters(max_tokens, temperature)
+        )
         try:
             result = self._inner.complete(
                 messages,
@@ -307,7 +391,9 @@ class TracingProvider:
         reasoning_effort: ReasoningEffort | None = None,
         trace_labels: TraceLabels | None = None,
     ) -> AsyncGenerator[str | LLMResult]:
-        generation = self._tracer.start_generation(messages, trace_labels or {})
+        generation = self._tracer.start_generation(
+            messages, trace_labels or {}, _model_parameters(max_tokens, temperature)
+        )
         parts: list[str] = []
         inner = self._inner.stream(
             messages,
@@ -336,3 +422,12 @@ class TracingProvider:
 
     async def aclose(self) -> None:
         await self._inner.aclose()
+
+
+def _model_parameters(
+    max_tokens: int, temperature: float | None
+) -> dict[str, int | float]:
+    """What the call asked the model for, shown on the generation. A temperature only when one was sent."""
+    return {"max_tokens": max_tokens} | (
+        {} if temperature is None else {"temperature": temperature}
+    )
