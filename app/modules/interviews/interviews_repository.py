@@ -1,18 +1,33 @@
 import uuid
-from typing import cast
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Any, cast
 
 from sqlalchemy import (
     ColumnElement,
     CursorResult,
     UnaryExpression,
+    and_,
     func,
+    or_,
     select,
     update,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .interviews_constants import HistorySortColumn, SessionStatus, SortDirection
-from .interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
+from .interviews_constants import (
+    FeedbackStatus,
+    HistorySortColumn,
+    SessionStatus,
+    SortDirection,
+)
+from .interviews_model import (
+    InterviewFeedback,
+    InterviewMessage,
+    InterviewQuestion,
+    InterviewSession,
+)
 
 # UUIDv7 ids are time-ordered, so `created_at` sorts by id: start order, served by ix_interview_sessions_user_id_id.
 _HISTORY_SORT_COLUMNS = {
@@ -205,6 +220,79 @@ class InterviewsRepository:
         except Exception:
             self.db.rollback()
             raise
+        return True
+
+    # --- end-of-interview feedback ---
+
+    def get_feedback(self, session_id: uuid.UUID) -> InterviewFeedback | None:
+        return self.db.scalar(select(InterviewFeedback).where(InterviewFeedback.session_id == session_id))
+
+    def insert_feedback(self, feedback: InterviewFeedback) -> bool:
+        """The first claim of an interview's feedback. False when another request inserted first: the unique
+        session_id lets only one of two simultaneous requests win."""
+        try:
+            self.db.add(feedback)
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            return False
+        return True
+
+    def reclaim_feedback(self, session_id: uuid.UUID, started_at: datetime, stale_before: datetime) -> bool:
+        """Take over a `failed` row, or a `generating` one whose request died (started before `stale_before`).
+
+        A compare-and-swap, like record_turn: the age check is part of the UPDATE (never done in Python), so of two
+        requests only one matches, and a fresh `generating` or a `generated` row is never touched. Stored scores are
+        kept, so a takeover only has to write the text.
+        """
+        result = cast(
+            CursorResult,
+            self.db.execute(
+                update(InterviewFeedback)
+                .where(
+                    InterviewFeedback.session_id == session_id,
+                    or_(
+                        InterviewFeedback.status == FeedbackStatus.failed,
+                        and_(
+                            InterviewFeedback.status == FeedbackStatus.generating,
+                            InterviewFeedback.started_at < stale_before,
+                        ),
+                    ),
+                )
+                .values(status=FeedbackStatus.generating, started_at=started_at, finished_at=None, failure_reason=None)
+                # No in-Python evaluation against loaded rows: SQLite hands back timezone-naive datetimes, and the
+                # commit below expires every loaded object anyway.
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        if result.rowcount != 1:
+            self.db.rollback()
+            return False
+        self.db.commit()
+        return True
+
+    def update_claimed_feedback(
+        self, feedback_id: uuid.UUID, claimed_at: datetime, values: Mapping[str, Any]
+    ) -> bool:
+        """Write to the row only while this request still holds its claim (still `generating`, same `started_at`).
+        False = another request took it over meanwhile, and nothing was written."""
+        result = cast(
+            CursorResult,
+            self.db.execute(
+                update(InterviewFeedback)
+                .where(
+                    InterviewFeedback.id == feedback_id,
+                    InterviewFeedback.status == FeedbackStatus.generating,
+                    InterviewFeedback.started_at == claimed_at,
+                )
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        if result.rowcount != 1:
+            self.db.rollback()
+            return False
+        self.db.commit()
         return True
 
     def _abandon_in_progress(self, user_id: uuid.UUID) -> None:

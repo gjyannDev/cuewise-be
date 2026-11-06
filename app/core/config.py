@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     llm_max_retries: int = Field(default=2, ge=0)
     llm_total_budget_seconds: float = Field(default=30, gt=0)
     llm_max_tokens: int = Field(default=4000, gt=0)
+    # End-of-interview feedback: one budget for both calls (each still within the per-call limits above); a
+    # `generating` row older than budget + margin is taken over by the next request (a crashed one left it behind).
+    feedback_total_budget_seconds: float = Field(default=60, gt=0)
+    feedback_stale_margin_seconds: float = Field(default=30, ge=0)
+    # The score reply of the largest interview is about 4,000 tokens; a reply cut off by the cap is invalid JSON.
+    feedback_score_max_tokens: int = Field(default=6000, gt=0)
+    feedback_write_max_tokens: int = Field(default=2000, gt=0)
+    # Low, so the same interview scores (nearly) the same twice.
+    feedback_score_temperature: float = Field(default=0.2, ge=0, le=2)
 
     # Speech-to-text for voice answers (Deepgram). No key = voice answers off; everything else still works.
     deepgram_api_key: SecretStr | None = None

@@ -2,7 +2,7 @@ import time
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, UploadFile, status
+from fastapi import APIRouter, Depends, Query, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sse_starlette.sse import EventSourceResponse
 
@@ -19,10 +19,16 @@ from .interviews_constants import (
     SessionStatus,
     SortDirection,
 )
-from .interviews_dependencies import InterviewsControllerDep, limit_transcriptions
+from .interviews_dependencies import (
+    FeedbackControllerDep,
+    InterviewsControllerDep,
+    limit_feedback,
+    limit_transcriptions,
+)
 from .interviews_schema import (
     AnswerIn,
     AnswerOut,
+    FeedbackOut,
     InterviewCreateIn,
     InterviewListOut,
     InterviewOut,
@@ -148,6 +154,51 @@ def get_transcript(
     ctrl: InterviewsControllerDep,
 ) -> TranscriptOut:
     return ctrl.transcript(user, session_id)
+
+
+@router.post(
+    "/{session_id}/feedback",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_feedback)],
+    responses={
+        200: {"model": FeedbackOut, "description": "Already generated: the stored feedback, no new LLM call."},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def generate_feedback(
+    session_id: uuid.UUID,
+    response: Response,
+    user: Annotated[User, require_permissions(Permission.interviews_feedback)],
+    ctrl: FeedbackControllerDep,
+) -> FeedbackOut:
+    """Score and write the feedback on a completed interview, once; the request waits for it (several seconds).
+
+    201: generated now (or too few answers to assess: `enough_evidence` false, no scores). 200: already generated,
+    the same body. 409 `INTERVIEW_NOT_COMPLETED` or `FEEDBACK_IN_PROGRESS`. 502 `FEEDBACK_FAILED`: no scores could be
+    produced, POST again to retry. 503 `FEEDBACK_UNAVAILABLE`: the LLM is off."""
+    feedback, created = ctrl.generate(user, session_id)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return feedback
+
+
+@router.get(
+    "/{session_id}/feedback",
+    status_code=status.HTTP_200_OK,
+    responses={404: {"model": ErrorResponse}},
+)
+def get_feedback(
+    session_id: uuid.UUID,
+    user: Annotated[User, require_permissions(Permission.interviews_feedback)],
+    ctrl: FeedbackControllerDep,
+) -> FeedbackOut:
+    """The stored feedback in any status (`generating`, `generated`, `failed`); never calls the LLM. Scores and text
+    appear only once `generated`. 404 `FEEDBACK_NOT_FOUND` when none was requested yet."""
+    return ctrl.get(user, session_id)
 
 
 @router.post(

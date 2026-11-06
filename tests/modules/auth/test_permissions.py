@@ -5,7 +5,12 @@ from app.modules.auth.auth_constants import (
     permissions_for,
 )
 
-INTERVIEW_PERMISSIONS = {Permission.interviews_create, Permission.interviews_read_self, Permission.interviews_answer}
+INTERVIEW_PERMISSIONS = {
+    Permission.interviews_create,
+    Permission.interviews_read_self,
+    Permission.interviews_answer,
+    Permission.interviews_feedback,
+}
 
 
 def test_admin_holds_every_user_permission():  # AC16, interviews AC12

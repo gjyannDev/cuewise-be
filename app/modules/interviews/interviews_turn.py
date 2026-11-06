@@ -285,7 +285,7 @@ class Interviewer:
                             shown = True
                             yield Delta(item)
             except LLMError as exc:
-                _log_error(session_id, exc, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
+                log_llm_error(session_id, exc, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
                 if shown:
                     yield Reset()
                 if exc.after_output:
@@ -494,7 +494,7 @@ class Interviewer:
                     trace_labels={"task": DECISION_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
                 )
             except LLMError as exc:
-                _log_error(session_id, exc, DECISION_TASK, version, budget_left_ms)
+                log_llm_error(session_id, exc, DECISION_TASK, version, budget_left_ms)
                 break
             results.append(result)
             if not result.text.strip():
@@ -582,7 +582,7 @@ class Interviewer:
                     trace_labels={"task": INTERVIEWER_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
                 )
             except LLMError as exc:
-                _log_error(session_id, exc, INTERVIEWER_TASK, version, budget_left_ms)
+                log_llm_error(session_id, exc, INTERVIEWER_TASK, version, budget_left_ms)
                 break
             results.append(result)
             if not result.text.strip():
@@ -717,7 +717,7 @@ def log_result(
     )
 
 
-def _log_error(
+def log_llm_error(
     session_id: uuid.UUID, exc: LLMError, task: str, version: str, budget_left_ms: int
 ) -> None:
     # Transient faults are expected now and then; a bad key or broken reply needs someone to look.

@@ -123,6 +123,34 @@ class AudioContainer(StrEnum):
     wav = "wav"
 
 
+class FeedbackStatus(StrEnum):
+    """A feedback row's life: `generating` while a request holds it, then `generated` (final) or `failed` (POST again)."""
+
+    generating = "generating"
+    generated = "generated"
+    failed = "failed"
+
+
+class TextSource(StrEnum):
+    """Who wrote the feedback text: the write call, or the code's template when that call failed. Stored, never shown."""
+
+    llm = "llm"
+    template = "template"
+
+
+class Criterion(StrEnum):
+    """What the score call rates, 1 to 5. Which ones apply depends on the question's category (CATEGORY_CRITERIA)."""
+
+    structure = "structure"
+    specificity = "specificity"
+    ownership = "ownership"
+    outcome = "outcome"
+    correctness = "correctness"
+    depth = "depth"
+    trade_offs = "trade_offs"
+    clarity = "clarity"
+
+
 # Bank-only role tag: a question tagged "general" is eligible for every JobRole.
 GENERAL_ROLE = "general"
 
@@ -171,6 +199,8 @@ TRANSCRIPTION_MAX_BYTES = 3 * 1024 * 1024
 # Checked against the duration the vendor reports; a little over the web app's 120 s for encoder rounding.
 TRANSCRIPTION_MAX_SECONDS = 125
 TRANSCRIPTIONS_PER_MINUTE = 10
+# Feedback generation spends two LLM calls (the first reads the whole interview); a retry is only needed after a failure.
+FEEDBACKS_PER_MINUTE = 3
 
 # Terms Deepgram should favour when it transcribes an answer (keyterm prompting, Nova-3). Without them the spike heard
 # "useEffect" as "use event" and "Redis" as "Redix"; keyterms only help the terms listed, so domain phrases are here too.
@@ -423,4 +453,84 @@ CLOSING_REACTIONS: dict[LevelGroup, tuple[str, ...]] = {
         "We are done for today. Thank you.",
         "Thanks, that completes the interview.",
     ),
+}
+
+# --- End-of-interview feedback: a score call (closed JSON), then a write call (plain text) ---
+CATEGORY_CRITERIA: dict[QuestionCategory, tuple[Criterion, ...]] = {
+    QuestionCategory.behavioral: (Criterion.structure, Criterion.specificity, Criterion.ownership, Criterion.outcome),
+    QuestionCategory.technical: (Criterion.correctness, Criterion.depth, Criterion.trade_offs, Criterion.clarity),
+}
+SCORE_MIN = 1
+SCORE_MAX = 5
+# The code pre-check (no LLM call): a main question's answer of this many words is substantive, and at least this share
+# of the main questions must be substantive before anything is scored.
+SUBSTANTIVE_ANSWER_WORDS = 15
+SUBSTANTIVE_SHARE = 0.5
+QUOTE_MIN_LENGTH = 10
+QUOTE_MAX_LENGTH = 200
+# Also bounds the score reply: with one evidence item per criterion, the largest interview stays inside its token cap.
+REASON_MAX_LENGTH = 120
+FEEDBACK_SUMMARY_MAX_LENGTH = 300
+FEEDBACK_ITEM_MAX_LENGTH = 200
+FEEDBACK_NOTE_MAX_LENGTH = 160
+# (fewest, most) items the write call must return per list.
+STRENGTHS_COUNT = (2, 3)
+IMPROVEMENTS_COUNT = (2, 3)
+NEXT_STEPS_COUNT = (1, 3)
+# The write call's section labels, in order: the prompt asks for them and the parser reads them.
+SUMMARY_LABEL = "SUMMARY"
+STRENGTHS_LABEL = "STRENGTHS"
+IMPROVEMENTS_LABEL = "IMPROVEMENTS"
+NEXT_STEPS_LABEL = "NEXT STEPS"
+NOTES_LABEL = "NOTES"
+SECTION_LABELS = (SUMMARY_LABEL, STRENGTHS_LABEL, IMPROVEMENTS_LABEL, NEXT_STEPS_LABEL, NOTES_LABEL)
+# Fills {{tone}} in the write prompt, by level group (like the reactions: warmer early on, briefer later).
+FEEDBACK_TONE = {
+    LevelGroup.early: "warm and encouraging; they are early in their career, so start with what went well.",
+    LevelGroup.experienced: "direct and brief; they are experienced, so be concise and concrete.",
+}
+FEEDBACK_SCORE_TASK = "feedback_score"
+FEEDBACK_WRITE_TASK = "feedback_write"
+# Langfuse: each call is a step holding its attempts (generations) and the code's check of each reply (guardrails).
+FEEDBACK_SCORE_STEP = "score"
+FEEDBACK_WRITE_STEP = "write"
+FEEDBACK_CHECKS = {FEEDBACK_SCORE_TASK: "check-score-reply", FEEDBACK_WRITE_TASK: "check-write-reply"}
+# v2 (2026-11-06): one-sentence quotes, no evidence item when no single sentence shows a criterion (eval: a
+# whole-answer `structure` quote broke the 200-character limit on both attempts). v1 stays for comparison.
+FEEDBACK_SCORE_PROMPT_VERSION = "feedback_score_v2"
+FEEDBACK_WRITE_PROMPT_VERSION = "feedback_write_v1"
+# Ground truth for every score: never edit a shipped version in place, stored feedback names it.
+FEEDBACK_RUBRIC_VERSION = "feedback_rubric_v1"
+FEEDBACK_RUBRIC_PATH = Path(__file__).parent / "data" / f"{FEEDBACK_RUBRIC_VERSION}.json"
+# Estimated tokens. The largest allowed interview (10 main questions with 2 follow-ups each, 500-character questions,
+# 2,000-character answers) plus the prompt and rubric is about 22,000; nothing can be dropped, so over this it fails.
+FEEDBACK_SCORE_INPUT_LIMIT = 25000
+# Answers longer than this are shortened in the score call (quotes are still checked against the full text). Equal to
+# the answer limit today, so it only bites if that limit grows.
+FEEDBACK_ANSWER_CAP = MAX_ANSWER_LENGTH
+# The whole result when the pre-check (or the model) finds too little to assess: no scores are invented.
+FEEDBACK_INSUFFICIENT_MESSAGE = (
+    "There were not enough answers to assess this interview. Answer at least half of the questions in a few "
+    "sentences each, then try another practice interview."
+)
+CRITERION_LABELS: dict[Criterion, str] = {
+    Criterion.structure: "Structure",
+    Criterion.specificity: "Specific detail",
+    Criterion.ownership: "Your own role",
+    Criterion.outcome: "Outcome",
+    Criterion.correctness: "Correctness",
+    Criterion.depth: "Depth",
+    Criterion.trade_offs: "Trade-offs",
+    Criterion.clarity: "Clarity",
+}
+# The template text's advice when the write call fails: one practical tip per criterion (each under the item limit).
+CRITERION_TIPS: dict[Criterion, str] = {
+    Criterion.structure: "Tell each story in order: the situation, your task, what you did, and the result.",
+    Criterion.specificity: "Use one real example with concrete details: names of tools, numbers, dates.",
+    Criterion.ownership: "Say what you did yourself (\"I\"), not only what the team did (\"we\").",
+    Criterion.outcome: "End with the result: what changed, ideally with a number, and what you learned.",
+    Criterion.correctness: "Check the core facts of your answer, and say so when you are unsure.",
+    Criterion.depth: "Explain how it works underneath, not only what it is called.",
+    Criterion.trade_offs: "Name an alternative you considered and why you chose one over the other.",
+    Criterion.clarity: "Start with a one-sentence answer, then add the detail in a clear order.",
 }

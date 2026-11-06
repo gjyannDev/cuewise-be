@@ -20,6 +20,12 @@ from app.core.ai.provider import ChatMessage
 from .interviews_constants import (
     DECISION_PROMPT_VERSION,
     DECISION_TASK,
+    FEEDBACK_ANSWER_CAP,
+    FEEDBACK_SCORE_INPUT_LIMIT,
+    FEEDBACK_SCORE_PROMPT_VERSION,
+    FEEDBACK_SCORE_TASK,
+    FEEDBACK_WRITE_PROMPT_VERSION,
+    FEEDBACK_WRITE_TASK,
     FULL_HISTORY,
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_STREAM_TASK,
@@ -41,6 +47,7 @@ from .interviews_constants import (
     Level,
     QuestionKind,
 )
+from .interviews_feedback import FeedbackThread, StoredResult
 from .interviews_utils import (
     QuestionTurn,
     build_interviewer_messages,
@@ -49,6 +56,8 @@ from .interviews_utils import (
     main_numbers,
     neutralize_app_tags,
     render_decision_prompt,
+    render_feedback_score_prompt,
+    render_feedback_write_prompt,
     render_interviewer_prompt,
     render_interviewer_v2_prompt,
     render_summary_prompt,
@@ -57,6 +66,8 @@ from .interviews_utils import (
 
 SUMMARY = "summary"
 DECIDE = "decide"
+SCORE = "score"
+WRITE = "write"
 
 
 class InterviewerInputs(NamedTuple):
@@ -272,6 +283,106 @@ class JobDescriptionSummary:
         )
 
 
+class FeedbackScoreInputs(NamedTuple):
+    """Plain values for the score call: the whole interview, read once the interview is completed."""
+
+    role: JobRole
+    level: Level
+    interview_type: InterviewType
+    # The effective one: the stored summary when there is one, else the original.
+    job_description: str | None
+    threads: Sequence[FeedbackThread]
+    summary_used: bool = False
+
+
+class FeedbackWriteInputs(NamedTuple):
+    """Plain values for the write call: the stored scores and evidence, never the answers or the job description."""
+
+    role: JobRole
+    level: Level
+    interview_type: InterviewType
+    # Computed by the code; the model is told it, never asked for it.
+    overall: float
+    result: StoredResult
+
+
+class FeedbackScore:
+    """The score call: every thread whole, nothing droppable. Over its own limit it fails rather than score a part."""
+
+    def __init__(
+        self,
+        version: str = FEEDBACK_SCORE_PROMPT_VERSION,
+        *,
+        cap: int = FEEDBACK_ANSWER_CAP,
+        limit: int | None = FEEDBACK_SCORE_INPUT_LIMIT,
+    ):
+        self.version = version
+        self.template = load_prompt(version)
+        self.cap = cap
+        self.limit = limit
+
+    def droppable(self, inputs: FeedbackScoreInputs) -> int:
+        return 0
+
+    def build(self, inputs: FeedbackScoreInputs, dropped: int) -> StrategyOutput:
+        system = render_feedback_score_prompt(
+            role=inputs.role, level=inputs.level, interview_type=inputs.interview_type, template=self.template
+        )
+        parts = [job_description_block(inputs.job_description)]
+        truncated = 0
+        for thread in inputs.threads:
+            lines = ["<question_thread>", f"Main question {thread.main_number} ({thread.category.value})"]
+            for turn in thread.turns:
+                label = "Question" if turn.kind == QuestionKind.main else "Follow-up"
+                answer = neutralize_app_tags(turn.answer)
+                if len(answer) > self.cap:
+                    answer = answer[: self.cap] + TRUNCATION_MARKER
+                    truncated += 1
+                lines += [f"{label}: {neutralize_app_tags(turn.question)}", "<answer>", answer, "</answer>"]
+            lines.append("</question_thread>")
+            parts.append("\n".join(lines))
+        parts.append(f"Score all {len(inputs.threads)} question threads above.")
+        messages = [ChatMessage(role="system", content=system), ChatMessage(role="user", content="\n\n".join(parts))]
+        counts = {
+            "threads": len(inputs.threads),
+            "answers": sum(len(t.turns) for t in inputs.threads),
+            "truncated": truncated,
+            "summary": int(inputs.summary_used),
+        }
+        return StrategyOutput(messages, self.version, counts)
+
+
+class FeedbackWrite:
+    """The write call: scores, evidence and question texts only; small whatever the interview, so no limit."""
+
+    limit: int | None = None
+
+    def __init__(self, version: str = FEEDBACK_WRITE_PROMPT_VERSION):
+        self.version = version
+        self.template = load_prompt(version)
+
+    def droppable(self, inputs: FeedbackWriteInputs) -> int:
+        return 0
+
+    def build(self, inputs: FeedbackWriteInputs, dropped: int) -> StrategyOutput:
+        system = render_feedback_write_prompt(
+            role=inputs.role, level=inputs.level, interview_type=inputs.interview_type, template=self.template
+        )
+        lines = ["<feedback_scores>", f"Overall: {inputs.overall:.1f} out of 5 (computed by the app)"]
+        questions = inputs.result.questions
+        for q in questions:
+            lines.append(f"Main question {q.main_number} ({q.category.value}): {neutralize_app_tags(q.question)}")
+            lines.append("Scores: " + ", ".join(f"{c.value} {value}" for c, value in q.scores.items()))
+            lines += [
+                f'- {e.criterion.value}: "{neutralize_app_tags(e.quote)}" ({neutralize_app_tags(e.reason)})'
+                for e in q.evidence
+            ]
+        lines.append("</feedback_scores>")
+        messages = [ChatMessage(role="system", content=system), ChatMessage(role="user", content="\n".join(lines))]
+        counts = {"questions": len(questions), "evidence": sum(len(q.evidence) for q in questions)}
+        return StrategyOutput(messages, self.version, counts)
+
+
 def _counts(full: int, ledger: int, notes: int, summary_used: bool) -> dict[str, int]:
     return {
         "turns_full": full,
@@ -306,6 +417,8 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
             SUMMARY_TASK: Task(
                 default=SUMMARY, strategies={SUMMARY: JobDescriptionSummary()}
             ),
+            FEEDBACK_SCORE_TASK: Task(default=SCORE, strategies={SCORE: FeedbackScore()}),
+            FEEDBACK_WRITE_TASK: Task(default=WRITE, strategies={WRITE: FeedbackWrite()}),
         }
     )
 

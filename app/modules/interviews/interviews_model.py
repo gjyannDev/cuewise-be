@@ -1,7 +1,16 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -112,3 +121,46 @@ class InterviewMessage(UUIDPrimaryKeyMixin, Base):
     prompt_tokens: Mapped[int | None]
     completion_tokens: Mapped[int | None]
     latency_ms: Mapped[int | None]
+
+
+class InterviewFeedback(UUIDPrimaryKeyMixin, Base):
+    """The end-of-interview feedback: at most one per interview (the unique session_id is the guarantee).
+
+    Written in steps by the request that holds the claim (`started_at` is the claim token): the scores as soon as the
+    score call validates, then the text. Personal data (quotes, text) lives only in `result`, never in a log.
+    """
+
+    __tablename__ = "interview_feedback"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"), unique=True
+    )
+    # FeedbackStatus as a plain string, like the session status.
+    status: Mapped[str] = mapped_column(String(16))
+    # None until known; False = too little to assess (no scores, final).
+    enough_evidence: Mapped[bool | None]
+    rubric_version: Mapped[str] = mapped_column(String(64))
+    score_prompt_version: Mapped[str | None] = mapped_column(String(64))
+    write_prompt_version: Mapped[str | None] = mapped_column(String(64))
+    # TextSource: llm or template. Stored for reports, never returned.
+    text_source: Mapped[str | None] = mapped_column(String(16))
+    # Computed by the code from the scores; a column so later reports can query it.
+    overall: Mapped[float | None]
+    # StoredResult as JSON: scores, evidence, then the text. Always assigned whole, never edited in place (in-place
+    # changes to a JSON value aren't tracked).
+    result: Mapped[dict | None] = mapped_column(JSON)
+    # Usage per call (summed over its attempts), for cost and latency reports.
+    score_model: Mapped[str | None] = mapped_column(String(128))
+    score_prompt_tokens: Mapped[int | None]
+    score_completion_tokens: Mapped[int | None]
+    score_latency_ms: Mapped[int | None]
+    write_model: Mapped[str | None] = mapped_column(String(128))
+    write_prompt_tokens: Mapped[int | None]
+    write_completion_tokens: Mapped[int | None]
+    write_latency_ms: Mapped[int | None]
+    # A reason code only (e.g. invalid_reply:quote_not_found), never model or user text.
+    failure_reason: Mapped[str | None] = mapped_column(String(64))
+    # Set by each claim from the app's clock; a `generating` row older than the budget plus a margin may be taken over.
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

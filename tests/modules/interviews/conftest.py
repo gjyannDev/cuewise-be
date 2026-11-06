@@ -8,6 +8,8 @@ from app.core.rate_limit import RateLimiter
 from app.main import app
 from app.modules.interviews.interviews_constants import (
     DECISION_PROMPT_VERSION,
+    FEEDBACK_SCORE_PROMPT_VERSION,
+    FEEDBACK_WRITE_PROMPT_VERSION,
     TRANSCRIPTIONS_PER_MINUTE,
     Level,
     QuestionCategory,
@@ -172,6 +174,9 @@ def llm():
     class _LLM:
         fake = FakeProvider(default=unique_question, stream_format=as_v5_text)
         decide = FakeProvider(default=_decision_json())
+        # End-of-interview feedback: unscripted, both reply with text that breaks their contract.
+        score = FakeProvider()
+        write = FakeProvider()
 
         def script(self, *replies, on_call=None):
             self.fake = FakeProvider(replies, on_call=on_call, default=unique_question, stream_format=as_v5_text)
@@ -183,9 +188,22 @@ def llm():
             )
             return self.decide
 
+        def script_score(self, *replies, on_call=None):
+            self.score = FakeProvider(replies, on_call=on_call)
+            return self.score
+
+        def script_write(self, *replies, on_call=None):
+            self.write = FakeProvider(replies, on_call=on_call)
+            return self.write
+
         # The provider the app gets: routes each call by its system prompt.
         def complete(self, messages, **kwargs):
-            fake = self.decide if _DECISION_MARKER in messages[0].content else self.fake
+            system = messages[0].content
+            if _SCORE_MARKER in system:
+                return self.score.complete(messages, **kwargs)
+            if _WRITE_MARKER in system:
+                return self.write.complete(messages, **kwargs)
+            fake = self.decide if _DECISION_MARKER in system else self.fake
             return fake.complete(messages, **kwargs)
 
         # Only write calls stream (the streamed turn's interviewer_v5); they share the write fake's script.
@@ -206,6 +224,8 @@ def llm():
 
 # A phrase only the decide prompt has (its role line, before the first placeholder), read from the prompt file.
 _DECISION_MARKER = load_prompt(DECISION_PROMPT_VERSION).splitlines()[1].split("{{")[0]
+_SCORE_MARKER = load_prompt(FEEDBACK_SCORE_PROMPT_VERSION).splitlines()[1].split("{{")[0]
+_WRITE_MARKER = load_prompt(FEEDBACK_WRITE_PROMPT_VERSION).splitlines()[1].split("{{")[0]
 
 
 def as_v5_text(reply: str) -> str:

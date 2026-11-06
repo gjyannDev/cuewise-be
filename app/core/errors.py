@@ -46,6 +46,28 @@ class QuestionNotCurrentError(ConflictError):
     code = "QUESTION_NOT_CURRENT"
 
 
+class InterviewNotCompletedError(ConflictError):
+    code = "INTERVIEW_NOT_COMPLETED"
+
+
+class FeedbackInProgressError(ConflictError):
+    code = "FEEDBACK_IN_PROGRESS"
+
+
+class FeedbackNotFoundError(NotFoundError):
+    code = "FEEDBACK_NOT_FOUND"
+
+
+class FeedbackFailedError(AppError):
+    """The LLM could not produce valid scores in time: nothing partial is returned; the client may POST again."""
+
+    status_code, code = 502, "FEEDBACK_FAILED"
+
+
+class FeedbackUnavailableError(AppError):
+    status_code, code = 503, "FEEDBACK_UNAVAILABLE"
+
+
 class AudioTooLargeError(AppError):
     status_code, code = 413, "AUDIO_TOO_LARGE"
 
@@ -74,7 +96,7 @@ class TranscriptionUnavailableError(AppError):
 
 class UnauthorizedError(AppError):
     status_code, code = 401, "UNAUTHORIZED"
-    headers = {"WWW-Authenticate": "Bearer"}
+    headers = {"WWW-Authenticate": "Bearer"}  # noqa: RUF012
 
 
 class InvalidCredentialsError(UnauthorizedError):

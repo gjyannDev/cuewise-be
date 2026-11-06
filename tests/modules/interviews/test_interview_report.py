@@ -4,7 +4,13 @@ import uuid
 import pytest
 
 from app.core.logging import LOG_FORMAT, request_id_ctx
-from app.modules.interviews.interviews_constants import DECISION_TASK, INTERVIEWER_TASK, SUMMARY_TASK
+from app.modules.interviews.interviews_constants import (
+    DECISION_TASK,
+    FEEDBACK_SCORE_TASK,
+    FEEDBACK_WRITE_TASK,
+    INTERVIEWER_TASK,
+    SUMMARY_TASK,
+)
 from app.modules.interviews.interviews_log import parse_log
 from app.modules.interviews.interviews_model import InterviewMessage, InterviewQuestion, InterviewSession
 from app.modules.interviews.interviews_report import analyze_interview, analyze_rollup
@@ -159,6 +165,19 @@ def test_the_start_the_answers_and_a_request_that_failed_half_way_are_told_apart
     assert "start - q1 main#1" in report
     assert "1 q1 main#1 q2 main#2" in report
     assert "partial - - - - - - - 100 150 500 req-crashed" in report
+
+
+def test_a_feedback_request_is_not_a_turn(app_logs):  # interview-feedback plan step 5
+    emit_start()
+    emit_answer_turn(request="req-1")
+    request_id_ctx.set("req-feedback")
+    emit_call(S, FEEDBACK_SCORE_TASK, "feedback_score_v1", prompt=3000, completion=900, ms=8000, left=60000, est=3000)
+    emit_call(S, FEEDBACK_WRITE_TASK, "feedback_write_v1", prompt=1500, completion=300, ms=3000, left=52000, est=1500)
+    emit_http("POST", f"/api/v1/interviews/{S}/feedback", 201, 11100)
+
+    report = report_for(app_logs, [question(1), question(2)])
+
+    assert "partial" not in report and "req-feedback" not in report
 
 
 # --- the detail of one interview ---

@@ -1,0 +1,125 @@
+{
+  "version": "feedback_rubric_v1",
+  "criteria": {
+    "structure": {
+      "category": "behavioral",
+      "question": "Does the answer tell one story in a clear order: situation, task, action, result?",
+      "levels": {
+        "1": "No story: a general statement or a list of habits.",
+        "2": "A story is there but jumps around; the situation or the result is missing.",
+        "3": "Situation, action and result are all there, but the order or the balance is uneven.",
+        "4": "A clear, ordered story; each part gets about the right weight.",
+        "5": "Tight and easy to follow: brief context, with most of the time on the action and the result."
+      },
+      "expectations": {
+        "early": "A clear beginning, middle and end is enough for a 4; school, internship or personal project stories are fine.",
+        "experienced": "Expect a concise story with a clear arc; long, rambling context caps it at 3."
+      }
+    },
+    "specificity": {
+      "category": "behavioral",
+      "question": "Does it give concrete details: what happened, when, with which tools, how much?",
+      "levels": {
+        "1": "Only general claims, such as always communicating well.",
+        "2": "One real example, but vague: no names, numbers or details.",
+        "3": "A real example with some concrete details.",
+        "4": "Concrete details throughout: tools, who was involved, numbers or dates.",
+        "5": "Precise, measurable details that make the example clearly real."
+      },
+      "expectations": {
+        "early": "A school or personal project with a few concrete details counts fully.",
+        "experienced": "Expect numbers, scale or impact for a 4 or more."
+      }
+    },
+    "ownership": {
+      "category": "behavioral",
+      "question": "Is it clear what the candidate did themselves, apart from the team?",
+      "levels": {
+        "1": "Only what the team did; the candidate's own part is unknown.",
+        "2": "Their own part is mentioned, but vaguely.",
+        "3": "Their own actions are clear for part of the story.",
+        "4": "Their own decisions and actions are clear throughout, separate from the team's.",
+        "5": "Clear ownership, with why they acted that way and how they involved others."
+      },
+      "expectations": {
+        "early": "Owning a small piece of work (a fix, a feature, a task) is enough for a 4.",
+        "experienced": "Expect them to have driven decisions, influenced others or led for a 4 or more."
+      }
+    },
+    "outcome": {
+      "category": "behavioral",
+      "question": "Does the answer say how it ended and what was learned?",
+      "levels": {
+        "1": "No result at all.",
+        "2": "A result that is only implied or vague, such as it went well.",
+        "3": "A clear result, with no measure and no reflection.",
+        "4": "A clear result, measured where possible, or a clear lesson learned.",
+        "5": "A measured result plus a reflection on what they would repeat or change."
+      },
+      "expectations": {
+        "early": "A clear result or a lesson learned is enough for a 4.",
+        "experienced": "Expect a measurable impact and a reflection for a 4 or more."
+      }
+    },
+    "correctness": {
+      "category": "technical",
+      "question": "Is what the candidate says technically right?",
+      "levels": {
+        "1": "Mostly wrong, or no technical content.",
+        "2": "Several significant errors or misconceptions.",
+        "3": "Mostly right, with a gap or a minor error.",
+        "4": "Right, with only small imprecisions.",
+        "5": "Fully right and precise, including any edge cases they bring up."
+      },
+      "expectations": {
+        "early": "Loose terminology is fine when the idea itself is right.",
+        "experienced": "A misconception about a core concept of the role caps it at 2."
+      }
+    },
+    "depth": {
+      "category": "technical",
+      "question": "Does the candidate explain how and why it works, beyond naming it?",
+      "levels": {
+        "1": "Names a term or a tool, nothing more.",
+        "2": "A surface description of what it does.",
+        "3": "Explains how it works at a basic level.",
+        "4": "Explains how and why, with a relevant detail or example.",
+        "5": "Real understanding: internals, limits or failure modes, tied to practical use."
+      },
+      "expectations": {
+        "early": "Explaining how the basics work with one example is enough for a 4.",
+        "experienced": "Expect internals, scale or failure modes for a 4 or more."
+      }
+    },
+    "trade_offs": {
+      "category": "technical",
+      "question": "Does the candidate weigh options and say why one fits better?",
+      "levels": {
+        "1": "No choice and no reasoning.",
+        "2": "A choice with no reason given.",
+        "3": "A reason for the choice, but no alternative considered.",
+        "4": "Compares at least two options with their pros and cons.",
+        "5": "Weighs options against real constraints (cost, scale, time, team) and says when the choice would change."
+      },
+      "expectations": {
+        "early": "Naming one alternative and one reason is enough for a 4.",
+        "experienced": "Expect reasoning driven by constraints for a 4 or more."
+      }
+    },
+    "clarity": {
+      "category": "technical",
+      "question": "Is the explanation easy to follow, and does it answer the question asked?",
+      "levels": {
+        "1": "Hard to follow, or does not address the question.",
+        "2": "Rambling; the main point is hard to find.",
+        "3": "Understandable, with some detours.",
+        "4": "Clear, in a sensible order, and answers the question asked.",
+        "5": "Concise and well structured: the answer first, then the supporting detail."
+      },
+      "expectations": {
+        "early": "Clear enough to follow is fine; a polished structure is not expected.",
+        "experienced": "Expect a direct answer first, then the detail."
+      }
+    }
+  }
+}

@@ -15,17 +15,33 @@ from app.core.errors import NotEnoughQuestionsError
 
 from .interviews_constants import (
     AUDIO_CONTENT_TYPES,
+    CATEGORY_CRITERIA,
     CLOSING_REACTIONS,
     DECISION_PROMPT_VERSION,
+    FEEDBACK_ITEM_MAX_LENGTH,
+    FEEDBACK_NOTE_MAX_LENGTH,
+    FEEDBACK_RUBRIC_PATH,
+    FEEDBACK_SCORE_PROMPT_VERSION,
+    FEEDBACK_SUMMARY_MAX_LENGTH,
+    FEEDBACK_TONE,
+    FEEDBACK_WRITE_PROMPT_VERSION,
     GENERAL_ROLE,
+    IMPROVEMENTS_COUNT,
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_V2_PROMPT_VERSION,
     LEVEL_GROUPS,
     LEVEL_GUIDANCE,
     MAX_FOLLOW_UPS,
+    NEXT_STEPS_COUNT,
     PROMPTS_DIR,
     QUESTION_BANK_PATH,
+    QUOTE_MAX_LENGTH,
+    QUOTE_MIN_LENGTH,
     REACTION_POOLS,
+    REASON_MAX_LENGTH,
+    SCORE_MAX,
+    SCORE_MIN,
+    STRENGTHS_COUNT,
     SUMMARY_MAX_LENGTH,
     SUMMARY_MAX_WORDS,
     SUMMARY_PROMPT_VERSION,
@@ -43,6 +59,7 @@ from .interviews_model import InterviewMessage, InterviewQuestion
 from .interviews_schema import (
     BankQuestion,
     QuestionBank,
+    Rubric,
     StreamEventOut,
     TranscriptItemOut,
 )
@@ -148,7 +165,9 @@ def build_transcript(
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 # Matches an opening or closing tag the app uses to fence data, in any case, so untrusted text can't close its own
 # block or fake the app's status block.
-APP_TAG = re.compile(r"<\s*/?\s*(job_description|interview_status)\s*>", re.IGNORECASE)
+APP_TAG = re.compile(
+    r"<\s*/?\s*(job_description|interview_status|question_thread|answer|feedback_scores)\s*>", re.IGNORECASE
+)
 
 
 def neutralize_app_tags(text: str) -> str:
@@ -160,6 +179,19 @@ INTERVIEWER_PROMPT = load_prompt(INTERVIEWER_PROMPT_VERSION)
 INTERVIEWER_V2_PROMPT = load_prompt(INTERVIEWER_V2_PROMPT_VERSION)
 SUMMARY_PROMPT = load_prompt(SUMMARY_PROMPT_VERSION)
 DECISION_PROMPT = load_prompt(DECISION_PROMPT_VERSION)
+FEEDBACK_SCORE_PROMPT = load_prompt(FEEDBACK_SCORE_PROMPT_VERSION)
+FEEDBACK_WRITE_PROMPT = load_prompt(FEEDBACK_WRITE_PROMPT_VERSION)
+
+
+def load_rubric(path: Path) -> Rubric:
+    """Read and validate a feedback rubric file; a bad one fails loudly at startup, like the bank."""
+    try:
+        return Rubric.model_validate_json(path.read_bytes())
+    except ValidationError as exc:
+        raise ValueError(f"Invalid feedback rubric {path.name}: {exc}") from exc
+
+
+FEEDBACK_RUBRIC = load_rubric(FEEDBACK_RUBRIC_PATH)
 
 _CATEGORY_RULES = {
     InterviewType.behavioral: 'Every question is behavioral (past experience, teamwork, decisions): use "category": "behavioral".',
@@ -261,6 +293,83 @@ def render_decision_prompt(*, role: JobRole, level: Level, interview_type: Inter
             "interview_type": interview_type.value,
             "level_guidance": LEVEL_GUIDANCE[level],
             "max_follow_ups": MAX_FOLLOW_UPS,
+        },
+    )
+
+
+def interview_categories(interview_type: InterviewType) -> list[QuestionCategory]:
+    """The question categories an interview of this type can hold (mixed: both)."""
+    if interview_type == InterviewType.mixed:
+        return list(QuestionCategory)
+    return [QuestionCategory(interview_type)]
+
+
+def render_rubric(rubric: Rubric, categories: Sequence[QuestionCategory], level: Level) -> str:
+    """The anchors of the criteria this interview can be scored on, with this level group's expectation each."""
+    group = LEVEL_GROUPS[level]
+    lines: list[str] = []
+    for category in categories:
+        for criterion in CATEGORY_CRITERIA[category]:
+            entry = rubric.criteria[criterion]
+            lines.append(f'"{criterion.value}" ({category.value}): {entry.question}')
+            lines += [f"  {score}: {entry.levels[score]}" for score in sorted(entry.levels)]
+            lines.append(f"  Expected at this level: {entry.expectations[group]}")
+    return "\n".join(lines)
+
+
+def render_feedback_score_prompt(
+    *,
+    role: JobRole,
+    level: Level,
+    interview_type: InterviewType,
+    template: str = FEEDBACK_SCORE_PROMPT,
+    rubric: Rubric = FEEDBACK_RUBRIC,
+) -> str:
+    """Per-interview constants and the rubric only: no answer or job-description text ever enters the system prompt."""
+    categories = interview_categories(interview_type)
+    criteria = "\n".join(
+        f"  {category.value}: " + ", ".join(f'"{c.value}"' for c in CATEGORY_CRITERIA[category]) for category in categories
+    )
+    return render_template(
+        template,
+        {
+            "role": role.value,
+            "level": level.value,
+            "interview_type": interview_type.value,
+            "level_group": LEVEL_GROUPS[level].value,
+            "criteria": criteria,
+            "rubric": render_rubric(rubric, categories, level),
+            "score_min": SCORE_MIN,
+            "score_max": SCORE_MAX,
+            "quote_min": QUOTE_MIN_LENGTH,
+            "quote_max": QUOTE_MAX_LENGTH,
+            "reason_max": REASON_MAX_LENGTH,
+        },
+    )
+
+
+def render_feedback_write_prompt(
+    *, role: JobRole, level: Level, interview_type: InterviewType, template: str = FEEDBACK_WRITE_PROMPT
+) -> str:
+    """Counts and limits come from the constants the write parser checks; a test checks the labels match too."""
+
+    def count(fewest_most: tuple[int, int]) -> str:
+        fewest, most = fewest_most
+        return f"{fewest} to {most}" if most - fewest > 1 else f"{fewest} or {most}"
+
+    return render_template(
+        template,
+        {
+            "role": role.value,
+            "level": level.value,
+            "interview_type": interview_type.value,
+            "tone": FEEDBACK_TONE[LEVEL_GROUPS[level]],
+            "summary_max": FEEDBACK_SUMMARY_MAX_LENGTH,
+            "item_max": FEEDBACK_ITEM_MAX_LENGTH,
+            "note_max": FEEDBACK_NOTE_MAX_LENGTH,
+            "strengths_count": count(STRENGTHS_COUNT),
+            "improvements_count": count(IMPROVEMENTS_COUNT),
+            "next_steps_count": count(NEXT_STEPS_COUNT),
         },
     )
 

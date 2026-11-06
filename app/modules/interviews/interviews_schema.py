@@ -1,19 +1,32 @@
 from datetime import datetime
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Literal, NamedTuple, Self
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from app.core.pagination import Page
 
 from .interviews_constants import (
+    CATEGORY_CRITERIA,
     JOB_DESCRIPTION_MAX_LENGTH,
     MAX_ANSWER_LENGTH,
     MAX_QUESTION_COUNT,
     MIN_QUESTION_COUNT,
+    SCORE_MAX,
+    SCORE_MIN,
+    Criterion,
+    FeedbackStatus,
     InterviewType,
     JobRole,
     Level,
+    LevelGroup,
     MessageKind,
     MessageRole,
     QuestionCategory,
@@ -47,6 +60,43 @@ def _unique_ids(bank: list[BankQuestion]) -> list[BankQuestion]:
 
 
 QuestionBank = Annotated[list[BankQuestion], Field(min_length=1), AfterValidator(_unique_ids)]
+
+
+class RubricCriterion(BaseModel):
+    """One criterion of the feedback rubric: what it asks, an anchor per score, and what each level group needs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    category: QuestionCategory
+    question: NonBlankStr
+    levels: dict[int, NonBlankStr]
+    expectations: dict[LevelGroup, NonBlankStr]
+
+    @model_validator(mode="after")
+    def _complete(self) -> Self:
+        if sorted(self.levels) != list(range(SCORE_MIN, SCORE_MAX + 1)):
+            raise ValueError(f"needs one anchor for each score {SCORE_MIN}-{SCORE_MAX}")
+        if set(self.expectations) != set(LevelGroup):
+            raise ValueError("needs an expectation for every level group")
+        return self
+
+
+class Rubric(BaseModel):
+    """The feedback rubric file: ground truth for every score, versioned like a prompt."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: NonBlankStr
+    criteria: dict[Criterion, RubricCriterion]
+
+    @model_validator(mode="after")
+    def _covers_every_criterion(self) -> Self:
+        if set(self.criteria) != set(Criterion):
+            raise ValueError(f"missing criteria: {sorted(set(Criterion) - set(self.criteria))}")
+        wrong = [c for c, entry in self.criteria.items() if c not in CATEGORY_CRITERIA[entry.category]]
+        if wrong:
+            raise ValueError(f"criteria in the wrong category: {wrong}")
+        return self
 
 
 class InterviewCreateIn(BaseModel):
@@ -166,6 +216,49 @@ class TranscriptionOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str
+
+
+# --- End-of-interview feedback (POST and GET /interviews/{id}/feedback) ---
+
+
+class FeedbackEvidenceOut(BaseModel):
+    criterion: Criterion
+    # Verified by the code: these exact words appear in the candidate's answers to this question.
+    quote: str
+    reason: str
+
+
+class FeedbackQuestionOut(BaseModel):
+    main_number: int
+    category: QuestionCategory
+    # The main question's text.
+    question: str
+    # Every criterion of the question's category, each 1 to 5.
+    scores: dict[Criterion, int]
+    note: str | None
+    evidence: list[FeedbackEvidenceOut]
+
+
+class FeedbackOut(BaseModel):
+    """The stored feedback. Scores and text only once `generated`; `enough_evidence` false = nothing was scored.
+
+    Never returned: token usage, prompt versions, the model, who wrote the text (model or template), failure details,
+    the job description, the user id.
+    """
+
+    id: UUID
+    interview_id: UUID
+    status: FeedbackStatus
+    enough_evidence: bool | None
+    # Out of 5, one decimal, computed by the app (the mean of every criterion score).
+    overall: float | None
+    summary: str | None
+    strengths: list[str]
+    improvements: list[str]
+    next_steps: list[str]
+    questions: list[FeedbackQuestionOut]
+    rubric_version: str
+    created_at: datetime
 
 
 # --- Streamed answer turn (POST /interviews/{id}/messages/stream): the `data` of each SSE event ---

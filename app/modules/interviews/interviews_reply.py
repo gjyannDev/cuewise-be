@@ -71,7 +71,7 @@ def parse_interviewer_reply(
     # Set = follow-up mode: the reply is the question only and gets this category (the main question's).
     follow_up_category: QuestionCategory | None = None,
 ) -> InterviewerReply:
-    data = _load_object(raw)
+    data = load_object(raw)
 
     try:
         if follow_up_category is None:
@@ -153,7 +153,7 @@ def _normalized(question: str) -> str:
     return " ".join(question.casefold().split())
 
 
-def _load_object(raw: str) -> dict:
+def load_object(raw: str) -> dict:
     """The reply as a JSON object: one optional fence around it, nothing else before or after."""
     text = raw.strip()
     if text.startswith("```"):
@@ -188,7 +188,7 @@ class Decision(NamedTuple):
 def parse_decision_reply(raw: str) -> Decision:
     """The decide call suggests; the code still applies the follow-up cap and the time check afterwards."""
     try:
-        reply = _RawDecision.model_validate(_load_object(raw))
+        reply = _RawDecision.model_validate(load_object(raw))
     except ValidationError as exc:
         raise InvalidReplyError("schema") from exc
     if reply.action == FollowUpAction.follow_up and reply.gap is None:

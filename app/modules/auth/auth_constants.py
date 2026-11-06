@@ -15,11 +15,17 @@ class Permission(StrEnum):
     interviews_create = "interviews:create"
     interviews_read_self = "interviews:read_self"
     interviews_answer = "interviews:answer"
+    interviews_feedback = "interviews:feedback"
 
 
 # Every signed-in role can practice interviews on its own sessions.
 _INTERVIEW_PERMISSIONS = frozenset(
-    {Permission.interviews_create, Permission.interviews_read_self, Permission.interviews_answer}
+    {
+        Permission.interviews_create,
+        Permission.interviews_read_self,
+        Permission.interviews_answer,
+        Permission.interviews_feedback,
+    }
 )
 
 # Single source of truth for what each role may do. Edit here to change access.

@@ -12,9 +12,12 @@ from typing import NamedTuple
 
 from app.core.logging import split_fields
 
+from .interviews_constants import FEEDBACK_SCORE_TASK, FEEDBACK_WRITE_TASK
+
 # One record of logs/app.log: `<date> <time> <LEVEL> [<request id>] <logger>: <message>`.
 _LINE = re.compile(r"^\S+ \S+ \w+\s+\[(?P<request>[^\]]*)\] (?P<logger>[\w.]+): (?P<message>.*)$")
 _HTTP = re.compile(r"^(?P<method>[A-Z]+) (?P<path>\S+) -> (?P<status>\d+) \((?P<ms>[\d.]+)ms\)$")
+_FEEDBACK_TASKS = {FEEDBACK_SCORE_TASK, FEEDBACK_WRITE_TASK}
 
 
 class LogEvent(NamedTuple):
@@ -90,11 +93,15 @@ def group_requests(events: Iterable[LogEvent]) -> dict[str, list[LogEvent]]:
 
 
 def turns_of(requests: dict[str, list[LogEvent]], session_id: str) -> list[Turn]:
-    """The requests that logged this session, oldest first: the start, then one numbered turn per answer."""
+    """The requests that logged this session, oldest first: the start, then one numbered turn per answer. A feedback
+    request is not a turn (its cost is stored on the feedback row), so it is left out rather than shown as failed."""
     turns: list[Turn] = []
     answers = 0
     for request, events in requests.items():
         if not any(e.fields.get("session") == session_id for e in events):
+            continue
+        tasks = {e.fields.get("task") for e in events if e.event == "llm_call"}
+        if tasks and tasks <= _FEEDBACK_TASKS:
             continue
         turn = _turn(request, events)
         if turn.summary is not None:
