@@ -11,12 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.db import models  # noqa: F401  (registers every model before the session is used)
 from app.db.session import SessionLocal
-from app.modules.auth.auth_controller import AuthController
-from app.modules.auth.auth_repository import AuthRepository
+from app.modules.auth.repositories.auth_repository import AuthRepository
+from app.modules.auth.services.auth_service import AuthService
 
 
 def main(email: str, db: Session, prompt_password: Callable[[], str]) -> str:
-    return AuthController(AuthRepository(db)).ensure_admin(email, prompt_password)
+    return AuthService(AuthRepository(db)).ensure_admin(email, prompt_password)
 
 
 def _prompt_password() -> str:

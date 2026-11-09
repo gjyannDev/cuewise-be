@@ -11,9 +11,13 @@ import pytest
 
 from app.core.ai.factory import build_provider
 from app.core.config import settings
-from app.modules.interviews.interviews_constants import InterviewType, JobRole, Level
-from app.modules.interviews.interviews_reply import parse_interviewer_reply
-from app.modules.interviews.interviews_utils import (
+from app.modules.interviews.ai.interviews_reply import parse_interviewer_reply
+from app.modules.interviews.constants.interviews_constants import (
+    InterviewType,
+    JobRole,
+    Level,
+)
+from app.modules.interviews.utils.interviews_utils import (
     QuestionTurn,
     build_interviewer_messages,
     render_interviewer_prompt,

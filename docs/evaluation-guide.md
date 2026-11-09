@@ -57,7 +57,7 @@ yourself, because no check can tell whether a question is *good*.
 ## 3. Run
 
 ```bash
-uv run python -m app.modules.interviews.interviews_evals --task <write|decide|stream|feedback> --model gemini-3.5-flash-lite [--repeat N]
+uv run python -m app.modules.interviews.tooling.interviews_evals --task <write|decide|stream|feedback> --model gemini-3.5-flash-lite [--repeat N]
 ```
 
 | Flag | What it does | Applies to |
@@ -71,7 +71,7 @@ uv run python -m app.modules.interviews.interviews_evals --task <write|decide|st
 | `--notes on/off`, `--summary on/off` | Ablations: the running note, and the job description summary | `write`, `stream` |
 
 **Trying a new prompt for another task.** `--prompt` doesn't reach `decide`, `stream` or `feedback` yet. Point the
-task's constant in `app/modules/interviews/interviews_constants.py` at the new file for the run, then point it back:
+task's constant in `app/modules/interviews/constants/interviews_constants.py` at the new file for the run, then point it back:
 
 | Task | Constant |
 |---|---|

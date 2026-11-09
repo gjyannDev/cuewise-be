@@ -28,8 +28,8 @@ from app.core.tokens import create_token
 from app.db import models  # noqa: F401  (registers every model on Base.metadata)
 from app.db.session import Base, get_db
 from app.main import app
-from app.modules.auth.auth_constants import Role
-from app.modules.auth.auth_model import User
+from app.modules.auth.constants.auth_constants import Role
+from app.modules.auth.models.auth_model import User
 
 test_router = APIRouter(prefix="/_test")
 

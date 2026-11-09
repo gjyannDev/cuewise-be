@@ -26,11 +26,19 @@ from app.core.config import settings
 from app.core.logging import LOG_FILE
 from app.db import models  # noqa: F401  (registers every model before the session is used)
 from app.db.session import SessionLocal
-from app.modules.interviews.interviews_log import parse_log
-from app.modules.interviews.interviews_model import InterviewSession
-from app.modules.interviews.interviews_report import analyze_interview, analyze_rollup
-from app.modules.interviews.interviews_report_render import render_html, render_text
-from app.modules.interviews.interviews_repository import InterviewsRepository
+from app.modules.interviews.models.interviews_model import InterviewSession
+from app.modules.interviews.repositories.interviews_repository import (
+    InterviewsRepository,
+)
+from app.modules.interviews.tooling.interviews_log import parse_log
+from app.modules.interviews.tooling.interviews_report import (
+    analyze_interview,
+    analyze_rollup,
+)
+from app.modules.interviews.tooling.interviews_report_render import (
+    render_html,
+    render_text,
+)
 
 DEFAULT_REPORTS_DIR = LOG_FILE.parent / "reports"
 

@@ -1,6 +1,6 @@
 """The LLM contract every feature codes against: message/result types, typed errors, the provider protocol.
 
-Nothing here knows about HTTP or a vendor, so a controller can handle "the LLM failed" without importing httpx.
+Nothing here knows about HTTP or a vendor, so a service can handle "the LLM failed" without importing httpx.
 """
 
 from collections.abc import AsyncGenerator, Mapping, Sequence

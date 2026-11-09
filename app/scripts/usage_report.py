@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.db import models  # noqa: F401  (registers every model before the session is used)
 from app.db.session import SessionLocal
-from app.modules.interviews.interviews_repository import InterviewsRepository
-from app.modules.interviews.interviews_utils import build_usage_report
+from app.modules.interviews.repositories.interviews_repository import (
+    InterviewsRepository,
+)
+from app.modules.interviews.utils.interviews_utils import build_usage_report
 
 
 def main(db: Session) -> str:

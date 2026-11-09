@@ -6,7 +6,7 @@ import pytest
 from app.core.ai.fake import FakeProvider, FakeTranscriber
 from app.core.rate_limit import RateLimiter
 from app.main import app
-from app.modules.interviews.interviews_constants import (
+from app.modules.interviews.constants.interviews_constants import (
     DECISION_PROMPT_VERSION,
     FEEDBACK_SCORE_PROMPT_VERSION,
     FEEDBACK_WRITE_PROMPT_VERSION,
@@ -14,15 +14,15 @@ from app.modules.interviews.interviews_constants import (
     Level,
     QuestionCategory,
 )
-from app.modules.interviews.interviews_dependencies import (
+from app.modules.interviews.dependencies.interviews_dependencies import (
     get_bank,
     get_clock,
     get_llm_provider,
     get_transcriber,
     get_transcription_limiter,
 )
-from app.modules.interviews.interviews_schema import BankQuestion
-from app.modules.interviews.interviews_utils import load_prompt
+from app.modules.interviews.schemas.interviews_schema import BankQuestion
+from app.modules.interviews.utils.interviews_utils import load_prompt
 
 
 def _bank_question(qid, category="behavioral", roles=("general",), levels=tuple(Level)):

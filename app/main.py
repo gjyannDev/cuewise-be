@@ -9,9 +9,9 @@ from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import RequestContextMiddleware
-from app.modules.auth.auth_route import router as auth_router
-from app.modules.interviews.interviews_route import router as interviews_router
-from app.modules.users.users_route import router as users_router
+from app.modules.auth.routes.auth_route import router as auth_router
+from app.modules.interviews.routes.interviews_route import router as interviews_router
+from app.modules.users.routes.users_route import router as users_router
 
 setup_logging(settings.debug)
 

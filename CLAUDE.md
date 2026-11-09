@@ -21,30 +21,33 @@ FastAPI backend (Python, `uv`, SQLAlchemy + Alembic). Code lives in `app/`.
   - **After finishing a task that changes code, run `graphify update .`** to keep the graph current.
 
 ## Architecture: Modular, Feature-Driven
-Request flow: **router → controller (service) → repository**.
+Request flow: **route → controller → service → repository**. Each layer lives in its own folder inside the feature module.
 
 ```
 app/
   core/        # cross-cutting: config, errors, exception_handlers, logging, middleware, security (passwords), tokens (JWT)
   db/          # engine/session, base models
   modules/
-    <feature>/                     # e.g. auth/, users/
-      <feature>_route.py           # HTTP only: path, status code, deps, response_model. No business logic.
-      <feature>_controller.py      # business logic / orchestration. No HTTP objects, no raw SQL.
-      <feature>_repository.py      # all DB access. No business rules.
-      <feature>_schema.py          # Pydantic request/response models (never expose ORM models)
-      <feature>_utils.py           # feature-local pure helpers
-      (<feature>_model.py / <feature>_dependencies.py / <feature>_constants.py as needed)
+    <feature>/                                   # e.g. auth/, users/, interviews/
+      routes/<feature>_route.py                  # HTTP declaration only: path, status code, deps, response_model, responses=.
+      controllers/<feature>_controller.py        # thin: request -> service call, domain result -> response schema,
+                                                 #   HTTP-shaped bits (200 vs 201, SSE frames). No repository, no LLM, no DB session.
+      services/<feature>_service.py              # business rules, ownership checks, state changes, LLM orchestration, repo calls.
+                                                 #   Raises core/errors.py errors. Returns domain objects, never *Out schemas.
+      repositories/<feature>_repository.py       # all DB access. No business rules.
+      schemas/<feature>_schema.py                # Pydantic request/response models (never expose ORM models)
+      utils/<feature>_utils.py                   # feature-local pure helpers
+      (models/ dependencies/ constants/ as needed; interviews also has ai/, tooling/, data/, prompts/, templates/)
   main.py      # app factory, middleware, router registration
-tests/modules/<feature>/   # mirrors app/modules
+tests/modules/<feature>/   # mirrors the layer folders of app/modules/<feature>
 ```
 
 Rules:
-- **File naming:** every file in a feature module is prefixed with the module folder name and an underscore (`auth/auth_controller.py`, `users/users_route.py`), so open tabs and tracebacks are unambiguous. Use `_`, never `.` (`auth.controller.py` is not importable in Python).
-- Every feature module **always** has `<feature>_schema.py` and `<feature>_utils.py` (alongside route/controller/repository).
-- Layers only call downward: router → controller → repository. Never skip a layer or import upward.
+- **File naming:** every file in a feature module is prefixed with the module folder name and an underscore, also inside the layer folders (`auth/services/auth_service.py`, `users/routes/users_route.py`), so open tabs and tracebacks are unambiguous. Use `_`, never `.` (`auth.controller.py` is not importable in Python).
+- Every feature module **always** has `routes/`, `controllers/`, `services/`, `repositories/`, `schemas/` and `utils/`. Layer folders have an empty `__init__.py` (no re-exports); folders with no file are not created.
+- Layers only call downward: route → controller → service → repository. Never skip a layer or import upward. Enforced by `tests/test_layers.py`.
 - Shared, feature-agnostic helpers go in `app/core/`, not duplicated across modules.
-- Features don't import each other's repositories; go through the other feature's controller.
+- Features don't import each other's repositories; go through the other feature's service.
 
 ## Code Principles
 - **DRY**: extract repeated logic into `<feature>_utils.py` / `core/`; reuse existing code before writing new.
@@ -62,7 +65,7 @@ Rules:
 - **Responses**: use `response_model` to whitelist fields; never leak internals, stack traces, or ORM objects.
 - **Errors**: raise the project's structured errors (`core/errors.py`); generic messages to clients, details to logs with request ID.
 - **CORS**: explicit origin allowlist; no `*` with credentials.
-- **Rate limiting** on auth/sensitive endpoints; enforce authorization (ownership checks) in controllers, not just authentication.
+- **Rate limiting** on auth/sensitive endpoints; enforce authorization (ownership checks) in services, not just authentication.
 - Add security headers, HTTPS-only in prod, and keep dependencies updated/audited.
 - Don't log PII, tokens, or passwords.
 
@@ -70,8 +73,8 @@ Rules:
 - One `APIRouter` per feature with `prefix` and `tags`; register in `main.py`.
 - Use dependency injection (`Depends`) for DB sessions, current user, settings; no globals.
 - Explicit `status_code` and `response_model` on every route; document errors via `responses=`.
-- Keep routes thin; no business logic or DB calls in routers.
-- DB: one session per request via dependency; transactions managed in controller/repository boundary; schema changes only through **Alembic migrations** (never edit DB by hand, never rely on `create_all`).
+- Keep routes and controllers thin; no business logic or DB calls in either.
+- DB: one session per request via dependency; transactions managed in service/repository boundary; schema changes only through **Alembic migrations** (never edit DB by hand, never rely on `create_all`).
 - Version the API (`/api/v1`). Use plural nouns, proper HTTP verbs/status codes; paginate list endpoints.
 - Structured logging with request ID tracing (see `core/logging.py`, `core/middleware.py`).
 - Provide health/readiness endpoints.
@@ -86,11 +89,11 @@ Rules:
 - Install deps: `uv sync`
 - Run dev server: `uv run fastapi dev app/main.py` (or `uv run uvicorn app.main:app --reload`)
 - Tests: `uv run pytest`
-- Lint/format: `uv run ruff check . && uv run ruff format .`
+- Lint/format: `uv run --with ruff ruff check .` (ruff is not a project dependency; don't reformat the whole repo)
 - Migrations: `uv run alembic revision --autogenerate -m "<msg>"` then `uv run alembic upgrade head` (always review the generated migration)
 
 ## AI Engineering Guidelines
-- **Provider abstraction**: LLM/embedding calls live behind an interface in the feature (or `core/ai/`); no direct SDK calls from routers or controllers.
+- **Provider abstraction**: LLM/embedding calls live behind an interface in the feature (or `core/ai/`); no direct SDK calls from routes, controllers or services (services orchestrate through the interface).
 - **Prompts are data, not inline strings**: keep them in dedicated, versioned files/modules; no prompt text scattered through business logic.
 - **Structured outputs**: validate all LLM output with Pydantic schemas; handle malformed/empty responses with retries and a safe fallback.
 - **Cost & reliability**: set timeouts, retries with backoff, max tokens, and log token usage/latency per call. Never block the event loop; use async clients.
@@ -103,7 +106,7 @@ Rules:
 
 ## Workflow / Definition of Done
 1. Orient with graphify + `ctx_compose` before changing anything.
-2. Implement within the router → controller → repository layers (schema/utils included).
+2. Implement within the route → controller → service → repository layers (schema/utils included).
 3. Add/update tests and run them; run lint.
 4. Run `graphify update .`.
 5. Summarize what changed and what's left. **Do not commit or push.**

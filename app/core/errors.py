@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class AppError(Exception):
-    """Base for expected errors. Controllers raise these instead of HTTPException."""
+    """Base for expected errors. Services raise these instead of HTTPException."""
 
     status_code: ClassVar[int] = 500
     code: ClassVar[str] = "INTERNAL_ERROR"

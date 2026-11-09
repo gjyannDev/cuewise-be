@@ -3,8 +3,8 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from app.core.security import verify_password
-from app.modules.auth.auth_constants import Role
-from app.modules.auth.auth_model import User
+from app.modules.auth.constants.auth_constants import Role
+from app.modules.auth.models.auth_model import User
 from app.scripts.create_admin import main
 
 
