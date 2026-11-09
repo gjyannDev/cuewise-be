@@ -4,7 +4,7 @@ import uuid
 import pytest
 
 from app.core.logging import LOG_FORMAT, request_id_ctx
-from app.modules.interviews.ai.interviews_turn import log_llm_call, log_turn_summary
+from app.modules.interviews.ai.interviews_turn_log import log_llm_call, log_turn_summary
 from app.modules.interviews.constants.interviews_constants import (
     DECISION_TASK,
     FEEDBACK_SCORE_TASK,

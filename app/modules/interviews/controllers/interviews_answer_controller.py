@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.core.logging import request_id_ctx
 from app.modules.auth.models.auth_model import User
 
-from ..ai.interviews_turn import Delta, PhaseChanged, Reset
+from ..ai.interviews_turn_types import Delta, PhaseChanged, Reset
 from ..constants.interviews_constants import StreamEvent
 from ..schemas.interviews_schema import (
     AnswerIn,

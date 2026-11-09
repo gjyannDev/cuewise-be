@@ -17,7 +17,8 @@ from app.modules.auth.models.auth_model import User
 
 from ..ai.interviews_context import CONTEXT_MANAGER, SummaryInputs
 from ..ai.interviews_reply import InvalidReplyError, validate_summary
-from ..ai.interviews_turn import Interviewer, log_llm_call, log_result
+from ..ai.interviews_turn import Interviewer
+from ..ai.interviews_turn_log import log_llm_call, log_result
 from ..constants.interviews_constants import (
     FIRST_POSITION,
     SUMMARY_TASK,

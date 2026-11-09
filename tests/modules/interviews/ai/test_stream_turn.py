@@ -12,10 +12,10 @@ from app.modules.interviews.ai.interviews_context import (
     CONTEXT_MANAGER,
     InterviewerInputs,
 )
-from app.modules.interviews.ai.interviews_turn import (
+from app.modules.interviews.ai.interviews_turn import Interviewer
+from app.modules.interviews.ai.interviews_turn_types import (
     ActionKnown,
     Delta,
-    Interviewer,
     PhaseChanged,
     Reset,
     Settled,

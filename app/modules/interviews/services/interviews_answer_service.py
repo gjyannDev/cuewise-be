@@ -22,17 +22,16 @@ from app.core.errors import QuestionNotCurrentError, SessionNotInProgressError
 from app.modules.auth.models.auth_model import User
 
 from ..ai.interviews_context import CONTEXT_MANAGER, InterviewerInputs
-from ..ai.interviews_turn import (
+from ..ai.interviews_turn import Interviewer
+from ..ai.interviews_turn_log import log_stream_summary, log_turn_summary
+from ..ai.interviews_turn_types import (
     ActionKnown,
     Delta,
-    Interviewer,
     PhaseChanged,
     Reset,
     Settled,
     TurnAction,
     TurnOutcome,
-    log_stream_summary,
-    log_turn_summary,
 )
 from ..constants.interviews_constants import (
     InterviewType,

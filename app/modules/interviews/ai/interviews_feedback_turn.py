@@ -23,8 +23,8 @@ from ..ai.interviews_feedback import (
     parse_write_reply,
 )
 from ..ai.interviews_reply import InvalidReplyError
-from ..ai.interviews_turn import (
-    Deadline,
+from ..ai.interviews_turn_limits import Deadline
+from ..ai.interviews_turn_log import (
     llm_logger,
     log_llm_call,
     log_llm_error,

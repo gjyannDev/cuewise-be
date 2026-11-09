@@ -13,7 +13,8 @@ from app.core.errors import NotFoundError
 from app.modules.auth.models.auth_model import User
 
 from ..ai.interviews_context import InterviewerInputs
-from ..ai.interviews_turn import Written, sum_known
+from ..ai.interviews_turn_log import sum_known
+from ..ai.interviews_turn_types import Written
 from ..constants.interviews_constants import (
     InterviewType,
     JobRole,
