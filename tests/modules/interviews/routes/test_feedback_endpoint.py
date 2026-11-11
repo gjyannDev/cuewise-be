@@ -32,9 +32,11 @@ from app.modules.interviews.constants.interviews_constants import (
     QuestionKind,
     TextSource,
 )
-from app.modules.interviews.dependencies.interviews_dependencies import (
-    get_context_manager,
+from app.modules.interviews.dependencies.interviews_feedback_dependencies import (
     get_feedback_limiter,
+)
+from app.modules.interviews.dependencies.interviews_shared_dependencies import (
+    get_context_manager,
     get_llm_provider,
     get_now,
     get_tracer,

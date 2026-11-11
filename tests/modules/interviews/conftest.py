@@ -14,11 +14,13 @@ from app.modules.interviews.constants.interviews_constants import (
     Level,
     QuestionCategory,
 )
-from app.modules.interviews.dependencies.interviews_dependencies import (
+from app.modules.interviews.dependencies.interviews_shared_dependencies import (
     get_bank,
     get_clock,
     get_llm_provider,
     get_transcriber,
+)
+from app.modules.interviews.dependencies.interviews_transcription_dependencies import (
     get_transcription_limiter,
 )
 from app.modules.interviews.schemas.interviews_schema import BankQuestion

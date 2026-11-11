@@ -9,7 +9,9 @@ import pytest
 
 from app.core.ai.tracing import Tracer
 from app.main import app
-from app.modules.interviews.dependencies.interviews_dependencies import get_tracer
+from app.modules.interviews.dependencies.interviews_shared_dependencies import (
+    get_tracer,
+)
 
 
 class RecordingClient:

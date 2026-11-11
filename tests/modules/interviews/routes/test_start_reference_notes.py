@@ -11,7 +11,9 @@ from app.core.ai.fake import FakeEmbedder
 from app.core.ai.provider import LLMServerError
 from app.main import app
 from app.modules.interviews.constants.interviews_constants import KNOWLEDGE_VECTOR_SIZE
-from app.modules.interviews.dependencies.interviews_dependencies import get_embedder
+from app.modules.interviews.dependencies.interviews_shared_dependencies import (
+    get_embedder,
+)
 from app.modules.interviews.models.interviews_knowledge_model import (
     InterviewSessionChunk,
 )

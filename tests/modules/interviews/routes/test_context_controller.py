@@ -12,7 +12,7 @@ from app.modules.interviews.constants.interviews_constants import (
     INTERVIEWER_TASK,
     WINDOW_LEDGER,
 )
-from app.modules.interviews.dependencies.interviews_dependencies import (
+from app.modules.interviews.dependencies.interviews_shared_dependencies import (
     get_context_manager,
 )
 from app.modules.interviews.models.interviews_model import (

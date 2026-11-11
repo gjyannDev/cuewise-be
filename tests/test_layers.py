@@ -149,7 +149,7 @@ def test_repository_importing_a_service_controller_or_route_is_reported():
 
 
 def test_a_feature_importing_another_features_repository_is_reported():
-    path = "app/modules/interviews/dependencies/interviews_dependencies.py"
+    path = "app/modules/interviews/dependencies/interviews_start_dependencies.py"
     assert _one(path, "from app.modules.auth.repositories.auth_repository import AuthRepository\n") == [
         f"{path}: interviews imports another feature's repository app.modules.auth.repositories.auth_repository"
     ]

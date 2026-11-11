@@ -19,12 +19,14 @@ from ..constants.interviews_constants import (
     SessionStatus,
     SortDirection,
 )
-from ..dependencies.interviews_dependencies import (
-    AnswerControllerDep,
+from ..dependencies.interviews_answer_dependencies import AnswerControllerDep
+from ..dependencies.interviews_feedback_dependencies import (
     FeedbackControllerDep,
-    InterviewsControllerDep,
-    TranscriptionControllerDep,
     limit_feedback,
+)
+from ..dependencies.interviews_start_dependencies import InterviewsControllerDep
+from ..dependencies.interviews_transcription_dependencies import (
+    TranscriptionControllerDep,
     limit_transcriptions,
 )
 from ..schemas.interviews_schema import (
