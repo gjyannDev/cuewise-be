@@ -13,6 +13,7 @@ dependencies = [
     "httpx>=0.28",
     "langfuse>=5.1.0",
     "openai>=3.42.1",
+    "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.6",
     "pwdlib[argon2]>=0.3.1",
     "pydantic-settings>=2.16.1",
@@ -31,3 +32,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "postgres: needs a real Postgres with pgvector (set TEST_POSTGRES_URL to a throwaway database); skipped otherwise",
+]

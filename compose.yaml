@@ -1,0 +1,23 @@
+# Dev database: Postgres 18 with the pgvector extension (the reference-note tables need the `vector` type).
+# Start: docker compose up -d   Stop: docker compose down (the data stays in the volume; add -v to delete it).
+# Host port 5433, so it can run next to a local Postgres on 5432; bound to localhost only.
+services:
+  db:
+    # Pinned: pgvector 0.8.7 on Postgres 18 (verified on Docker Hub, 2026-11-09).
+    image: pgvector/pgvector:0.8.7-pg18-trixie
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_236
+      POSTGRES_DB: cuewise
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # Postgres 18 images keep their data under /var/lib/postgresql/18/docker: mount the parent directory.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cuewise"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
