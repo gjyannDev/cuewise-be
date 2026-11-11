@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import ProviderConfig, Settings
+from app.modules.interviews.constants.interviews_constants import KNOWLEDGE_VECTOR_SIZE
 
 GOOGLE = {
     "LLM_GOOGLE_API_KEY": "google-test-secret",
@@ -335,3 +336,52 @@ def test_env_example_lists_every_transcription_setting():  # voice AC8
         "TRANSCRIPTION_MAX_RETRIES",
         "TRANSCRIPTION_TOTAL_BUDGET_SECONDS",
     } <= keys
+
+
+@pytest.fixture
+def no_embedding_env(no_llm_env):
+    for name in list(os.environ):
+        if name.upper().startswith("EMBEDDING_"):
+            no_llm_env.delenv(name, raising=False)
+    return no_llm_env
+
+
+def test_embedding_defaults_and_off_without_the_google_key(no_embedding_env):  # knowledge-base-rag AC27
+    s = _settings()
+
+    assert s.embedding_configured is False
+    assert (s.embedding_model, s.embedding_dimensions, s.embedding_base_url, s.embedding_timeout_seconds) == (
+        "gemini-embedding-001",
+        768,
+        "https://generativelanguage.googleapis.com/v1beta/",
+        10,
+    )
+
+
+def test_embedding_dimensions_match_the_vector_column():  # AC27, EC14: a mismatch needs a migration
+    assert Settings.model_fields["embedding_dimensions"].default == KNOWLEDGE_VECTOR_SIZE
+
+
+def test_embeddings_use_the_google_key_and_a_blank_one_is_unset(no_embedding_env):  # AC27: no second secret
+    no_embedding_env.setenv("LLM_GOOGLE_API_KEY", "  ")
+    assert _settings().embedding_configured is False
+
+    no_embedding_env.setenv("LLM_GOOGLE_API_KEY", "google-test-secret")
+    assert _settings().embedding_configured is True
+
+
+@pytest.mark.parametrize(("name", "value"), [("EMBEDDING_DIMENSIONS", "0"), ("EMBEDDING_TIMEOUT_SECONDS", "0")])
+def test_embedding_limits_must_be_positive(no_embedding_env, name, value):  # inferred: a zero size or timeout
+    no_embedding_env.setenv(name, value)
+
+    with pytest.raises(ValidationError):
+        _settings()
+
+
+def test_env_example_lists_every_embedding_setting():  # AC27
+    with open(".env.example", encoding="utf-8") as f:
+        keys = {line.split("=", 1)[0] for line in f if "=" in line and not line.startswith("#")}
+
+    assert {"EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS", "EMBEDDING_BASE_URL", "EMBEDDING_TIMEOUT_SECONDS"} <= keys
+    assert "EMBEDDING_API_KEY" not in keys
+

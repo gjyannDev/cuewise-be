@@ -3,12 +3,14 @@ import logging
 from app.core.config import Settings
 
 from .deepgram import DeepgramTranscriber
+from .google_embedder import GoogleEmbedder
 from .openai_compatible import OpenAICompatibleProvider
 from .provider import LLMProvider
 from .tracing import Tracer, TracingProvider
 
 logger = logging.getLogger("app.llm")
 stt_logger = logging.getLogger("app.stt")
+rag_logger = logging.getLogger("app.rag")
 
 
 def build_provider(settings: Settings, *, model: str | None = None, tracer: Tracer | None = None) -> LLMProvider | None:
@@ -47,4 +49,22 @@ def build_transcriber(settings: Settings) -> DeepgramTranscriber | None:
         timeout_seconds=settings.transcription_timeout_seconds,
         max_retries=settings.transcription_max_retries,
         total_budget_seconds=settings.transcription_total_budget_seconds,
+    )
+
+
+def build_embedder(settings: Settings) -> GoogleEmbedder | None:
+    """Embeddings for reference-note retrieval; None without the Google key (notes are then picked by role and level
+    only). Never traced: the query is the candidate's job description."""
+    key = settings.llm_google_api_key
+    if key is None:
+        rag_logger.warning(
+            "Embeddings disabled (LLM_GOOGLE_API_KEY is empty): reference notes are picked by role and level only"
+        )
+        return None
+    return GoogleEmbedder(
+        api_key=key.get_secret_value(),
+        model=settings.embedding_model,
+        dimensions=settings.embedding_dimensions,
+        base_url=settings.embedding_base_url,
+        timeout_seconds=settings.embedding_timeout_seconds,
     )

@@ -4,10 +4,17 @@ import os
 import pytest
 
 from app.core.ai.deepgram import DeepgramTranscriber
-from app.core.ai.factory import build_provider, build_transcriber
-from app.core.ai.fake import FakeProvider
+from app.core.ai.embedder import EmbeddingKind
+from app.core.ai.factory import build_embedder, build_provider, build_transcriber
+from app.core.ai.fake import FakeEmbedder, FakeProvider
+from app.core.ai.google_embedder import GoogleEmbedder
 from app.core.ai.openai_compatible import OpenAICompatibleProvider
-from app.core.ai.provider import ChatMessage, LLMResult, LLMTimeoutError
+from app.core.ai.provider import (
+    ChatMessage,
+    LLMRateLimitError,
+    LLMResult,
+    LLMTimeoutError,
+)
 from app.core.config import Settings
 
 
@@ -15,7 +22,7 @@ from app.core.config import Settings
 def settings_with(monkeypatch):
     def _settings(**env):
         for name in list(os.environ):
-            if name.upper().startswith(("LLM_", "OPENROUTER_", "DEEPGRAM_", "TRANSCRIPTION_")):
+            if name.upper().startswith(("LLM_", "OPENROUTER_", "DEEPGRAM_", "TRANSCRIPTION_", "EMBEDDING_")):
                 monkeypatch.delenv(name, raising=False)
         for name, value in env.items():
             monkeypatch.setenv(name, value)
@@ -134,3 +141,61 @@ def test_enabled_tracer_wraps_the_provider_and_a_disabled_one_does_not(settings_
 
     assert isinstance(wrapped, TracingProvider)
     assert isinstance(plain, OpenAICompatibleProvider)
+
+
+def test_no_google_key_means_no_embedder_and_one_warning(settings_with, app_logs):  # knowledge-base-rag EC7
+    assert build_embedder(settings_with()) is None
+
+    [warning] = [r for r in app_logs.records if r.name == "app.rag"]
+    assert warning.levelno == logging.WARNING
+    assert "role and level" in warning.getMessage()
+
+
+def test_the_google_key_builds_a_google_embedder_with_the_configured_model_and_size(settings_with, app_logs):  # AC10
+    embedder = build_embedder(
+        settings_with(LLM_GOOGLE_API_KEY="embed-secret-123", EMBEDDING_MODEL="gemini-embedding-x", EMBEDDING_DIMENSIONS="256")
+    )
+
+    assert isinstance(embedder, GoogleEmbedder)
+    assert (embedder.model, embedder.dimensions) == ("gemini-embedding-x", 256)
+    assert not [r for r in app_logs.records if r.name == "app.rag"]
+    assert all("embed-secret-123" not in r.getMessage() for r in app_logs.records)
+    embedder.close()
+
+
+def test_fake_embedder_is_deterministic_and_records_texts_kinds_and_budgets():  # AC9, AC10
+    fake = FakeEmbedder(dimensions=8)
+
+    first = fake.embed(["a note", "another note"], kind=EmbeddingKind.document)
+    again = fake.embed(["a note"], kind=EmbeddingKind.query, budget_seconds=5)
+
+    assert len(first.vectors) == 2 and all(len(v) == 8 for v in first.vectors)
+    assert first.vectors[0] != first.vectors[1]
+    assert again.vectors[0] == first.vectors[0]
+    assert (first.model, first.attempts) == ("fake-embedding", 1)
+    assert [(c.texts, c.kind, c.budget_seconds) for c in fake.calls] == [
+        (("a note", "another note"), EmbeddingKind.document, None),
+        (("a note",), EmbeddingKind.query, 5),
+    ]
+
+
+def test_fake_embedder_honors_scripted_vectors_and_errors():  # AC9: tests fix the geometry they need
+    fake = FakeEmbedder({"backend": [1.0, 0.0]}, dimensions=2, errors=[LLMRateLimitError("slow down")])
+
+    with pytest.raises(LLMRateLimitError):
+        fake.embed(["backend"], kind=EmbeddingKind.query)
+    result = fake.embed(["backend"], kind=EmbeddingKind.query)
+
+    assert result.vectors == [[1.0, 0.0]]
+    assert len(fake.calls) == 2
+
+
+def test_a_slow_fake_embedder_waits_at_most_its_budget_then_times_out():  # AC19
+    waited: list[float] = []
+    fake = FakeEmbedder(delay=30, sleep=waited.append)
+
+    with pytest.raises(LLMTimeoutError):
+        fake.embed(["a"], kind=EmbeddingKind.query, budget_seconds=5)
+    fake.embed(["a"], kind=EmbeddingKind.document)
+
+    assert waited == [5, 30]

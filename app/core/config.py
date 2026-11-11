@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     # Low, so the same interview scores (nearly) the same twice.
     feedback_score_temperature: float = Field(default=0.2, ge=0, le=2)
 
+    # Embeddings for reference-note retrieval (Gemini's native endpoint: only it takes the query/document task types
+    # and a reduced size). The key is LLM_GOOGLE_API_KEY, so there is no second secret; without it, notes are picked
+    # by role and level alone. The dimensions must equal the vector column's size (a new migration to change it).
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimensions: int = Field(default=768, gt=0)
+    embedding_base_url: str = "https://generativelanguage.googleapis.com/v1beta/"
+    # Per attempt. At interview start the whole embedding step is also capped (RETRIEVAL_TIME_CAP_SECONDS).
+    embedding_timeout_seconds: float = Field(default=10, gt=0)
+
     # Speech-to-text for voice answers (Deepgram). No key = voice answers off; everything else still works.
     deepgram_api_key: SecretStr | None = None
     deepgram_model: str = "nova-3"
@@ -158,6 +167,10 @@ class Settings(BaseSettings):
     @property
     def transcription_configured(self) -> bool:
         return self.deepgram_api_key is not None
+
+    @property
+    def embedding_configured(self) -> bool:
+        return self.llm_google_api_key is not None
 
 
 # Values come from env vars / .env at runtime, which Pyright can't see.
