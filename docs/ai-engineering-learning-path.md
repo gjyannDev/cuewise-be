@@ -95,7 +95,7 @@ Each concept has: **What** it is, **Why** it matters, where it shows up **In Cue
 
 - **What:** Text becomes a vector; similar meaning means nearby vectors. Retrieval fetches the top-k most relevant pieces for the prompt instead of sending a whole knowledge base. Ingestion, chunking, embedding, retrieval and generation are separate steps, each testable alone.
 - **Why:** You can't put everything in the context (concept 2). But retrieval can fail silently, and the model then answers confidently from the wrong text. Retrieved text is also untrusted input (concept 8).
-- **In Cuewise:** Retrieve questions by role, level and job description, and good-answer examples to ground the feedback.
+- **In Cuewise:** Retrieve interview notes for the candidate's role, level and job description to ground the main questions (8a), and strong-answer notes to ground the feedback (8e).
 - **Proof:** You report retrieval quality (recall@k) separately from answer quality, and can show a query where retrieval failed and why.
 
 ### 13. Tool use and agents
@@ -134,7 +134,7 @@ The interview works and can be measured. These slices add what it still can't do
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- |
 | 6. Feedback and scoring           | A separate endpoint that generates structured, rubric-based feedback once and stores it; scores combined in code; consistency measured                        | 4, 5, 11            |
 | 7. Eval maturity                  | LLM-as-judge with a rubric, calibrated against your own grades; a regression gate that fails when the pass rate drops                                        | 10, model choice    |
-| 8. Embeddings and RAG             | pgvector in Postgres; ingestion, chunking, embedding, retrieval as separate steps; retrieved questions and good-answer examples; retrieval evals              | 12, 8               |
+| 8. Embeddings and RAG             | pgvector in Postgres; ingestion, chunking, embedding, retrieval as separate steps; retrieved interview notes feed the question writer (8a), then a job URL, a résumé and feedback grounding (8b to 8e); retrieval evals              | 12, 8               |
 | 9. Tool use and agents            | Tool-call support behind `LLMProvider`; a few read-only tools; a bounded loop under the turn's deadline                                                      | 13, 5, 8            |
 | 10. Provider fallback chain       | `LLM_PROVIDERS` with a second and third vendor behind the factory; the same eval set run on each                                                             | 6, model choice     |
 
@@ -391,42 +391,112 @@ Slice 6   judgment: score a whole interview, consistently
 
 **Done when:** you can say "the judge agrees with my grade on N/10 cases, it is biased toward X", and a deliberate prompt regression makes the gate fail.
 
-### Slice 8: Embeddings and RAG
+### Slice 8: Embeddings and RAG (split into 8a to 8e)
 
-**Goal:** Retrieve the right content instead of hard-coding it, and prove retrieval works on its own before judging the answers built on it.
+Slice 8 is a family of five slices. Only **8a is retrieval proper**, and it is the foundation the rest reuses. 8b and 8c bring in a job URL and a résumé, which are ingestion and security work, not RAG. 8d and 8e put what they produce to use.
 
-**What the user sees:** Questions that fit their role, level and job description better, and feedback that can point to what a strong answer looks like.
+**The question bank plays no part in Slice 8.** The LLM already writes every main question, one per turn (`interviewer_v5`), and the bank is only the fallback. Removing the bank belongs to Slice 10, once the provider chain exists. Retrieval feeds a separate knowledge corpus into the prompt that already exists.
+
+| Slice | What gets built | Concepts |
+| ----- | --------------- | -------- |
+| 8a. Knowledge-base RAG | Role × level notes, chunking, `Embedder`, pgvector, retrieval at interview start, injected into the main-question writer (`interviewer_v6`). Starts with a behavior-preserving split of `interviews_turn.py`. | 12, 2, 8, 9 |
+| 8b. Job URL | Fetch a posting, extract its text, feed the existing job-description path; SSRF defences | 8, 6 |
+| 8c. Résumé upload | PDF/DOCX upload, text extraction, a validated candidate profile, a delete path | 4, 8, 9 |
+| 8d. Résumé-aware interview | The profile feeds the question prompt and the retrieval query (`interviewer_v7`) | 12, 5, 8 |
+| 8e. Feedback grounding | Retrieved strong-answer notes in the feedback prompt | 12, 11 |
+
+Order: 8a, 8b, 8c, 8d, 8e. 8a, 8b and 8c are independent of each other; 8d needs 8a and 8c; 8e needs 8a.
+
+#### 8a: Knowledge-base RAG for the question writer
+
+**Goal:** Ground the main questions in curated interview notes for the candidate's role and level, and prove retrieval works on its own before judging the questions built on it.
+
+**What the user sees:** Main questions that cover the competencies a real interviewer for their role and level would probe, and that follow the job description's skills more closely.
 
 **What you build:**
-- **pgvector in Postgres** through an Alembic migration (never `create_all`), and an embeddings table with UUID keys.
+- **First, a refactor with no behavior change:** split `interviews_turn.py` (about 790 lines mixing types, limits, logging, decide, write and streamed write in one file) by responsibility: deadline and limits, the decide step, the write and stream step, and the logging helpers. The existing tests are the safety net. It is a separate, reviewable part so later slices stop piling onto one file.
+- **A small corpus:** about 15 to 20 markdown notes by role and level (competencies, what interviewers probe, what strong and weak answers look like). A model writing notes to ground a model mostly returns what it already knows, so at least a third of the notes come from material you supply or approve (skills from real job postings, your own level expectations), and each note records its source.
 - **Five separate, individually testable steps:**
-  - **Ingestion:** load the question bank and a small set of good-answer examples
-  - **Chunking:** decide what one chunk is (probably one question or one example with its metadata; you may not need to split at all)
+  - **Ingestion:** a CLI under the interviews tooling, idempotent through a content hash
+  - **Chunking:** by heading, each chunk carrying roles, levels and a competency
   - **Embedding:** an `Embedder` behind an interface in `app/core/ai/`, like `Transcriber`, with a fake for tests
-  - **Retrieval:** top-k with filters (role, level), replacing or feeding `select_questions` while the bank stays the fallback
-  - **Generation:** the retrieved items go into the prompt as delimited data
-- **Retrieval evals:** labelled queries with the item that should come back; report recall@k and MRR, separately from the quality of the generated question or feedback.
-- **Privacy:** embed the knowledge base, not candidate answers, unless a spec says why.
+  - **Retrieval:** filter by role and level in SQL, then the top-k (about 6) by cosine similarity
+  - **Generation:** the chunks go into a new `interviewer_v6` as delimited `<reference_notes>` data, for main questions only (v5 is kept for comparison, follow-ups are unchanged)
+- **pgvector in Postgres** through an Alembic migration (never `create_all`), UUID keys, and the embedding model's name stored on each row because the vector size is fixed in the column. One new dependency, the `pgvector` package, for the SQLAlchemy vector type.
+- **Retrieve once, at interview start.** Role and level are hard filters only; the vector query is the job description alone (its summary when there is one). With no job description there is no embedding call: the notes come from the filter alone, chosen deterministically from the interview id. The result is stored in an `interview_session_chunks` table (session, chunk, rank, score, mode), so you can trace which notes shaped which interview.
+- **Failure path:** if the embedder fails or times out (5-second cap), or nothing clears the similarity threshold, retrieval degrades to the filter-only notes and the log says `retrieval_degraded:<reason>`. If there is no eligible note at all, or the LLM is off, the writer runs without notes and the log says `retrieval_skipped:<reason>`. The interview always carries on. The threshold comes from the eval, not a guess.
+- **Evals, in two parts:**
+  - *Retrieval:* about 15 labelled queries with the chunk that should come back; report recall@5 and MRR. Include synonym job descriptions, a vague one and a role-boundary one, and document one real failure. The baseline to beat is the metadata filter alone, with no vectors. Write the queries independently of the notes' headings, or the eval is too easy.
+  - *Generation:* three arms on the existing eval setups, with repeats: no notes (`interviewer_v5`), `interviewer_v6` with filter-only notes, and `interviewer_v6` with vector notes. That separates "do notes help" from "does vector ranking help". Measure distinct competencies per interview, how many of the job description's skills get a question, whether the existing rule checks still pass, and the added tokens and latency at start. Then rank the three arms' question sets blind, yourself, on about 10 setups, because the rule checks are gameable.
+- **Privacy:** log ids, ranks and scores, never the query text. The summary goes to the embedding provider, which already receives it as an LLM input.
 
 **You learn:**
-- embeddings and retrieval (concept 12), and why retrieval quality and answer quality are measured apart
+- embeddings and retrieval (concept 12), and why retrieval quality and question quality are measured apart
 - chunking as a real decision
 - retrieved text is untrusted input too: the injection defences from Slice 2 apply (concept 8)
-- the cost of embedding (concept 9)
+- the cost of embedding and of a longer prompt (concepts 2, 9)
+- when vectors do not beat a plain metadata filter
 
-**Not included:** reranking, hybrid keyword + vector search, uploading résumés.
+**Known limitation:** there is no LLM judge (Slice 7 was skipped), so "better questions" is measured with rule checks plus your own blind ranking. The rule checks are gameable and the ranking is one person's opinion on about 10 setups, and the learnings should say so.
 
-**Done when:** you can say "recall@5 is X on N labelled queries", show one query where retrieval failed and why, and show the judge score of the generated output with and without retrieval.
+**Not included:** reranking, hybrid keyword and vector search, per-turn retrieval, assigning notes to individual questions by competency (a possible 8a-2 once you have the baseline numbers), the question bank, résumés and job URLs (8b to 8d), feedback grounding (8e).
+
+**Done when:**
+- you can say "recall@5 is X and MRR is Y on N labelled queries", and whether vectors beat the metadata-only baseline
+- you can show one query where retrieval failed and why
+- you can compare the three arms on the rule-check numbers and your blind ranking, with the added tokens and latency at start
+- a test where the fake embedder fails still completes the interview
+- the `interviews_turn.py` split passes the existing tests unchanged
+
+#### 8b: Job URL
+
+**Goal:** Let the candidate give a job posting link instead of pasting the text.
+
+**What you build:** a fetch that accepts only http(s) and checks the resolved address before connecting (and on every redirect), with size and time limits and a content-type check; text extraction from the page; the result flows into the existing job-description path (summary, prompts, retrieval query). When a site blocks scraping or needs JavaScript, the response says to paste the text instead; there is no headless browser.
+
+**You learn:** SSRF, and treating fetched web text as untrusted input (concept 8); failure handling for an external fetch (concept 6).
+
+**Done when:** tests on saved HTML pages (no network) pass, requests to private addresses and redirects into them are refused, and a page containing instructions does not change the interviewer's behavior.
+
+#### 8c: Résumé upload
+
+**Goal:** Turn an uploaded résumé into a small, validated candidate profile.
+
+**What you build:** a PDF/DOCX upload with type, size and content checks; text extraction; a Pydantic profile (skills, roles, projects) produced with structured output, retry and a safe failure; storage of the minimum; a delete endpoint.
+
+**You learn:** structured extraction (concept 4); résumés as personal data and as an injection path, such as hidden text (concept 8).
+
+**Done when:** field-level accuracy is reported on about 5 sample résumés, an injected résumé does not change behavior, and a garbage or oversized file is refused cleanly.
+
+#### 8d: Résumé-aware interview
+
+**Goal:** Questions that refer to the candidate's own background.
+
+**What you build:** the profile goes into the question prompt and into the retrieval query (`interviewer_v7`). Embedding résumé chunks is optional and only worth it if a résumé is too long to send; if you do, every query is scoped to the user.
+
+**You learn:** personalising a prompt safely; why embedding candidate data needs a reason (concepts 12, 8).
+
+**Done when:** questions measurably reference résumé items, and a test shows one user never retrieves another user's chunks.
+
+#### 8e: Feedback grounding
+
+**Goal:** Feedback that can point to what a strong answer looks like.
+
+**What you build:** retrieved strong-answer notes in the feedback prompts, as delimited data, with a new prompt or rubric version. It reuses the retrieval layer from 8a.
+
+**You learn:** reusing a retrieval layer for a second job; grounding a judge-style call (concept 11).
+
+**Done when:** the feedback eval bands and score spread are compared with and without the notes.
 
 ### Slice 9: Tool use and agents
 
 **Goal:** Let the model call a few of your functions, while the code stays in charge of what is allowed.
 
-**What the user sees:** Nothing new directly. Behind the scenes, the model can look things up (a rubric, matching questions) instead of you guessing what to put in the prompt.
+**What the user sees:** Nothing new directly. Behind the scenes, the model can look things up (a rubric, matching interview notes) instead of you guessing what to put in the prompt.
 
 **What you build:**
 - **Tool support behind `LLMProvider`** (OpenAI-compatible tool calls), plus scripted tool calls in `FakeProvider`.
-- **A few read-only tools** with Pydantic argument schemas, for example `search_questions(role, level, topic)` and `get_rubric(criterion)`. This is what the empty `# Capabilities` part of the prompts is for.
+- **A few read-only tools** with Pydantic argument schemas, for example `search_notes(role, level, topic)` and `get_rubric(criterion)`. This is what the empty `# Capabilities` part of the prompts is for.
 - **A bounded loop:** a maximum number of tool calls per turn, a timeout per tool, and the turn's shared `Deadline`.
 - **Code enforces:** an allowlist of tools, validated arguments, everything scoped to the session and user (the model can't name ids outside them), and tool results treated as untrusted data.
 - **Tracing and logs:** each tool call traced in Langfuse; log the tool name and duration, not the arguments' text.
@@ -448,12 +518,13 @@ Slice 6   judgment: score a whole interview, consistently
 
 **Goal:** When one provider fails, the next one answers, and you can see what each vendor does on the same cases.
 
-**What the user sees:** Fewer bank fallbacks and fewer errors during a provider outage.
+**What the user sees:** Fewer errors during a provider outage, and no question-bank fallback once the bank is removed.
 
 **What you build:**
 - **Config:** `LLM_PROVIDERS=google,...` as an ordered list, plus a block per vendor: `LLM_<VENDOR>_API_KEY`, `_MODEL`, `_BASE_URL`. No positional names, so reordering never renames keys.
 - **The chain in the factory:** build the providers in order and fall through on failure. Retries and switches happen only **before the first streamed chunk**, because after that the candidate may have read text.
 - **Tracing:** which provider answered each call, and the cost per vendor.
+- **Remove the question bank** once the chain is proven: delete the bank file, `select_questions` and the bank fallback at interview start and in the turns. The spec decides what the candidate sees when every provider fails (most likely a clear, retryable error).
 - **The same eval set run on each provider**, with the numbers side by side.
 
 **You learn:**
@@ -484,7 +555,7 @@ Every later AI feature reuses these, so a new feature mostly means a new prompt,
 - **Model routing and semantic caching:** send easy turns to a cheap model and hard ones to a strong model, using evals to justify the split.
 - **Guardrails on output:** a second pass that checks replies for leaked prompts, scores given when they shouldn't be, and off-topic drift.
 - **Online evals and feedback loops:** score live traces in Langfuse and add user thumbs up/down.
-- **Resume parsing:** extraction with structured output, plus a PII-minimization step before anything goes to the provider.
+- **Resume parsing:** now Slice 8c. A PII-minimization step before anything goes to the provider remains a later hardening step.
 - **Fine-tuning vs prompting:** a cost and quality analysis only, not a build.
 
 ## How to make it stick
@@ -526,8 +597,12 @@ reference answers.
 - [ ] Slice 4: SSE streaming: built 2026-11-02 (`docs/features/sse-streaming/`). `POST /interviews/{id}/messages/stream` sends the turn as typed SSE events over sse-starlette (progress, reaction, the question token by token through an async provider `stream()`, reset on a rejected draft, one terminal `done`/`error`). It shares the JSON turn's rules and its single atomic save, so a client that leaves saves nothing, and `interviewer_v5` is plain text with a `CATEGORY:` line. Unit-tested end to end with fakes. Still open before ticking: the 3-repeat v4 vs v5 eval comparison and the time to first token from a live interview (see its learnings)
 - [ ] Slice 5: Evals (grow the first set from Slice 2 into a repeatable model/prompt comparison)
 - [ ] Slice 6: Feedback and scoring (earlier called "Slice 3 (revised)"): a separate endpoint that generates rubric-based structured feedback once and stores it (strengths, improvements, per-question notes, scores combined in code); consistency measured
-- [ ] Slice 7: Eval maturity (LLM-as-judge calibrated against your own grades, a regression gate)
-- [ ] Slice 8: Embeddings and RAG (pgvector, retrieval evals)
+- [ ] Slice 7: Eval maturity (LLM-as-judge calibrated against your own grades, a regression gate). Skipped for now by choice (2026-11-09): the existing evals are good enough, so Slice 8a measures with rule checks instead of a judge
+- [ ] Slice 8a: Knowledge-base RAG for the question writer (starts with a no-behavior-change split of `interviews_turn.py`; pgvector, retrieval evals, `interviewer_v6`; the question bank is not used). *Progress (2026-11-09): code, tests and drafted corpus done; corpus review, Docker pgvector database and the real-model evals pending.*
+- [ ] Slice 8b: Job URL (fetch and extract a posting, SSRF defences)
+- [ ] Slice 8c: Résumé upload (PDF/DOCX to a validated profile, delete path)
+- [ ] Slice 8d: Résumé-aware interview (profile in the question prompt and retrieval query)
+- [ ] Slice 8e: Feedback grounding (retrieved strong-answer notes in the feedback prompts)
 - [ ] Slice 9: Tool use and agents (a bounded tool loop, read-only tools)
 - [ ] Slice 10: Provider fallback chain (`LLM_PROVIDERS`, the same evals on each vendor)
 
@@ -552,7 +627,15 @@ reference answers.
 ├───────────────────────────────────┼───────────────────────────────┤
 │ 7. Eval maturity                  │ 10, model choice              │
 ├───────────────────────────────────┼───────────────────────────────┤
-│ 8. Embeddings and RAG             │ 12, 8                         │
+│ 8a. Knowledge-base RAG            │ 12, 2, 8, 9                   │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 8b. Job URL                       │ 8, 6                          │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 8c. Résumé upload                 │ 4, 8, 9                       │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 8d. Résumé-aware interview        │ 12, 5, 8                      │
+├───────────────────────────────────┼───────────────────────────────┤
+│ 8e. Feedback grounding            │ 12, 11                        │
 ├───────────────────────────────────┼───────────────────────────────┤
 │ 9. Tool use and agents            │ 13, 5, 8                      │
 ├───────────────────────────────────┼───────────────────────────────┤
