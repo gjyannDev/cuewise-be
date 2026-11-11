@@ -1,4 +1,5 @@
 from enum import StrEnum
+from fractions import Fraction
 from pathlib import Path
 
 
@@ -151,7 +152,7 @@ class Criterion(StrEnum):
     clarity = "clarity"
 
 
-# Bank-only role tag: a question tagged "general" is eligible for every JobRole.
+# Bank and reference-note role tag: a question or note tagged "general" is eligible for every JobRole.
 GENERAL_ROLE = "general"
 
 MIN_QUESTION_COUNT = 1
@@ -359,6 +360,9 @@ WINDOW_TURNS = 3
 WINDOW_ANSWER_CAP = 600
 # Estimated tokens. A safety net, not a cost target: a worst-case window_ledger call is about 4,000.
 WINDOW_INPUT_LIMIT = 5000
+# Added to the limit for a main-question write that carries reference notes: six maximum-size notes are about 1,100
+# tokens and the v6 prompts about 100 more than v4/v5. Older history is still trimmed first; the notes go last.
+REFERENCE_NOTES_TOKEN_ALLOWANCE = 1500
 TRUNCATION_MARKER = " [answer shortened]"
 NOTE_MAX_LENGTH = 200
 # A job description longer than this is condensed once at interview start.
@@ -536,3 +540,60 @@ CRITERION_TIPS: dict[Criterion, str] = {
     Criterion.trade_offs: "Name an alternative you considered and why you chose one over the other.",
     Criterion.clarity: "Start with a one-sentence answer, then add the detail in a clear order.",
 }
+
+# --- Knowledge-base RAG (Slice 8a): reference notes picked once at interview start, stored per interview ---
+
+
+class RetrievalMode(StrEnum):
+    """How an interview's reference notes were picked: ranked by meaning against the job description, or by role and
+    level alone (no job description, or vector ranking was not possible)."""
+
+    vector = "vector"
+    filter = "filter"
+
+
+class RetrievalDegrade(StrEnum):
+    """Why vector mode fell back to filter mode (logged as retrieval_degraded:<reason>)."""
+
+    not_configured = "not_configured"
+    embedder_error = "embedder_error"
+    rate_limited = "rate_limited"
+    timeout = "timeout"
+    size_mismatch = "size_mismatch"
+    below_threshold = "below_threshold"
+
+
+class RetrievalSkip(StrEnum):
+    """Why an interview has no reference notes at all (logged as retrieval_skipped:<reason>); it runs as before."""
+
+    llm_off = "llm_off"
+    no_match = "no_match"
+    db_error = "db_error"
+
+
+class NoteSource(StrEnum):
+    """Where a note's content came from. A model grounding a model on its own drafts mostly echoes what it already
+    knows, so a share of the corpus must come from somewhere else (MIN_NON_DRAFTED_SHARE)."""
+
+    drafted = "drafted"
+    posting = "posting"
+    user = "user"
+
+
+RETRIEVAL_TOP_K = 6
+# The embedding call at interview start never delays the start by more than this; then filter mode takes over.
+RETRIEVAL_TIME_CAP_SECONDS = 5.0
+# Cosine similarity a vector-mode note must reach. 0 keeps everything but opposite meanings: a placeholder until the
+# retrieval eval's threshold sweep sets it (Step 12), never a guess.
+RETRIEVAL_MIN_SIMILARITY = 0.0
+MIN_NON_DRAFTED_SHARE = Fraction(1, 3)
+KNOWLEDGE_DIR = MODULE_DIR / "data" / "knowledge"
+# Per section (chunk). Six of them go into every main-question write, so they must stay small next to the interview.
+KNOWLEDGE_SECTION_MAX_LENGTH = 600
+# The competency column's size; a heading is a short label, not a sentence.
+KNOWLEDGE_HEADING_MAX_LENGTH = 128
+# The vector column's size, fixed by the migration; EMBEDDING_DIMENSIONS must match it.
+KNOWLEDGE_VECTOR_SIZE = 768
+# v5 / v4 plus the reference-notes rule; used only when an interview has stored notes, so no-notes prompts are unchanged.
+INTERVIEWER_V6_PROMPT_VERSION = "interviewer_v6"
+INTERVIEWER_V6_JSON_PROMPT_VERSION = "interviewer_v6_json"

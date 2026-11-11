@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, cast
 
@@ -22,12 +22,14 @@ from ..constants.interviews_constants import (
     SessionStatus,
     SortDirection,
 )
+from ..models.interviews_knowledge_model import InterviewSessionChunk, KnowledgeChunk
 from ..models.interviews_model import (
     InterviewFeedback,
     InterviewMessage,
     InterviewQuestion,
     InterviewSession,
 )
+from ..utils.interviews_knowledge_utils import ReferenceNote
 
 # UUIDv7 ids are time-ordered, so `created_at` sorts by id: start order, served by ix_interview_sessions_user_id_id.
 _HISTORY_SORT_COLUMNS = {
@@ -61,16 +63,22 @@ class InterviewsRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def start(self, session: InterviewSession, questions: list[InterviewQuestion]) -> InterviewSession:
-        """Abandon the user's active session and save the new one with its questions, all or nothing."""
+    def start(
+        self,
+        session: InterviewSession,
+        questions: list[InterviewQuestion],
+        note_refs: Sequence[InterviewSessionChunk] = (),
+    ) -> InterviewSession:
+        """Abandon the user's active session and save the new one with its questions and its reference notes, all or
+        nothing."""
         try:
             # Before the insert, so the one-in-progress-per-user index never sees two rows.
             self._abandon_in_progress(session.user_id)
             self.db.add(session)
             self.db.flush()  # assigns session.id for the questions' foreign key
-            for question in questions:
-                question.session_id = session.id
-            self.db.add_all(questions)
+            for row in [*questions, *note_refs]:
+                row.session_id = session.id
+            self.db.add_all([*questions, *note_refs])
             self.db.commit()
         except Exception:
             self.db.rollback()
@@ -90,6 +98,23 @@ class InterviewsRepository:
         for row in rows:
             if row is not None:
                 self.db.refresh(row)
+
+    def reference_notes(self, session_id: uuid.UUID) -> list[ReferenceNote]:
+        """The notes stored for this interview at start, rank order; none for interviews without (or from before) them.
+        Read from the rows the interview points at, so a later re-ingest never changes them."""
+        rows = self.db.execute(
+            select(
+                KnowledgeChunk.id,
+                KnowledgeChunk.competency,
+                KnowledgeChunk.text,
+                InterviewSessionChunk.rank,
+                InterviewSessionChunk.score,
+            )
+            .join(KnowledgeChunk, KnowledgeChunk.id == InterviewSessionChunk.chunk_id)
+            .where(InterviewSessionChunk.session_id == session_id)
+            .order_by(InterviewSessionChunk.rank)
+        )
+        return [ReferenceNote(*row) for row in rows]
 
     def get_for_user(self, session_id: uuid.UUID, user_id: uuid.UUID) -> InterviewSession | None:
         # Keyed on the owner too, so "missing" and "someone else's" are indistinguishable.

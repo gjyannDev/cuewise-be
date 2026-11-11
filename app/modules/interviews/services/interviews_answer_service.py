@@ -193,6 +193,7 @@ class AnswerService:
             session.question_count,
             session.job_description,
             session.job_description_summary,
+            tuple(self.repo.reference_notes(session.id)),
         )
         asked = self.repo.list_questions(session.id, position)
         saved = self.repo.list_messages(session.id)

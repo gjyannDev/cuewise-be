@@ -63,6 +63,7 @@ from ..schemas.interviews_schema import (
     StreamEventOut,
     TranscriptItemOut,
 )
+from .interviews_knowledge_utils import ReferenceNote
 
 _bank_adapter = TypeAdapter(QuestionBank)
 
@@ -166,7 +167,8 @@ _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 # Matches an opening or closing tag the app uses to fence data, in any case, so untrusted text can't close its own
 # block or fake the app's status block.
 APP_TAG = re.compile(
-    r"<\s*/?\s*(job_description|interview_status|question_thread|answer|feedback_scores)\s*>", re.IGNORECASE
+    r"<\s*/?\s*(job_description|interview_status|question_thread|answer|feedback_scores|reference_notes)\s*>",
+    re.IGNORECASE,
 )
 
 
@@ -381,6 +383,16 @@ def job_description_block(job_description: str | None) -> str:
     return f"<job_description>\n{neutralize_app_tags(job_description)}\n</job_description>"
 
 
+def reference_notes_block(notes: Sequence[ReferenceNote]) -> str:
+    """The interview's reference notes, fenced as data like the job description, most relevant first. Posting-derived
+    notes are third-party text, so tags inside are neutralised and the prompt says the block is never instructions."""
+    lines = ["<reference_notes>"]
+    for note in sorted(notes, key=lambda n: n.rank):
+        lines.append(f"{note.rank}. {neutralize_app_tags(note.competency)}: {neutralize_app_tags(note.text)}")
+    lines.append("</reference_notes>")
+    return "\n".join(lines)
+
+
 def interviewer_history(
     questions: Sequence[InterviewQuestion], messages: Sequence[InterviewMessage]
 ) -> list[QuestionTurn]:
@@ -396,16 +408,23 @@ def interviewer_history(
 
 
 def build_interviewer_messages(
-    system_prompt: str, job_description: str | None, turns: Sequence[QuestionTurn]
+    system_prompt: str,
+    job_description: str | None,
+    turns: Sequence[QuestionTurn],
+    reference_notes: Sequence[ReferenceNote] = (),
 ) -> list[ChatMessage]:
     """The full input for one call (the model has no memory, so the whole interview is resent every time).
 
-    The job description opens the conversation as user data; earlier questions are replayed as the same JSON the
-    model must answer with, which keeps it in format. Roles alternate system, user, assistant, user, ...
+    The job description opens the conversation as user data (with the interview's reference notes right after it,
+    when it has any); earlier questions are replayed as the same JSON the model must answer with, which keeps it in
+    format. Roles alternate system, user, assistant, user, ...
     """
+    data = job_description_block(job_description)
+    if reference_notes:
+        data = f"{data}\n\n{reference_notes_block(reference_notes)}"
     messages = [
         ChatMessage(role="system", content=system_prompt),
-        ChatMessage(role="user", content=f"{job_description_block(job_description)}\n\nPlease ask the first question."),
+        ChatMessage(role="user", content=f"{data}\n\nPlease ask the first question."),
     ]
     for turn in turns:
         messages.append(

@@ -31,7 +31,8 @@ class StrategyOutput(NamedTuple):
 
 
 class Strategy(Protocol):
-    # Estimated input tokens; None = never trimmed.
+    # Estimated input tokens; None = never trimmed. A strategy whose limit depends on the input also has
+    # `limit_for(inputs)`, which the manager then uses instead.
     limit: int | None
 
     def droppable(self, inputs: Any) -> int:
@@ -82,12 +83,14 @@ class ContextManager:
         if name not in spec.strategies:
             raise ValueError(f"Unknown strategy {name!r} for {task}; valid: {', '.join(spec.strategies)}")
         chosen = spec.strategies[name]
+        limit_for = getattr(chosen, "limit_for", None)
+        limit = limit_for(inputs) if limit_for is not None else chosen.limit
 
         dropped = 0
         output = chosen.build(inputs, dropped)
-        if chosen.limit is not None:
+        if limit is not None:
             most = chosen.droppable(inputs)
-            while estimate_tokens(output.messages) > chosen.limit and dropped < most:
+            while estimate_tokens(output.messages) > limit and dropped < most:
                 dropped += 1
                 output = chosen.build(inputs, dropped)
 
@@ -99,7 +102,7 @@ class ContextManager:
             dropped=dropped,
             counts=output.counts,
         )
-        if chosen.limit is not None and report.estimated_tokens > chosen.limit:
+        if limit is not None and report.estimated_tokens > limit:
             _log(logging.WARNING, report, "too_large")
             raise ContextTooLargeError(report)
         _log(logging.INFO, report, "ok")

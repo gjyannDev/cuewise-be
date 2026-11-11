@@ -28,6 +28,7 @@ from ..constants.interviews_constants import (
     SessionStatus,
     SortDirection,
 )
+from ..models.interviews_knowledge_model import InterviewSessionChunk
 from ..models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
@@ -35,6 +36,7 @@ from ..models.interviews_model import (
 )
 from ..repositories.interviews_repository import InterviewsRepository
 from ..schemas.interviews_schema import BankQuestion, InterviewCreateIn
+from ..services.interviews_retrieval_service import RetrievalService
 from ..utils.interviews_session_utils import (
     InterviewSetup,
     bank_question,
@@ -76,12 +78,15 @@ class InterviewsService:
         clock: Callable[[], float] = time.monotonic,
         context: ContextManager = CONTEXT_MANAGER,
         tracer: Tracer | None = None,
+        retrieval: RetrievalService | None = None,
     ):
         self.repo = repo
         self.bank = bank
         self.rng = rng
         # None = LLM off: every question comes from the bank.
         self.llm = llm
+        # Picks the interview's reference notes at start (knowledge-base RAG); None = no notes (evals, older tests).
+        self.retrieval = retrieval
         # Langfuse traces (one per request that can call the LLM); a disabled tracer costs nothing.
         self.tracer = tracer or Tracer(None)
         self.llm_max_tokens = llm_max_tokens
@@ -126,6 +131,21 @@ class InterviewsService:
             if summary is not None:
                 session.job_description_summary = summary
                 setup = setup._replace(job_description_summary=summary)
+            note_refs: list[InterviewSessionChunk] = []
+            if self.retrieval is not None:
+                # After the summary: the query is the summary when there is one. Never fails the start.
+                retrieval = self.retrieval.retrieve(
+                    setup.session_id,
+                    setup.role,
+                    setup.level,
+                    summary=setup.job_description_summary,
+                    job_description=setup.job_description,
+                )
+                setup = setup._replace(reference_notes=tuple(retrieval.notes))
+                note_refs = [
+                    InterviewSessionChunk(chunk_id=note.chunk_id, rank=note.rank, score=note.score, mode=retrieval.mode)
+                    for note in retrieval.notes
+                ]
             first = None
             if self.interviewer is not None:
                 written = self.interviewer.first_question(setup.session_id, interviewer_inputs(setup, []))
@@ -133,7 +153,7 @@ class InterviewsService:
                     first = llm_question(written, written.results, FIRST_POSITION, 1)
             if first is None:
                 first = bank_question(self.bank, self.rng, setup, FIRST_POSITION, 1, set())
-            self.repo.start(session, [first])
+            self.repo.start(session, [first], note_refs)
             return InterviewState(session, first)
 
     def get(self, user: User, session_id: uuid.UUID) -> InterviewState:

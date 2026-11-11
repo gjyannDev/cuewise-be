@@ -26,6 +26,7 @@ from ..constants.interviews_constants import (
 from ..models.interviews_model import InterviewQuestion, InterviewSession
 from ..repositories.interviews_repository import InterviewsRepository
 from ..schemas.interviews_schema import BankQuestion
+from .interviews_knowledge_utils import ReferenceNote
 from .interviews_utils import QuestionTurn, pick_fallback_question
 
 
@@ -40,6 +41,8 @@ class InterviewSetup(NamedTuple):
     job_description: str | None
     # Sent instead of job_description when present (made once at start for long descriptions).
     job_description_summary: str | None = None
+    # Picked once at start and stored with the interview; empty for interviews without notes (and older ones).
+    reference_notes: tuple[ReferenceNote, ...] = ()
 
 
 class Thread(NamedTuple):
@@ -66,6 +69,7 @@ def interviewer_inputs(setup: InterviewSetup, turns: Sequence[QuestionTurn]) -> 
         job_description=setup.job_description_summary or setup.job_description,
         turns=turns,
         summary_used=setup.job_description_summary is not None,
+        reference_notes=setup.reference_notes,
     )
 
 

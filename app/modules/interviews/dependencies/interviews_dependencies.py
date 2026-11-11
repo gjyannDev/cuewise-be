@@ -8,6 +8,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.ai.context import ContextManager
+from app.core.ai.embedder import Embedder
 from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.ai.transcriber import Transcriber
@@ -28,10 +29,12 @@ from ..controllers.interviews_answer_controller import AnswerController
 from ..controllers.interviews_controller import InterviewsController
 from ..controllers.interviews_feedback_controller import FeedbackController
 from ..controllers.interviews_transcription_controller import TranscriptionController
+from ..repositories.interviews_knowledge_repository import KnowledgeRepository
 from ..repositories.interviews_repository import InterviewsRepository
 from ..schemas.interviews_schema import BankQuestion
 from ..services.interviews_answer_service import AnswerService
 from ..services.interviews_feedback_service import FeedbackService
+from ..services.interviews_retrieval_service import RetrievalService
 from ..services.interviews_service import InterviewsService
 from ..services.interviews_transcription_service import TranscriptionService
 from ..utils.interviews_utils import QUESTION_BANK
@@ -54,6 +57,11 @@ def get_llm_provider(request: Request) -> LLMProvider | None:
 def get_transcriber(request: Request) -> Transcriber | None:
     """Built once at startup (app lifespan); None when no Deepgram key is configured or the lifespan didn't run."""
     return getattr(request.app.state, "transcriber", None)
+
+
+def get_embedder(request: Request) -> Embedder | None:
+    """Built once at startup (app lifespan); None without the Google key or when the lifespan didn't run."""
+    return getattr(request.app.state, "embedder", None)
 
 
 def get_transcription_limiter() -> RateLimiter:
@@ -88,6 +96,16 @@ def get_context_manager() -> ContextManager:
     return CONTEXT_MANAGER
 
 
+def get_retrieval_service(
+    db: Annotated[Session, Depends(get_db)],
+    embedder: Annotated[Embedder | None, Depends(get_embedder)],
+    llm: Annotated[LLMProvider | None, Depends(get_llm_provider)],
+    clock: Annotated[Callable[[], float], Depends(get_clock)],
+    tracer: Annotated[Tracer, Depends(get_tracer)],
+) -> RetrievalService:
+    return RetrievalService(KnowledgeRepository(db), embedder, llm_on=llm is not None, tracer=tracer, clock=clock)
+
+
 def get_interviews_service(
     db: Annotated[Session, Depends(get_db)],
     bank: Annotated[list[BankQuestion], Depends(get_bank)],
@@ -95,6 +113,7 @@ def get_interviews_service(
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     context: Annotated[ContextManager, Depends(get_context_manager)],
     tracer: Annotated[Tracer, Depends(get_tracer)],
+    retrieval: Annotated[RetrievalService, Depends(get_retrieval_service)],
 ) -> InterviewsService:
     return InterviewsService(
         InterviewsRepository(db),
@@ -106,6 +125,7 @@ def get_interviews_service(
         clock=clock,
         context=context,
         tracer=tracer,
+        retrieval=retrieval,
     )
 
 

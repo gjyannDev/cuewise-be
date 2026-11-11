@@ -8,6 +8,8 @@ is today's send-everything payload, never trimmed: the honest baseline and the f
 move on. Both it and window_ledger keep the current thread whole.
 `interviewer_stream` is the streamed turn's write call: window_ledger on interviewer_v5, whose plain-text reply can be
 shown while it streams.
+Both write tasks are wrapped by `WithReferenceNotes`: an interview with reference notes gets the v6 prompts and the
+notes for its main questions; every other call is unchanged.
 """
 
 import json
@@ -33,7 +35,10 @@ from ..constants.interviews_constants import (
     INTERVIEWER_TASK,
     INTERVIEWER_V4_PROMPT_VERSION,
     INTERVIEWER_V5_PROMPT_VERSION,
+    INTERVIEWER_V6_JSON_PROMPT_VERSION,
+    INTERVIEWER_V6_PROMPT_VERSION,
     MAX_FOLLOW_UPS,
+    REFERENCE_NOTES_TOKEN_ALLOWANCE,
     SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
     TRUNCATION_MARKER,
@@ -48,6 +53,7 @@ from ..constants.interviews_constants import (
     Level,
     QuestionKind,
 )
+from ..utils.interviews_knowledge_utils import ReferenceNote
 from ..utils.interviews_utils import (
     QuestionTurn,
     build_interviewer_messages,
@@ -85,6 +91,8 @@ class InterviewerInputs(NamedTuple):
     # Write calls only: what to write, set by the code after the decision and its limits.
     mode: FollowUpAction = FollowUpAction.next_question
     gap: FollowUpGap | None = None
+    # The interview's stored notes, rank order. Only main-question writes render them (not decide, not follow-ups).
+    reference_notes: Sequence[ReferenceNote] = ()
 
 
 class SummaryInputs(NamedTuple):
@@ -131,6 +139,8 @@ class WindowLedger:
         limit: int | None = WINDOW_INPUT_LIMIT,
         # Earlier questions are replayed in the format the prompt asks for: JSON (v2-v4), or v5's streamable text.
         text_replies: bool = False,
+        # The v6 prompts: put the interview's reference notes after the job description (WithReferenceNotes decides).
+        with_notes: bool = False,
     ):
         self.version = version
         self.template = load_prompt(version)
@@ -138,6 +148,7 @@ class WindowLedger:
         self.cap = cap
         self.limit = limit
         self.text_replies = text_replies
+        self.with_notes = with_notes
 
     def droppable(self, inputs: InterviewerInputs) -> int:
         # Everything older than the current thread: the model must see the whole thread it is writing for.
@@ -160,8 +171,10 @@ class WindowLedger:
             question_count=inputs.question_count,
             template=self.template,
         )
-        # System prompt and the job-description message never change during an interview: a cacheable prefix.
-        messages = build_interviewer_messages(system, inputs.job_description, [])
+        # System prompt and the job-description message never change during an interview: a cacheable prefix. The
+        # reference notes are fixed per interview too, so they sit in that prefix.
+        notes = inputs.reference_notes if self.with_notes else ()
+        messages = build_interviewer_messages(system, inputs.job_description, [], notes)
         for i, (_, turn) in enumerate(recent, start=len(turns) - len(recent)):
             answer = neutralize_app_tags(turn.answer)
             if i != len(turns) - 1 and len(answer) > self.cap:
@@ -208,6 +221,53 @@ class WindowLedger:
             if current + 1 == total:
                 lines.append("This is the final question.")
         return _status_block(lines, ledger, "Earlier questions no longer shown in full:")
+
+
+class WithReferenceNotes:
+    """A main-question write of an interview with reference notes: the notes-aware prompt (v6) and a <reference_notes>
+    block after the job description. Any other write (no notes, or a follow-up) is the plain strategy, unchanged, so
+    interviews without notes send exactly what they sent before this feature.
+
+    The notes get their own token allowance on top of the plain limit. When even that is not enough, older history is
+    trimmed first (as always) and the notes go last, before the input would count as too large: notes must never be
+    the reason a question falls back to the bank.
+    """
+
+    def __init__(self, plain: WindowLedger, notes_version: str, *, allowance: int = REFERENCE_NOTES_TOKEN_ALLOWANCE):
+        self.plain = plain
+        self.with_notes = WindowLedger(
+            notes_version,
+            window=plain.window,
+            cap=plain.cap,
+            limit=plain.limit,
+            text_replies=plain.text_replies,
+            with_notes=True,
+        )
+        self.allowance = allowance
+        self.limit = plain.limit
+
+    def limit_for(self, inputs: InterviewerInputs) -> int | None:
+        if self.limit is None or not self._uses_notes(inputs):
+            return self.limit
+        return self.limit + self.allowance
+
+    def droppable(self, inputs: InterviewerInputs) -> int:
+        # One more step than the plain strategy: after all older history, the notes block itself.
+        return self.plain.droppable(inputs) + int(self._uses_notes(inputs))
+
+    def build(self, inputs: InterviewerInputs, dropped: int) -> StrategyOutput:
+        if not self._uses_notes(inputs):
+            return self.plain.build(inputs, dropped)
+        history = self.plain.droppable(inputs)
+        if dropped <= history:
+            output = self.with_notes.build(inputs, dropped)
+            return output._replace(counts={**output.counts, "reference_notes": len(inputs.reference_notes)})
+        output = self.plain.build(inputs, history)
+        return output._replace(counts={**output.counts, "reference_notes": 0})
+
+    @staticmethod
+    def _uses_notes(inputs: InterviewerInputs) -> bool:
+        return bool(inputs.reference_notes) and inputs.mode == FollowUpAction.next_question
 
 
 class FollowUpDecision:
@@ -400,8 +460,10 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
             INTERVIEWER_TASK: Task(
                 default=WINDOW_LEDGER,
                 strategies={
-                    WINDOW_LEDGER: WindowLedger(
-                        prompts.get(WINDOW_LEDGER, INTERVIEWER_V4_PROMPT_VERSION)
+                    # The JSON writer: the first question and the JSON answer route.
+                    WINDOW_LEDGER: WithReferenceNotes(
+                        WindowLedger(prompts.get(WINDOW_LEDGER, INTERVIEWER_V4_PROMPT_VERSION)),
+                        INTERVIEWER_V6_JSON_PROMPT_VERSION,
                     ),
                     FULL_HISTORY: FullHistory(
                         prompts.get(FULL_HISTORY, INTERVIEWER_PROMPT_VERSION)
@@ -412,7 +474,11 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
             # The streamed turn's write call (v5, shown while it streams); its own task keeps v4's cache prefix intact.
             INTERVIEWER_STREAM_TASK: Task(
                 default=WINDOW_LEDGER,
-                strategies={WINDOW_LEDGER: WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True)},
+                strategies={
+                    WINDOW_LEDGER: WithReferenceNotes(
+                        WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True), INTERVIEWER_V6_PROMPT_VERSION
+                    )
+                },
             ),
             SUMMARY_TASK: Task(
                 default=SUMMARY, strategies={SUMMARY: JobDescriptionSummary()}
