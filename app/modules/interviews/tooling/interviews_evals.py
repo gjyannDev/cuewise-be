@@ -79,6 +79,7 @@ from ..constants.interviews_constants import (
     QuestionKind,
 )
 from ..utils.interviews_utils import QuestionTurn
+from .interviews_rag_evals import RAG_TASKS, run_rag_task
 
 EVAL_CASES_PATH = MODULE_DIR / "data" / "eval_cases.json"
 # In Langfuse: the user every eval trace belongs to, and the prefix of the dataset each task's cases are mirrored to.
@@ -758,13 +759,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repeat", type=_positive, default=1)
     parser.add_argument(
         "--task",
-        choices=["write", "decide", "stream", "feedback"],
+        choices=["write", "decide", "stream", "feedback", *RAG_TASKS],
         default="write",
         help=(
             "write: the question rules (default, interviewer_v4 as JSON); decide: the follow-up decision on the "
             "labelled cases; stream: the streamed turn's write call (interviewer_v5), with time to first token; "
-            "feedback: end-of-interview scoring on labelled interviews (bands, quotes, spread with --repeat)"
+            "feedback: end-of-interview scoring on labelled interviews (bands, quotes, spread with --repeat); "
+            "retrieval, generation, ranking: the knowledge-base RAG evals (interviews_rag_evals.py)"
         ),
+    )
+    parser.add_argument("--sheet", default="blind_ranking.md", help="generation/ranking: the blind sheet's path")
+    parser.add_argument("--seed", type=int, default=8, help="generation: the seed of the sheet's label order")
+    parser.add_argument(
+        "--pause-seconds", type=float, default=2.5, help="retrieval/generation: wait between calls (free-tier limits)"
     )
     return parser
 
@@ -781,6 +788,9 @@ def main(
     from app.core.ai.tracing import build_tracer
     from app.core.config import settings
 
+    if args.task in RAG_TASKS:
+        # Their own data, runners and output (interviews_rag_evals.py).
+        return run_rag_task(args, provider, settings)
     context = CONTEXT_MANAGER
     if args.prompt:
         versions = sorted(p.stem for p in PROMPTS_DIR.glob("*.md"))

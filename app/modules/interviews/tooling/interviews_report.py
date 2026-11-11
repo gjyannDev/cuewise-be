@@ -265,7 +265,23 @@ def _facts(b: Bundle) -> list[tuple[str, str]]:
         ("follow_ups", str(sum(1 for q in b.questions if q.kind == QuestionKind.follow_up))),
         ("models", models),
         ("log_turns", f"{len(b.answered)}{'' if expected is None else f' of {expected}'}"),
+        *_retrieval_fact(b),
     ]
+
+
+def _retrieval_fact(b: Bundle) -> list[tuple[str, str]]:
+    """The reference notes the interview got at start, as ids-free metadata; nothing for interviews from before them."""
+    found = next((turn.retrieval for turn in b.turns if turn.retrieval), None)
+    if found is None:
+        return []
+    parts = [
+        found.get("mode", "-"),
+        f"{found.get('count', '0')} notes",
+        f"scores {found.get('scores', '-')}",
+        found.get("outcome", "-"),
+        f"{found.get('latency_ms', '-')} ms",
+    ]
+    return [("reference_notes", ", ".join(parts))]
 
 
 # --- the headline tiles ---

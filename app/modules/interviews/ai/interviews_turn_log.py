@@ -9,6 +9,8 @@ from app.core.ai.provider import LLMError, LLMResult
 # One line per LLM call and one per answer turn: metadata only (ids, model, tokens, timing, reason codes), never
 # question, answer, note or job-description text.
 llm_logger = logging.getLogger("app.llm")
+# Embedding calls and retrieval (knowledge-base RAG), apart from the chat calls above; the same metadata-only rule.
+rag_logger = logging.getLogger("app.rag")
 
 
 def sum_known(values: Sequence[int | None]) -> int | None:
@@ -130,6 +132,57 @@ def log_turn_summary(
         source,
         fallback or "-",
         llm_ms,
+    )
+
+
+def log_embedding_call(
+    level: int,
+    *,
+    purpose: str,
+    kind: str,
+    model: str,
+    outcome: str,
+    latency_ms: int,
+    attempts: int,
+    input_tokens: int | None = None,
+    # The interview it was for (retrieval at start); None for ingestion.
+    session_id: uuid.UUID | None = None,
+) -> None:
+    """One line per embedding call (ingest or retrieval): metadata only, never the embedded text."""
+    rag_logger.log(
+        level,
+        "embedding_call session=%s purpose=%s kind=%s model=%s input_tokens=%s latency_ms=%s attempts=%s outcome=%s",
+        session_id or "-",
+        purpose,
+        kind,
+        model,
+        _shown(input_tokens),
+        latency_ms,
+        attempts,
+        outcome,
+    )
+
+
+def log_retrieval(
+    level: int,
+    session_id: uuid.UUID,
+    *,
+    mode: str | None,
+    scores: Sequence[float | None],
+    outcome: str,
+    latency_ms: int,
+) -> None:
+    """Which reference notes an interview got at start: mode, count, scores and the reason code. Never the query or
+    note text."""
+    rag_logger.log(
+        level,
+        "retrieval session=%s mode=%s count=%s scores=%s latency_ms=%s outcome=%s",
+        session_id,
+        mode or "-",
+        len(scores),
+        ",".join("-" if s is None else f"{s:.3f}" for s in scores) or "-",
+        latency_ms,
+        outcome,
     )
 
 

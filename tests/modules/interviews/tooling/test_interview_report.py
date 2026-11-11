@@ -4,7 +4,11 @@ import uuid
 import pytest
 
 from app.core.logging import LOG_FORMAT, request_id_ctx
-from app.modules.interviews.ai.interviews_turn_log import log_llm_call, log_turn_summary
+from app.modules.interviews.ai.interviews_turn_log import (
+    log_llm_call,
+    log_retrieval,
+    log_turn_summary,
+)
 from app.modules.interviews.constants.interviews_constants import (
     DECISION_TASK,
     FEEDBACK_SCORE_TASK,
@@ -701,3 +705,22 @@ def test_a_pooled_report_is_named_after_its_size_and_the_newest_interview(db, tm
     main(db, [], last=2, html_path=tmp_path)
 
     assert [p.name for p in tmp_path.iterdir()] == [f"rollup_last-2_{uuid.UUID(int=3)}.html"]
+
+
+# --- reference notes (knowledge-base RAG): one retrieval line per interview start ---
+
+
+def test_the_retrieval_at_start_is_one_fact_with_mode_count_scores_and_outcome(app_logs):  # knowledge-base-rag AC20
+    request_id_ctx.set("req-start")
+    log_retrieval(logging.INFO, S, mode="vector", scores=[0.91, 0.84], outcome="ok", latency_ms=412)
+    emit_start()
+
+    facts = dict(analysis(app_logs, [question(1)]).facts)
+
+    assert facts["reference_notes"] == "vector, 2 notes, scores 0.910,0.840, ok, 412 ms"
+
+
+def test_an_interview_without_a_retrieval_line_shows_no_notes_fact(app_logs):  # EC20: interviews from before
+    emit_start()
+
+    assert "reference_notes" not in dict(analysis(app_logs, [question(1)]).facts)

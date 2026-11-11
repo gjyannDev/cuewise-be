@@ -64,6 +64,8 @@ class Turn:
     status: str | None
     http_ms: int | None
     label: str = "start"
+    # The start's `retrieval` line (reference notes: mode, count, scores, outcome); None for answers and older starts.
+    retrieval: dict[str, str] | None = None
 
     @property
     def llm_ms(self) -> int | None:
@@ -117,10 +119,13 @@ def _turn(request: str, events: Sequence[LogEvent]) -> Turn:
     estimates: dict[str, tuple[int | None, int | None]] = {}
     calls: list[Call] = []
     summary: dict[str, str] | None = None
+    retrieval: dict[str, str] | None = None
     http: re.Match[str] | None = None
     for event in events:
         f = event.fields
-        if event.event == "context_build":
+        if event.event == "retrieval":
+            retrieval = f
+        elif event.event == "context_build":
             estimates[f.get("task", "")] = (_int(f.get("est_tokens")), _int(f.get("system_tokens")))
         elif event.event == "llm_call":
             task = f.get("task", "-")
@@ -156,6 +161,7 @@ def _turn(request: str, events: Sequence[LogEvent]) -> Turn:
         is_start=bool(http) and http["method"] == "POST" and http["path"].endswith("/interviews"),
         status=http["status"] if http else None,
         http_ms=round(float(http["ms"])) if http else None,
+        retrieval=retrieval,
     )
 
 
