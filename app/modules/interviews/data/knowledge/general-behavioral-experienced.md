@@ -1,15 +1,15 @@
 ---
 roles: general
 levels: mid, senior
-source: drafted
+source: posting
 ---
 # Behavioral notes for experienced candidates
 
 ## Ownership and delivery
-Probe a project they carried from unclear request to release: how they cut scope, which risk they spotted early, and what they did when a date slipped. Strong answers give numbers (users, time, incidents) and name a trade-off they made on purpose.
+Probe a piece of work they owned from an unclear request to release: meeting the goals and timelines of engineers and project managers, cutting scope, the risk they spotted early, and what they did when a date slipped. Strong: gives numbers and a trade-off made on purpose. Weak: describes only their own task. Follow-up: what would you do differently?
 
 ## Disagreement and influence
-Ask about a technical decision they disagreed with. Strong answers show how they made their case with evidence, listened to the other side, and committed once it was decided. Weak answers either always won or quietly did it their own way.
+Probe a decision they disagreed with, with a teammate, a client or another team. Strong: makes the case with evidence, champions an idea without forcing it, listens, and commits once it is decided. Weak: always wins, or quietly does it their own way. Follow-up: how do you push back on a client's request?
 
 ## Raising others
-Probe mentoring, onboarding or review habits: one person they helped grow, and how they knew it worked. For seniors, look for changes that outlived them (a guideline, a tool, a process), not only one-off help.
+Probe mentoring, onboarding or review habits: one person they helped grow and how they knew it worked. For seniors, look for changes that outlived them: a guideline, a tool, a standard. Weak: only one-off help. Follow-up: how do you mentor someone who disagrees with your advice?

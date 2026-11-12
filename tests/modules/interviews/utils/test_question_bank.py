@@ -44,7 +44,7 @@ def test_valid_bank_loads_typed_entries(tmp_path):  # AC14
         pytest.param([_entry(), _entry()], id="duplicate-id"),
         pytest.param([_entry(text="")], id="empty-text"),
         pytest.param([_entry(text="   ")], id="whitespace-text"),
-        pytest.param([_entry(roles=["devops"])], id="unknown-role"),
+        pytest.param([_entry(roles=["sre"])], id="unknown-role"),
         pytest.param([_entry(levels=["principal"])], id="unknown-level"),
         pytest.param([_entry(type="system_design")], id="unknown-type"),
         pytest.param([_entry(roles=[])], id="empty-roles"),
@@ -66,3 +66,11 @@ def test_shipped_bank_covers_every_type_role_and_level():  # AC14
     assert {q.type for q in bank} == set(QuestionCategory)
     assert {role for q in bank for role in q.roles} >= set(JobRole)
     assert {level for q in bank for level in q.levels} == set(Level)
+
+
+@pytest.mark.parametrize("level", list(Level))
+@pytest.mark.parametrize("role", list(JobRole))
+def test_every_role_has_its_own_technical_question_at_every_level(role, level):  # new-interview-roles G2
+    bank = load_bank(QUESTION_BANK_PATH)
+
+    assert any(q.type == QuestionCategory.technical and role in q.roles and level in q.levels for q in bank)

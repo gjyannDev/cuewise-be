@@ -124,7 +124,7 @@ def test_mixed_short_on_one_type_is_409(start_interview, make_user, make_bank_qu
 @pytest.mark.parametrize(
     "overrides",
     [
-        pytest.param({"role": "devops"}, id="unknown-role"),
+        pytest.param({"role": "sre"}, id="unknown-role"),
         pytest.param({"level": "Junior"}, id="wrong-case-level"),
         pytest.param({"interview_type": "system_design"}, id="unknown-type"),
         pytest.param({"question_count": 0}, id="count-0"),
@@ -273,6 +273,34 @@ def test_start_without_permission_is_403(start_interview, make_user, db):  # AC1
 
     assert r.status_code == 403
     assert _sessions(db) == []
+
+
+# --- new roles (new-interview-roles G1, G2) ---
+
+
+@pytest.mark.parametrize("level", ["intern", "senior"])
+@pytest.mark.parametrize("role", ["designer", "qa", "devops"])
+def test_a_new_role_starts_a_technical_interview_from_the_shipped_bank(client, auth_header, make_user, role, level):
+    # No `bank` fixture: the shipped bank must back the role on its own (its own question plus the general ones).
+    user = make_user()
+    body = {"role": role, "level": level, "interview_type": "technical", "question_count": 3}
+
+    r = client.post(INTERVIEWS, json=body, headers=auth_header(user))
+
+    assert r.status_code == 201
+    assert r.json()["session"]["role"] == role
+
+
+@pytest.mark.parametrize("role", ["designer", "qa", "devops"])
+def test_a_new_role_is_returned_by_get_and_list(start_interview, make_user, client, auth_header, role):
+    user = make_user()
+    session_id = start_interview(user, role=role).json()["session"]["id"]
+
+    got = client.get(f"{INTERVIEWS}/{session_id}", headers=auth_header(user))
+    listed = client.get(INTERVIEWS, headers=auth_header(user))
+
+    assert got.json()["session"]["role"] == role
+    assert [item["role"] for item in listed.json()["items"]] == [role]
 
 
 # --- privacy ---

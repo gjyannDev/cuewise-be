@@ -1,0 +1,24 @@
+{
+  "competencies": {
+    "API design": ["endpoint", "rest api", "status code", "versioning", "pagination", "api contract"],
+    "Data and transactions": ["transaction", "consisten", "idempoten", "index", "schema", "sql", "query"],
+    "Performance and scaling": ["cache", "caching", "latency", "slow", "performance", "scale", "scaling", "load time"],
+    "Observability and incidents": ["incident", "outage", "monitoring", "logs", "alert", "on-call", "post-mortem", "debug"],
+    "Testing and quality": ["test", "regression", "edge case", "bug report"],
+    "Security": ["authentication", "authoriz", "security", "password", "token", "permission", "secret"],
+    "Frontend UI and state": ["component", "react", "render", "state management", "the dom"],
+    "Accessibility": ["accessib", "screen reader", "keyboard", "contrast"],
+    "Mobile and offline": ["offline", "sync", "battery", "app lifecycle", "unreliable network", "weak signal"],
+    "Data pipelines": ["pipeline", "etl", "warehouse", "batch job", "orchestrat"],
+    "Delivery and CI/CD": ["deploy", "release", "ci/cd", "rollback", "kubernetes", "docker", "container"],
+    "Collaboration and communication": ["stakeholder", "explain", "disagree", "teammate", "communicat", "code review", "feedback"],
+    "Ownership and prioritisation": ["prioriti", "deadline", "trade-off", "scope", "ownership", "owned"]
+  },
+  "setups": {
+    "strong-backend-mid": ["payment", "python", "postgresql", "api"],
+    "long-history-backend-senior": ["marketplace", "python", "postgresql", "kafka", "kubernetes", "traffic"],
+    "long-job-description-frontend-junior": ["react", "typescript", "booking", "accessib", "slow network", "test", "react query", "payment"],
+    "near-empty-data-intern": [],
+    "complete-behavioral-junior": []
+  }
+}

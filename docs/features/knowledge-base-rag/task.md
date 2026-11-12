@@ -1,7 +1,7 @@
 # Implementation: Knowledge-Base RAG for the Question Writer (Slice 8a)
 
 ## Status
-Steps 1-11 built and tested (Step 1 committed by you). **Waiting on you:** the Step 11 corpus review (at least a third non-drafted) and the Docker pgvector database; then Step 12 (real runs) and the rest of Step 13.
+Steps 1-11 built and tested (Step 1 committed by you). Corpus gate met 2026-11-11 (7 of 21 notes from real postings). Opt-in Postgres tests passed. Dev DB migrated and ingested. Retrieval eval run 2026-11-11 and threshold set to 0.55. **Next (yours):** the generation eval and blind ranking, the manual check in the app (with Langfuse), then the rest of Step 13.
 
 ## Completed Steps
 - [x] 1. Split `interviews_turn.py` with no behavior change: six new files in `app/modules/interviews/ai/` (`interviews_turn_types.py`, `interviews_turn_log.py`, `interviews_turn_limits.py`, `interviews_decide.py`, `interviews_write.py`, `interviews_write_stream.py`); `interviews_turn.py` keeps only `Interviewer` (constructor, `first_question`, `answer_turn`, `stream_turn`, and thin `plan_write`, `settle`, `_decide`, `_write` delegates). Import lines updated in 5 app files and 2 test files.
@@ -13,9 +13,9 @@ Steps 1-11 built and tested (Step 1 committed by you). **Waiting on you:** the S
 - [x] 7. Retrieval service: `services/interviews_retrieval_service.py` (`RetrievalService.retrieve`, `Retrieval`), `KnowledgeRepository.eligible_chunks` / `nearest_chunks` (pgvector `<=>` on Postgres, Python cosine on SQLite) / `release`, `ReferenceNote` in the knowledge utils, `log_retrieval` and `log_embedding_call` on a new `app.rag` logger.
 - [x] 8. Wiring: `InterviewsService.start` retrieves after the summary and saves `interview_session_chunks` in the same commit (`InterviewsRepository.start(..., note_refs)`); `InterviewsRepository.reference_notes`; `InterviewSetup` / `InterviewerInputs.reference_notes`; `AnswerService.prepare_answer` reloads them; `get_retrieval_service`; the report's `reference_notes` fact from the `retrieval` log line.
 - [x] 9. Prompts and context: `prompts/interviewer_v6.md` (v5 + notes) and `interviewer_v6_json.md` (v4 + notes); `WithReferenceNotes` wraps both write tasks; `reference_notes_block` and `reference_notes` in `APP_TAG`; `REFERENCE_NOTES_TOKEN_ALLOWANCE` 1500; `ContextManager` honours an optional `limit_for(inputs)`.
-- [x] 10. Eval tooling: `tooling/interviews_rag_evals.py` (`recall_at_k`, `reciprocal_rank`, `filter_baseline`, `threshold_sweep`, `case_set_problems`, `competencies_of`, `skill_coverage`, `simulate_main_questions`, `summarize_arm`, `build_sheet`, `read_rankings`, the three runners), wired into `interviews_evals` as `--task retrieval|generation|ranking` with `--sheet`, `--seed`, `--pause-seconds`. `EligibleChunk` gained `note_key`.
+- [x] 10. Eval tooling: `tooling/interviews_rag_evals.py` (`recall_at_k`, `reciprocal_rank`, `filter_baseline`, `threshold_sweep`, `case_set_problems`, `competencies_of`, `skill_coverage`, `simulate_main_questions`, `summarize_arm`, `build_sheet`, `read_rankings`, the three runners), wired into `interviews_evals` as `--task retrieval|generation|ranking` with `--sheet`, `--seed`, `--pause-seconds`. `EligibleChunk` gained `note_key`. Added 2026-11-11 (your request): the generation task is traced in Langfuse (environment `eval`, one session per run, one trace per setup x repeat x arm tagged `arm:A|B|C`, the retrieval step and every question's generation nested, `valid_share` / `distinct_competencies` / `skill_coverage` scores via `run_scores`); retrieval and ranking stay untraced (ranking would lose its blinding). Test: `test_rag_evals.py::test_each_setup_and_arm_is_one_trace_with_its_retrieval_output_and_scores`, `::test_run_scores_are_the_keyword_rules_for_one_interview`. Full suite after: 1524 passed, 6 skipped, 1 failed (config baseline).
 - [~] 11. Corpus and labels: 15 drafted notes in `data/knowledge/` (5 general, 2 per role; every role and level has at least 10 eligible sections) and `tests/modules/interviews/utils/test_shipped_corpus.py`. **Gate (yours):** review the notes, rewrite or replace at least 5 with your own material (`source: user` / `posting`), then write `data/retrieval_eval_cases.json` (15+ queries: 3 synonym, 1 vague, 1 role-boundary; not copied from headings) and `data/generation_eval_keywords.json` (`competencies`: name -> keywords; `setups`: eval case id -> job-description skills).
-- [ ] 12. Real runs, threshold, learnings (blocked by the gate and the Docker database)
+- [~] 12. Real runs, threshold, learnings. Done: dev DB migrated and ingested; eval data files (21 retrieval cases, 13 competencies / 5 generation setups); `--task retrieval` (vector recall@5 1.000, MRR 0.909; filter 0.506 / 0.288); `RETRIEVAL_MIN_SIMILARITY` = 0.55 from the sweep; one retrieval miss explained in learnings.md §7. Left: `--task generation`, your blind ranking, embedding time vs the 5 s cap, the manual check.
 - [~] 13. Docs and wrap-up: README (Docker, ingest, evals), `.env.example`, learning-path progress line, `graphify update .`, full suite and ruff done; the final pass after Step 12 is left.
 
 ## Current Step
@@ -63,11 +63,13 @@ Step 1 (already committed):
 - C901 at 15 on `app/modules/interviews/ai`: all checks passed. Per function: `stream_write` 14, `decide` 8, `write` 8, `stream_draft` 8, `stream_turn` 6, `apply_limits` 4, `settle` 4, `plan_write` 3, `answer_turn` 2.
 - AC3 diff review: a script compared every string literal and f-string of the old file with the new files. All log text and reason codes are present the same number of times; the only difference is the extended `settle` docstring.
 
+- Opt-in Postgres tests (yours, 2026-11-11): `TEST_POSTGRES_URL=<throwaway cuewise_test on 127.0.0.1:5433> uv run pytest -m postgres -v`: **5 passed, 1414 deselected in 1.05s** (migration up/down, vector round trip, interview-delete cascade, referenced-note protection, pgvector `<=>` vs Python cosine order). Closes T20 and T45. The by-hand migration/cascade check on the dev DB was dropped: the same checks ran on the throwaway database.
+- Retrieval eval (yours, 2026-11-11): `uv run python -m app.modules.interviews.tooling.interviews_evals --task retrieval`, gemini-embedding-001 768, 21 cases: vector recall@5 1.000 / MRR 0.909, filter 0.506 / 0.288; sweep cliff between 0.60 (recall 1.000) and 0.65 (0.857). Threshold set to 0.55. Five tests had assumed the 0.0 placeholder (fake vectors scoring 0-0.11 kept): `test_retrieval_service.py`'s `service()` helper now defaults `min_similarity=0.0` so each test states its own threshold, and the route test's fake Caching note moved to 0.606 so all three clear 0.55, like real related notes. After: `uv run pytest`: 1521 passed, 6 skipped, 2 failed (the config baseline and the timing-flaky `test_turn_budget.py::test_usage_of_both_calls_is_summed_and_every_call_logs_metadata_only`, both failing before this change). Ruff on touched files: clean.
+
 ## Tests Pending
-- Step 11 gate: `test_at_least_a_third_of_the_shipped_notes_are_not_drafted` (needs your material).
-- Step 12: real retrieval and generation evals, the threshold, your blind ranking, embedding time vs the 5 s cap, provider limits with a maximum interview plus 6 notes.
-- Step 4 by hand on the Docker DB (yours): `alembic upgrade head`, delete an interview and see its chunk rows go, downgrade; and `TEST_POSTGRES_URL=... uv run pytest -m postgres`.
-- learnings.md measurements for retrieval and generation (Step 12).
+- Step 11 gate: met (T65). Eval data files written.
+- Step 12: generation eval, your blind ranking, embedding time vs the 5 s cap, provider limits with a maximum interview plus 6 notes, the manual check in the app and Langfuse. (Retrieval eval and threshold: done.)
+- learnings.md measurements for generation and latency (Step 12).
 
 ## Test Cases
 | ID | Step | Case | Tag | Source | Status |
@@ -91,7 +93,7 @@ Step 1 (already committed):
 | T17 | 4 | session FK cascades, chunk FK does not; scopes cascade | spec | AC21, EC21 | pass |
 | T18 | 4 | vector column compiles to `VECTOR(768)` on Postgres and round-trips as JSON on SQLite | spec | AC16 | pass |
 | T19 | 4 | one active row per note key; retired versions may share it | code-derived | partial unique index | pass |
-| T20 | 4 | migration round trip, cascade and referenced-chunk delete on real Postgres | spec | AC16, AC21, AC7 | **pending** (opt-in, needs the Docker DB) |
+| T20 | 4 | migration round trip, cascade and referenced-chunk delete on real Postgres | spec | AC16, AC21, AC7 | pass (opt-in Postgres, 2026-11-11) |
 | T21 | 5 | valid note -> chunks with competency, scopes, stable key and hash; deterministic | spec | AC4 | pass |
 | T22 | 5 | 14 invalid-note cases name the file and the reason (header, roles, levels, source, sections, length, hidden characters) | spec | AC4 | pass |
 | T23 | 5 | instruction-like phrases warn without failing and without quoting the text | spec | AC4 extended | pass |
@@ -116,7 +118,7 @@ Step 1 (already committed):
 | T42 | 7 | skip reasons llm_off, no_match (empty, no level), db_error; general-only fallback | spec | AC15, EC4, EC8, EC9, EC18 | pass |
 | T43 | 7 | an instruction in the job description can't change eligibility | spec | AC22, EC16 | pass |
 | T44 | 7 | logs and trace: metadata only, no query or note text | spec | AC20 | pass |
-| T45 | 7 | pgvector `<=>` ranks like the Python cosine | spec | Step 7 | **pending** (opt-in Postgres) |
+| T45 | 7 | pgvector `<=>` ranks like the Python cosine | spec | Step 7 | pass (opt-in Postgres, 2026-11-11) |
 | T46 | 8 | start stores ranked vector rows; response has no notes | spec | AC16 | pass |
 | T47 | 8 | start without job description stores filter rows, no call; failing embedder stores filter rows | spec | AC13, AC14 | pass |
 | T48 | 8 | LLM off: skip line, nothing stored; empty corpus: no_match, starts as before | spec | AC15, EC8, EC9 | pass |
@@ -136,7 +138,7 @@ Step 1 (already committed):
 | T62 | 10 | sheet hides arms, reproducible per seed, shuffles across seeds, leaves out failed setups | spec | AC25, EC24 | pass |
 | T63 | 10 | rankings: first places per arm; empty, short, unknown, repeated and missing setups refused with line and reason | spec | AC25, EC25 | pass |
 | T64 | 11 | shipped notes valid, no warnings; every role and level has at least 6 eligible sections | spec | AC4, AC5 | pass |
-| T65 | 11 | at least a third of the shipped notes are not drafted | spec | AC5 | **fail until your material arrives (the gate)** |
+| T65 | 11 | at least a third of the shipped notes are not drafted | spec | AC5 | pass (2026-11-11): 7 of 21 `posting`. Three notes from UX/UI, QA and DevOps postings (`ux-design-collaboration`, `qa-testing-fundamentals`, `devops-platform`) and four general notes rebuilt on those postings' stated requirements (`general-communication`, `general-engineering-habits`, `general-senior-judgement`, `general-behavioral-experienced`; same headings, roles and levels) |
 | T66 | 12 | real retrieval eval, threshold, generation arms, blind ranking, embedding latency vs the 5 s cap | spec | AC23-AC26 | **pending** |
 
 ## Open Questions

@@ -790,7 +790,7 @@ def main(
 
     if args.task in RAG_TASKS:
         # Their own data, runners and output (interviews_rag_evals.py).
-        return run_rag_task(args, provider, settings)
+        return run_rag_task(args, provider, settings, tracer)
     context = CONTEXT_MANAGER
     if args.prompt:
         versions = sorted(p.stem for p in PROMPTS_DIR.glob("*.md"))

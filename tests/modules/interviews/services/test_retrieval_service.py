@@ -16,6 +16,8 @@ from app.core.ai.embedder import EmbeddingKind
 from app.core.ai.fake import FakeEmbedder
 from app.core.ai.provider import LLMRateLimitError, LLMServerError, LLMTimeoutError
 from app.modules.interviews.constants.interviews_constants import (
+    GENERAL_ROLE,
+    KNOWLEDGE_DIR,
     KNOWLEDGE_VECTOR_SIZE,
     RETRIEVAL_TIME_CAP_SECONDS,
     RetrievalMode,
@@ -29,6 +31,7 @@ from app.modules.interviews.services.interviews_retrieval_service import (
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import (
     embedding_text,
+    load_corpus,
     parse_note,
 )
 
@@ -89,6 +92,9 @@ class Steps:
 
 def service(db, embedder=None, **kwargs) -> RetrievalService:
     kwargs.setdefault("llm_on", True)
+    # The shipped threshold is tuned on real embeddings (scores ~0.55-0.72); these fake directions spread over 0-1, so
+    # each test states its own threshold and none depends on the tuned value.
+    kwargs.setdefault("min_similarity", 0.0)
     return RetrievalService(KnowledgeRepository(db), embedder, **kwargs)
 
 
@@ -268,3 +274,26 @@ def test_logs_and_traces_carry_metadata_but_never_the_query(db, corpus, app_logs
     assert "REST" not in everything and "What to probe" not in everything
     [embed_line] = [r.getMessage() for r in app_logs.records if r.getMessage().startswith("embedding_call")]
     assert f"session={SESSION}" in embed_line and "purpose=retrieval" in embed_line and "kind=query" in embed_line
+
+
+# --- the shipped corpus and the new roles (new-interview-roles G3) ---
+
+NEW_ROLES = ("designer", "qa", "devops")
+
+
+@pytest.mark.parametrize("level", ["intern", "junior", "mid", "senior"])
+@pytest.mark.parametrize("role", NEW_ROLES)
+def test_a_new_role_gets_its_own_notes_and_never_another_new_roles(db, role, level):
+    shipped = load_corpus(KNOWLEDGE_DIR).chunks
+    ingest_corpus(shipped, FakeEmbedder(), KnowledgeRepository(db))
+    roles_of = {chunk.competency: set(chunk.roles) for chunk in shipped}
+    assert len(roles_of) == len(shipped), "headings repeat across notes; map the picked notes another way"
+
+    # No job description: filter mode, the notes come from the role and level alone.
+    result = retrieve(service(db, FakeEmbedder()), role=role, level=level, job_description=None)
+
+    picked = [roles_of[name] for name in competencies(result)]
+    assert picked and all(roles & {role, GENERAL_ROLE} for roles in picked)
+    assert not any(roles & (set(NEW_ROLES) - {role}) for roles in picked)
+    eligible_own = [c for c in shipped if role in c.roles and level in c.levels]
+    assert eligible_own, f"no {role} note covers {level}"

@@ -36,6 +36,7 @@ def build_provider(settings: Settings, *, model: str | None = None, tracer: Trac
     return TracingProvider(provider, tracer) if tracer is not None and tracer.enabled else provider
 
 
+
 def build_transcriber(settings: Settings) -> DeepgramTranscriber | None:
     """Speech-to-text for voice answers; None without a key. Never traced: audio and transcripts stay out of Langfuse.
     """

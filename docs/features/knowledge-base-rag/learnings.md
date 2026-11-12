@@ -1,8 +1,8 @@
 # Learn: Knowledge-base RAG for the question writer (Slice 8a)
 
-> Status: **code complete, evals pending.** Steps 1-11 are built and tested with fakes. Everything measured against
-> the real model (retrieval recall, the threshold, the three generation arms, your blind ranking, embedding latency)
-> is **pending** until the corpus review (Step 11 gate) and the Docker pgvector database are done (Step 12).
+> Status: **code complete, retrieval measured, generation pending.** Steps 1-11 are built and tested with fakes. The
+> retrieval eval ran on 2026-11-11 and set the threshold (section 7). Still **pending**: the three generation arms,
+> your blind ranking, and embedding latency at interview start (Step 12).
 
 ## 1. Why it exists
 The LLM wrote every main question from the role, level and job description alone, so which competencies an interview
@@ -79,7 +79,9 @@ interview without notes sends exactly what it sent before.
    same way? (API design; CSS is a frontend note and the interview is backend.)
 2. In `tests/modules/interviews/utils/test_knowledge_utils.py`, change one level in a header and predict whether the
    hash changes. (Yes: header values are part of the hash, so a re-scoped section is re-embedded.)
-3. Real runs: **pending** (Step 12): ingest, then `--task retrieval`, `--task generation`, `--task ranking`.
+3. Real runs: `--task retrieval` done (section 7). Before running it yourself, predict: will vector recall@5 beat
+   filter by more on the `synonym` cases or the `plain` ones? (Synonym: filter can't read meaning at all, and vector
+   still scored 1.00 on every one.) Still **pending**: `--task generation`, `--task ranking`.
 
 ## 7. What surprised me
 - The "cyclomatic complexity 46, 23 and 21" in the first spec draft didn't match ruff's McCabe count (14, 8, 8).
@@ -89,12 +91,29 @@ interview without notes sends exactly what it sent before.
   every long interview. Measuring the worst case before choosing the rule changed the design.
 - An editing tool decoded `​` into a real zero-width space inside a test file: exactly the hidden character the
   ingest check exists for. The test now builds it with `chr(0x200B)`.
+- **Similarity scores barely separate right from wrong.** Every score on the 21 retrieval cases sits in about
+  0.55-0.72, and the right note often beats the next one by under 0.01. The *order* is reliable (MRR 0.909); the
+  absolute score is not a "relevant or not" line. So the threshold is a light guard and the top 6 do the real work.
+  At 0.55, none of the three cases inspected below loses a single note (their lowest score is 0.5546).
+- **The one retrieval "failure" was a label problem as much as a ranking one.** `qa-manual-tickets-junior` ("test our
+  mobile and back-office apps by hand and file clear tickets with steps, screenshots and logs") expected the bug-report
+  note, which came 3rd (0.6418). Above it: *Verifying an API and the data behind a screen* (0.6681) and *Regression and
+  cross-platform testing* (0.6646). The query talks about *what* is tested (mobile and back-office apps, logs) as much as
+  *how* to report it, and an embedding represents the whole text at once, so those notes matched too. All three are
+  fair notes for that job, and all three reach the interviewer. Lesson: a single expected note under-counts a query
+  that genuinely covers several topics; MRR punishes it, recall@5 doesn't.
+  Similar for `be-endpoints-junior`: *Debugging a failing request* (0.6727) edged out *HTTP and REST basics* (0.6659)
+  because the query mentions "when a request goes wrong". The vague case (`make an impact`) ranked all 11 notes inside
+  0.60-0.65: with nothing specific to match, every note looks a bit alike, as expected.
+- **The perfect recall@5 is partly easy mode.** Role and level leave only 10-12 eligible notes, so a top 5 is half the
+  pool, and the same author wrote the notes and the queries (shared wording). Real job descriptions will score lower;
+  MRR is the more telling number here.
 
-**Eval log** (one row per real run; pending):
+**Eval log** (one row per real run):
 
 | Date | Change | Versions | Summary numbers | Failures by type | Decision |
 |------|--------|----------|-----------------|------------------|----------|
-| pending | first retrieval run on the reviewed corpus | gemini-embedding-001 768 | recall@5 / MRR vector vs filter: pending | pending | threshold: pending |
+| 2026-11-11 | first retrieval run on the reviewed corpus (21 cases: 12 plain, 6 synonym, 1 vague, 2 role_boundary), `--task retrieval`, threshold 0.0; full output saved as the baseline in `eval-runs/retrieval-2026-11-11.txt` | gemini-embedding-001, 768 dims; corpus of 21 notes, 75 sections | vector recall@5 **1.000**, MRR **0.909**; filter recall@5 0.506, MRR 0.288 (20 orderings). Sweep: recall@5 1.000 up to 0.60 (kept 5.0 / 5.0 / 4.9 / 4.3 at 0 / 0.50 / 0.55 / 0.60), 0.857 at 0.65 (2.2 kept), 0.286 at 0.70, 0 at 0.75 | no misses in the top 5; 3 right notes below 1st: `qa-manual-tickets-junior` 3rd (label covers one of several fair topics), `be-endpoints-junior` 2nd (near tie, 0.007), `vague-make-an-impact-mid` 4th (vague query, flat scores) | threshold **0.55**: highest value with one sweep step of margin below the 0.65 cliff; 0.60 would fit 21 hand-written cases too tightly |
 | pending | three-arm generation run | interviewer_v5 / v6 | competencies, coverage, tokens, start ms: pending | pending | pending |
 | pending | your blind ranking | - | first places per arm: pending | - | pending |
 
@@ -126,6 +145,8 @@ is the real quality signal.
 - Step 11 gate: at least a third of the notes must come from your material (posting-derived or your own level
   expectations); `tests/modules/interviews/utils/test_shipped_corpus.py::test_at_least_a_third_of_the_shipped_notes_are_not_drafted`
   stays red until then. Then write the 15+ labelled retrieval queries and the generation keyword lists.
-- Step 12: Docker pgvector database, migration by hand, `pytest -m postgres`, ingest, the evals, the threshold, typical
-  embedding time against the 5-second cap, one documented retrieval failure.
+- Step 12: done: Docker pgvector database, migration, `pytest -m postgres`, ingest, the retrieval eval, the threshold,
+  one documented retrieval failure. Pending: the generation eval and blind ranking, typical embedding time against the
+  5-second cap (from a real interview's `embedding_call` log line or Langfuse), and the manual check in the app.
+- Revisit the threshold once real job descriptions arrive: the sweep came from 21 hand-written cases.
 - Later (not this slice): assigning notes to question slots by competency (8a-2), a keyword baseline, a local embedder.

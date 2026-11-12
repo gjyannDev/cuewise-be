@@ -1,0 +1,35 @@
+be-endpoints-junior      plain          vector recall@5=1.00 rr=0.50  filter recall@5=0.70 rr=0.28
+be-peak-traffic-mid      synonym        vector recall@5=1.00 rr=1.00  filter recall@5=0.55 rr=0.27
+be-charged-twice-senior  synonym        vector recall@5=1.00 rr=1.00  filter recall@5=0.35 rr=0.25
+be-on-call-mid           plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.50 rr=0.23
+be-also-runs-deploys-mid role_boundary  vector recall@5=1.00 rr=1.00  filter recall@5=0.50 rr=0.23
+fe-screen-readers-junior plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.70 rr=0.28
+fe-sluggish-phones-mid   synonym        vector recall@5=1.00 rr=1.00  filter recall@5=0.35 rr=0.21
+fs-request-shapes-mid    plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.70 rr=0.28
+fs-signup-end-to-end-junior role_boundary  vector recall@5=1.00 rr=1.00  filter recall@5=0.70 rr=0.28
+mob-weak-signal-junior   plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.55 rr=0.40
+mob-edit-on-a-plane-senior synonym        vector recall@5=1.00 rr=1.00  filter recall@5=0.50 rr=0.24
+data-sales-questions-junior plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.57 rr=0.42
+data-nightly-jobs-mid    plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.70 rr=0.28
+qa-manual-tickets-junior plain          vector recall@5=1.00 rr=0.33  filter recall@5=0.55 rr=0.32
+qa-3000-checks-senior    synonym        vector recall@5=1.00 rr=1.00  filter recall@5=0.45 rr=0.34
+devops-terraform-mid     plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.35 rr=0.25
+devops-terminal-junior   plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.42 rr=0.34
+devops-safer-deploys-senior synonym        vector recall@5=1.00 rr=1.00  filter recall@5=0.38 rr=0.38
+des-watch-users-mid      plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.35 rr=0.32
+des-easy-to-scan-junior  plain          vector recall@5=1.00 rr=1.00  filter recall@5=0.50 rr=0.24
+vague-make-an-impact-mid vague          vector recall@5=1.00 rr=0.25  filter recall@5=0.25 rr=0.16
+
+threshold used: 0.0
+vector: recall@5=1.000 MRR=0.909
+filter: recall@5=0.506 MRR=0.288  (20 orderings)
+
+threshold  recall@5  kept
+     0.00     1.000   5.0
+     0.50     1.000   5.0
+     0.55     1.000   4.9
+     0.60     1.000   4.3
+     0.65     0.857   2.2
+     0.70     0.286   0.3
+     0.75     0.000   0.0
+     0.80     0.000   0.0

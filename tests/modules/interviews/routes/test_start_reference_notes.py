@@ -36,9 +36,11 @@ def vec(*head: float) -> list[float]:
     return [*head, *[0.0] * (KNOWLEDGE_VECTOR_SIZE - len(head))]
 
 
+# Against the job's vector (0.9, 0.1): API design 0.994 > Communication 0.781 > Caching 0.606. All three clear the
+# shipped RETRIEVAL_MIN_SIMILARITY (0.55), as related notes do with real embeddings.
 NOTES = [
     ("api.md", "backend", "API design", vec(1, 0, 0)),
-    ("cache.md", "backend", "Caching", vec(0, 1, 0)),
+    ("cache.md", "backend", "Caching", vec(0.6, 1, 0)),
     ("talk.md", "general", "Communication", vec(0.5, 0.5, 0)),
 ]
 

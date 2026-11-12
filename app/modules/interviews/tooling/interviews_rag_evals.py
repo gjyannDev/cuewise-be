@@ -15,7 +15,9 @@ baseline, plus a sweep of similarity thresholds (pick the threshold from it, nev
 no notes (interviewer_v5), B filter-only notes, C vector notes (interviewer_v6). Per arm: distinct competencies per
 interview and job-description skill coverage (keyword rules, so wording can game them), valid replies, prompt tokens per
 question and retrieval time at start. It also writes a blind sheet: the arms' question sets under neutral labels in a
-seeded random order, the key in a separate file, for you to rank.
+seeded random order, the key in a separate file, for you to rank. With Langfuse keys set, every setup x repeat x arm is
+one trace (environment "eval", tagged `arm:A|B|C`, one session per run) holding the retrieval step, each question's
+full prompt and reply, and its keyword scores. Rank the sheet before opening those traces: they name the arm.
 
 **Ranking** reads that sheet back once filled in and reports how often each arm ranked first: the main quality signal,
 because the rule metrics are gameable.
@@ -30,6 +32,7 @@ import random
 import time
 import uuid
 from collections.abc import Callable, Collection, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
 from typing import Literal, NamedTuple
@@ -38,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from app.core.ai.embedder import Embedder, EmbeddingKind
 from app.core.ai.provider import LLMError, LLMProvider
+from app.core.ai.tracing import Tracer
 
 from ..ai.interviews_context import CONTEXT_MANAGER, InterviewerInputs
 from ..ai.interviews_reply import InvalidReplyError, parse_streamed_reply, split_header
@@ -207,7 +211,11 @@ def simulate_main_questions(
         )
         built = CONTEXT_MANAGER.build(INTERVIEWER_STREAM_TASK, inputs)
         try:
-            result = llm.complete(built.messages, max_tokens=max_tokens)
+            result = llm.complete(
+                built.messages,
+                max_tokens=max_tokens,
+                trace_labels={"task": INTERVIEWER_STREAM_TASK, "prompt_version": built.prompt_version},
+            )
         except LLMError:
             written.append(WrittenQuestion(None, None))
             continue
@@ -226,6 +234,21 @@ def simulate_main_questions(
         written.append(WrittenQuestion(reply.question, result.prompt_tokens))
         turns.append(QuestionTurn(reply.question, reply.category, CANNED_ANSWER))
     return written
+
+
+def run_scores(
+    run: Sequence[WrittenQuestion], keywords: Mapping[str, Sequence[str]], skills: Sequence[str]
+) -> list[tuple[str, float]]:
+    """One interview's keyword scores, for its Langfuse trace: the same rules the arm summary averages."""
+    questions = [w.question for w in run if w.question]
+    scores = [
+        ("valid_share", len(questions) / len(run) if run else 0.0),
+        ("distinct_competencies", float(len(set().union(*(competencies_of(q, keywords) for q in questions))))),
+    ]
+    coverage = skill_coverage(questions, skills)
+    if coverage is not None:
+        scores.append(("skill_coverage", coverage))
+    return scores
 
 
 def summarize_arm(
@@ -251,13 +274,20 @@ def summarize_arm(
 # --- the blind sheet ---
 
 
-def build_sheet(sets: Mapping[str, Mapping[str, Sequence[str] | None]], *, seed: int) -> Sheet:
+def build_sheet(
+    sets: Mapping[str, Mapping[str, Sequence[str] | None]],
+    *,
+    seed: int,
+    contexts: Mapping[str, Sequence[str]] | None = None,
+) -> Sheet:
     """One block per setup with the three question sets under X/Y/Z in a seeded random order. A setup where an arm
-    has no full set is left out (and listed), so every graded setup compares all three."""
+    has no full set is left out (and listed), so every graded setup compares all three. `contexts` maps a setup to the
+    lines you judge against (role, level, job description); they are quoted so they can never read as a ranking."""
     rng = random.Random(seed)
     lines = [
         "# Blind ranking",
         "For each setup, rank the three question sets from best to worst on the Ranking line, e.g. `Ranking: Y > X > Z`.",
+        "Judge each set against the setup's role, level and job description (the quoted lines under its heading).",
         "",
     ]
     key: dict[str, dict[str, str]] = {}
@@ -270,7 +300,10 @@ def build_sheet(sets: Mapping[str, Mapping[str, Sequence[str] | None]], *, seed:
         order = list(ARMS)
         rng.shuffle(order)
         key[setup_id] = dict(zip(LABELS, order, strict=True))
-        lines += [f"## Setup {setup_id}", "Ranking:", ""]
+        lines.append(f"## Setup {setup_id}")
+        for context in (contexts or {}).get(setup_id, ()):
+            lines.append(f"> {context}".rstrip())
+        lines += ["", "Ranking:", ""]
         for label, arm in key[setup_id].items():
             lines.append(f"### {label}")
             lines += [f"{n}. {q}" for n, q in enumerate(arms[arm] or [], start=1)]
@@ -320,27 +353,39 @@ def _ranking(number: int, raw: str, labels: Mapping[str, str]) -> list[str]:
 # --- the runners (real calls) ---
 
 
-def run_rag_task(args: argparse.Namespace, provider: LLMProvider | None, settings) -> int:
+def run_rag_task(
+    args: argparse.Namespace, provider: LLMProvider | None, settings, tracer: Tracer | None = None
+) -> int:
     if args.task == "ranking":
         # Reads your filled-in sheet: no model call at all.
         return _run_ranking(Path(args.sheet))
     from app.core.ai.factory import build_embedder, build_provider
+    from app.core.ai.tracing import build_tracer
     from app.db.session import SessionLocal
 
-    if args.task == "generation" and provider is None:
-        provider = build_provider(settings, model=args.model)
-    embedder = build_embedder(settings)
-    if embedder is None:
-        print("Embeddings are not configured: set LLM_GOOGLE_API_KEY in .env first.")
-        return 1
-    with SessionLocal() as db:
-        repo = KnowledgeRepository(db)
-        if args.task == "retrieval":
-            return _run_retrieval(repo, embedder, pause=args.pause_seconds, sleep=time.sleep)
+    configs = settings.llm_provider_configs
+    model = args.model or (configs[0].model if configs else None)
+    if args.task == "generation":
+        # Generation calls go to Langfuse under environment "eval", like the other eval tasks (no-op without keys).
+        tracer = tracer or build_tracer(settings, environment="eval")
         if provider is None:
-            print("LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first.")
+            provider = build_provider(settings, model=args.model, tracer=tracer)
+    try:
+        embedder = build_embedder(settings)
+        if embedder is None:
+            print("Embeddings are not configured: set LLM_GOOGLE_API_KEY in .env first.")
             return 1
-        return _run_generation(args, provider, embedder, repo, settings.llm_max_tokens)
+        with SessionLocal() as db:
+            repo = KnowledgeRepository(db)
+            if args.task == "retrieval":
+                return _run_retrieval(repo, embedder, pause=args.pause_seconds, sleep=time.sleep)
+            if provider is None:
+                print("LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first.")
+                return 1
+            return _run_generation(args, provider, embedder, repo, settings.llm_max_tokens, tracer=tracer, model=model)
+    finally:
+        if tracer is not None:
+            tracer.close()
 
 
 def _run_retrieval(
@@ -376,10 +421,20 @@ def _run_retrieval(
 
 
 def _run_generation(
-    args: argparse.Namespace, provider: LLMProvider, embedder: Embedder, repo: KnowledgeRepository, max_tokens: int
+    args: argparse.Namespace,
+    provider: LLMProvider,
+    embedder: Embedder,
+    repo: KnowledgeRepository,
+    max_tokens: int,
+    *,
+    tracer: Tracer | None = None,
+    model: str | None = None,
 ) -> int:
-    from ..tooling.interviews_evals import EVAL_CASES_PATH, load_cases
+    from ..tooling.interviews_evals import EVAL_CASES_PATH, EVAL_USER, load_cases
 
+    tracer = tracer or Tracer(None)
+    # Every trace of this run shares one Langfuse session, named by what was run and when.
+    label = f"generation/{model or 'default'}/{datetime.now(UTC):%Y%m%d-%H%M%S}"
     data = json.loads(GENERATION_KEYWORDS_PATH.read_text(encoding="utf-8"))
     cases = {c.id: c for c in load_cases(EVAL_CASES_PATH) if c.id in data["setups"]}
     results: dict[str, list[list[WrittenQuestion]]] = {arm: [] for arm in ARMS}
@@ -390,17 +445,31 @@ def _run_generation(
         for repeat in range(1, args.repeat + 1):
             skills.append(data["setups"][setup_id])
             for arm in ARMS:
-                notes, start_ms = _arm_notes(arm, case, repo, embedder, uuid.uuid5(uuid.NAMESPACE_URL, f"{setup_id}/{repeat}"))
-                run = simulate_main_questions(
-                    provider,
-                    role=case.setup.role,
-                    level=case.setup.level,
-                    interview_type=case.setup.interview_type,
-                    question_count=case.setup.question_count,
-                    job_description=case.job_description,
-                    notes=notes,
-                    max_tokens=max_tokens,
-                )
+                with tracer.trace(
+                    f"generation: {setup_id} arm {arm}",
+                    user_id=EVAL_USER,
+                    session_id=label,
+                    input=_generation_input(case, arm),
+                    tags=["task:generation", f"model:{model or 'default'}", f"arm:{arm}"],
+                    metadata={"case_id": setup_id, "repeat": str(repeat), "arm": arm},
+                ) as trace_id:
+                    session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{setup_id}/{repeat}")
+                    notes, start_ms = _arm_notes(arm, case, repo, embedder, session_id, tracer)
+                    run = simulate_main_questions(
+                        provider,
+                        role=case.setup.role,
+                        level=case.setup.level,
+                        interview_type=case.setup.interview_type,
+                        question_count=case.setup.question_count,
+                        job_description=case.job_description,
+                        notes=notes,
+                        max_tokens=max_tokens,
+                    )
+                    tracer.set_trace_output(
+                        {"notes": [n.competency for n in notes], "questions": [w.question for w in run]}
+                    )
+                for name, value in run_scores(run, data["competencies"], data["setups"][setup_id]):
+                    tracer.score(trace_id, name, value)
                 results[arm].append(run)
                 starts[arm].append(start_ms)
                 if repeat == 1:
@@ -415,21 +484,50 @@ def _run_generation(
         coverage = "-" if s.skill_coverage is None else f"{s.skill_coverage:.2f}"
         print(f"{arm:<4} {s.questions:>9}  {s.valid:>5}  {s.distinct_competencies:>12.2f}  {coverage:>14}  "
               f"{s.prompt_tokens:>13.0f}  {s.prompt_tokens - baseline:>12.0f}  {s.start_ms:>8.0f}")  # fmt: skip
-    sheet = build_sheet(sets, seed=args.seed)
+    sheet = build_sheet(sets, seed=args.seed, contexts={sid: sheet_context(c) for sid, c in cases.items()})
     Path(args.sheet).write_text(sheet.text, encoding="utf-8")
     key_path = Path(args.sheet).with_suffix(".key.json")
     key_path.write_text(json.dumps(sheet.key, indent=2), encoding="utf-8")
     print(f"\nblind sheet: {args.sheet} ({len(sheet.key)} setups); key kept apart in {key_path}")
     if sheet.excluded:
         print(f"left out (an arm failed): {', '.join(sheet.excluded)}")
+    if tracer.enabled:
+        print(f"\nLangfuse session: {label} (rank the sheet first: the traces name each arm)")
     return 0
 
 
-def _arm_notes(arm: str, case, repo: KnowledgeRepository, embedder: Embedder, session_id: uuid.UUID):
+def sheet_context(case) -> list[str]:
+    """What a ranker judges the questions against: the interview's setup and the full job description (never the arm)."""
+    setup = case.setup
+    lines = [
+        f"**Role:** {setup.role} | **Level:** {setup.level} | **Type:** {setup.interview_type} | "
+        + f"**Questions:** {setup.question_count}"
+    ]
+    if case.job_description:
+        lines += ["**Job description:**", *case.job_description.strip().splitlines()]
+    else:
+        lines.append("**Job description:** none given (judge on role and level only)")
+    return lines
+
+
+def _generation_input(case, arm: str) -> dict:
+    """What the trace list shows for one arm's interview: the setup and the start of the job description."""
+    setup = case.setup
+    return {
+        "arm": arm,
+        "role": setup.role,
+        "level": setup.level,
+        "interview_type": setup.interview_type,
+        "question_count": setup.question_count,
+        "job_description": (case.job_description or "")[:300] or None,
+    }
+
+
+def _arm_notes(arm: str, case, repo: KnowledgeRepository, embedder: Embedder, session_id: uuid.UUID, tracer: Tracer):
     """A: no notes. B: filter mode (no job description given to retrieval). C: vector mode on the job description."""
     if arm == "A":
         return (), 0.0
-    service = RetrievalService(repo, embedder, llm_on=True)
+    service = RetrievalService(repo, embedder, llm_on=True, tracer=tracer)
     start = time.monotonic()
     found = service.retrieve(
         session_id,

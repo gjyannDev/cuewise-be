@@ -1,12 +1,12 @@
 ---
 roles: general
 levels: intern, junior, mid, senior
-source: drafted
+source: posting
 ---
 # Communication and priorities
 
 ## Explaining technical work
-Ask them to explain a past technical choice to a non-technical stakeholder. Strong answers start with the outcome, use one plain example, and check understanding. Weak answers stay in jargon or skip why the choice mattered to the business.
+Probe how they explain a design, a bug or an infrastructure change to people outside their field: a client, a product manager, a support team. Strong: starts with the impact, uses one plain example, states what they need from the listener and checks understanding. Weak: stays in jargon or skips why it matters. Follow-up: how do you present a finding the stakeholder will not like?
 
 ## Prioritising under pressure
-Probe a time when several urgent things competed. Strong answers name how they ranked them (impact, deadlines, who was blocked), what they said no to, and how they told people. Weak answers say they worked longer hours and did everything.
+Probe a time several urgent things competed: a release date, a production issue, a teammate blocked. Strong: ranks by impact and who is blocked, says what they dropped and tells the people affected early. Weak: works longer hours and does everything. Follow-up: how do you say no to a stakeholder's request?

@@ -22,6 +22,12 @@
   {"id": "mob-tech-01", "text": "How do you handle offline support and syncing in a mobile app?", "type": "technical", "roles": ["mobile"], "levels": ["mid", "senior"]},
   {"id": "mob-tech-02", "text": "What are the main differences between building for iOS and Android?", "type": "technical", "roles": ["mobile"], "levels": ["intern", "junior", "mid"]},
   {"id": "data-tech-01", "text": "Explain the difference between a JOIN and a subquery, and when you would use each.", "type": "technical", "roles": ["data"], "levels": ["intern", "junior", "mid"]},
+  {"id": "des-tech-01", "text": "Walk me through how you would turn a vague feature request into user flows and a testable prototype.", "type": "technical", "roles": ["designer"], "levels": ["intern", "junior", "mid"]},
+  {"id": "des-tech-02", "text": "How would you plan a usability test for a new checkout flow, and how would you decide which findings to fix first?", "type": "technical", "roles": ["designer"], "levels": ["mid", "senior"]},
+  {"id": "qa-tech-01", "text": "A form field accepts ages from 18 to 60. Which test cases would you write, and why those?", "type": "technical", "roles": ["qa"], "levels": ["intern", "junior", "mid"]},
+  {"id": "qa-tech-02", "text": "How would you decide what to automate and what to keep as manual testing for a mobile app with weekly releases?", "type": "technical", "roles": ["qa"], "levels": ["mid", "senior"]},
+  {"id": "devops-tech-01", "text": "Describe how a basic CI pipeline takes a code change from a commit to a running container.", "type": "technical", "roles": ["devops"], "levels": ["intern", "junior", "mid"]},
+  {"id": "devops-tech-02", "text": "A service on Kubernetes keeps restarting after a deploy. How would you find the cause and roll back safely?", "type": "technical", "roles": ["devops"], "levels": ["mid", "senior"]},
   {"id": "data-tech-02", "text": "How would you detect and handle missing or duplicate data in a pipeline?", "type": "technical", "roles": ["data"], "levels": ["mid", "senior"]},
   {"id": "be-beh-01", "text": "Tell me about a time a service you owned went down. How did you respond?", "type": "behavioral", "roles": ["backend", "fullstack"], "levels": ["mid", "senior"]}
 ]

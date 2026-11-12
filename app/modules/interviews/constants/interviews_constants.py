@@ -9,6 +9,9 @@ class JobRole(StrEnum):
     fullstack = "fullstack"
     mobile = "mobile"
     data = "data"
+    designer = "designer"
+    qa = "qa"
+    devops = "devops"
 
 
 class Level(StrEnum):
@@ -323,6 +326,56 @@ _ROLE_ONLY_KEYTERMS = {
         "data warehouse",
         "data lake",
     ),
+    JobRole.designer: (
+        "Figma",
+        "wireframe",
+        "mockup",
+        "prototype",
+        "user flow",
+        "usability testing",
+        "user research",
+        "persona",
+        "design system",
+        "WCAG",
+        "accessibility",
+        "heuristic evaluation",
+        "A/B test",
+        "information architecture",
+    ),
+    JobRole.qa: (
+        "test case",
+        "test plan",
+        "regression testing",
+        "exploratory testing",
+        "smoke test",
+        "boundary value analysis",
+        "equivalence partitioning",
+        "Postman",
+        "Jira",
+        "Selenium",
+        "Cypress",
+        "Playwright",
+        "STLC",
+        "acceptance criteria",
+        "bug report",
+    ),
+    JobRole.devops: (
+        "Terraform",
+        "Ansible",
+        "Helm",
+        "Jenkins",
+        "GitHub Actions",
+        "GitLab CI",
+        "Prometheus",
+        "Grafana",
+        "CloudWatch",
+        "infrastructure as code",
+        "load balancer",
+        "VPC",
+        "IAM",
+        "on-call",
+        "rollback",
+    ),
 }
 ROLE_KEYTERMS: dict[JobRole, tuple[str, ...]] = {
     role: SHARED_KEYTERMS + terms for role, terms in _ROLE_ONLY_KEYTERMS.items()
@@ -583,9 +636,10 @@ class NoteSource(StrEnum):
 RETRIEVAL_TOP_K = 6
 # The embedding call at interview start never delays the start by more than this; then filter mode takes over.
 RETRIEVAL_TIME_CAP_SECONDS = 5.0
-# Cosine similarity a vector-mode note must reach. 0 keeps everything but opposite meanings: a placeholder until the
-# retrieval eval's threshold sweep sets it (Step 12), never a guess.
-RETRIEVAL_MIN_SIMILARITY = 0.0
+# Cosine similarity a vector-mode note must reach. From the retrieval eval's sweep (2026-11-11, gemini-embedding-001,
+# 21 cases): recall@5 stays 1.0 up to 0.60 and falls to 0.86 at 0.65, so 0.55 keeps one step of margin below the cliff.
+# Scores bunch in ~0.55-0.72, so this only drops clear misses; the ranking does the real work.
+RETRIEVAL_MIN_SIMILARITY = 0.55
 MIN_NON_DRAFTED_SHARE = Fraction(1, 3)
 KNOWLEDGE_DIR = MODULE_DIR / "data" / "knowledge"
 # Per section (chunk). Six of them go into every main-question write, so they must stay small next to the interview.
