@@ -16,7 +16,7 @@ from app.core.ai.provider import LLMResult, LLMServerError
 from app.core.ai.tracing import Tracer
 from app.modules.interviews.constants.interviews_constants import (
     INTERVIEWER_V5_PROMPT_VERSION,
-    INTERVIEWER_V6_PROMPT_VERSION,
+    INTERVIEWER_V7_PROMPT_VERSION,
     RETRIEVAL_MIN_SIMILARITY,
 )
 from app.modules.interviews.repositories.interviews_knowledge_repository import (
@@ -79,7 +79,7 @@ def test_each_arm_is_one_run_of_the_setups(db, corpus, lf, tmp_path):  # AC16
     runs = lf.experiments
     assert [r["metadata"]["arm"] for r in runs] == list(ARMS)
     assert all(r["item_ids"] == [f"generation:{s}" for s in SETUP_IDS] for r in runs)
-    prompts = {"A": INTERVIEWER_V5_PROMPT_VERSION, "B": INTERVIEWER_V6_PROMPT_VERSION, "C": INTERVIEWER_V6_PROMPT_VERSION}
+    prompts = {"A": INTERVIEWER_V5_PROMPT_VERSION, "B": INTERVIEWER_V7_PROMPT_VERSION, "C": INTERVIEWER_V7_PROMPT_VERSION}
     for r in runs:
         arm = r["metadata"]["arm"]
         assert r["run_name"].startswith(f"generation/{prompts[arm]}/m/") and r["run_name"].endswith(f"/r1/arm-{arm}")

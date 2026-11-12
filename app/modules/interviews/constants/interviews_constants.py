@@ -671,5 +671,7 @@ KNOWLEDGE_HEADING_MAX_LENGTH = 128
 # The vector column's size, fixed by the migration; EMBEDDING_DIMENSIONS must match it.
 KNOWLEDGE_VECTOR_SIZE = 768
 # v5 / v4 plus the reference-notes rule; used only when an interview has stored notes, so no-notes prompts are unchanged.
-INTERVIEWER_V6_PROMPT_VERSION = "interviewer_v6"
-INTERVIEWER_V6_JSON_PROMPT_VERSION = "interviewer_v6_json"
+# v7 replaces v6: in v6 the notes chose the topic and crowded out the job description's skills (skill_coverage
+# 0.83 -> 0.57 vs v5); in v7 the job description picks the topic and the notes only set depth. v6 files kept for history.
+INTERVIEWER_V7_PROMPT_VERSION = "interviewer_v7"
+INTERVIEWER_V7_JSON_PROMPT_VERSION = "interviewer_v7_json"

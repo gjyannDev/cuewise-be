@@ -16,7 +16,7 @@ four averages, and metadata naming the embedding model, the threshold and a fing
 before any call when the database is down or the notes are not ingested.
 
 **Generation** writes the main questions of the setups listed in data/generation_eval_keywords.json three ways: arm A
-no notes (interviewer_v5), B filter-only notes, C vector notes (interviewer_v6). Per arm: distinct competencies per
+no notes (interviewer_v5), B filter-only notes, C vector notes (interviewer_v7; v6 before 2026-11-12). Per arm: distinct competencies per
 interview and job-description skill coverage (keyword rules, so wording can game them), valid replies, prompt tokens per
 question and retrieval time at start. It also writes a blind sheet: the arms' question sets under neutral labels in a
 seeded random order, the key in a separate file, for you to rank. With Langfuse keys set, every setup x repeat x arm is
@@ -54,7 +54,7 @@ from ..ai.interviews_reply import InvalidReplyError, parse_streamed_reply, split
 from ..constants.interviews_constants import (
     INTERVIEWER_STREAM_TASK,
     INTERVIEWER_V5_PROMPT_VERSION,
-    INTERVIEWER_V6_PROMPT_VERSION,
+    INTERVIEWER_V7_PROMPT_VERSION,
     MODULE_DIR,
     RETRIEVAL_MIN_SIMILARITY,
     InterviewType,
@@ -232,7 +232,7 @@ def simulate_main_questions(
     max_tokens: int,
 ) -> list[WrittenQuestion]:
     """One interview's main questions through the streamed writer's text format (the same prompt for every arm, v5
-    or v6), with a canned neutral answer between them and no decide call or follow-ups."""
+    or v7), with a canned neutral answer between them and no decide call or follow-ups."""
     turns: list[QuestionTurn] = []
     written: list[WrittenQuestion] = []
     for _ in range(question_count):
@@ -680,7 +680,7 @@ def run_generation(
     records: list[ExperimentRun | None] = []
     for repeat in range(1, args.repeat + 1):
         for arm in ARMS:
-            prompt = INTERVIEWER_V5_PROMPT_VERSION if arm == "A" else INTERVIEWER_V6_PROMPT_VERSION
+            prompt = INTERVIEWER_V5_PROMPT_VERSION if arm == "A" else INTERVIEWER_V7_PROMPT_VERSION
 
             def run_one(case, arm: str = arm, repeat: int = repeat) -> ArmInterview:
                 session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{case.id}/{repeat}")

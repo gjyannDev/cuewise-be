@@ -1,6 +1,6 @@
 """Reference notes in the question writer's input (knowledge-base-rag Step 9; AC17, AC18, AC29, EC17, EC23, EC26).
 
-Only main-question writes of an interview with notes change: they use interviewer_v6 (streamed) or interviewer_v6_json
+Only main-question writes of an interview with notes change: they use interviewer_v7 (streamed) or interviewer_v7_json
 and carry a <reference_notes> block right after the job description. Every other call renders exactly as before.
 """
 
@@ -26,8 +26,8 @@ from app.modules.interviews.constants.interviews_constants import (
     INTERVIEWER_TASK,
     INTERVIEWER_V4_PROMPT_VERSION,
     INTERVIEWER_V5_PROMPT_VERSION,
-    INTERVIEWER_V6_JSON_PROMPT_VERSION,
-    INTERVIEWER_V6_PROMPT_VERSION,
+    INTERVIEWER_V7_JSON_PROMPT_VERSION,
+    INTERVIEWER_V7_PROMPT_VERSION,
     KNOWLEDGE_HEADING_MAX_LENGTH,
     KNOWLEDGE_SECTION_MAX_LENGTH,
     RETRIEVAL_TOP_K,
@@ -75,7 +75,7 @@ def first_user(built) -> str:
 
 @pytest.mark.parametrize(
     ("task", "version"),
-    [(INTERVIEWER_TASK, INTERVIEWER_V6_JSON_PROMPT_VERSION), (INTERVIEWER_STREAM_TASK, INTERVIEWER_V6_PROMPT_VERSION)],
+    [(INTERVIEWER_TASK, INTERVIEWER_V7_JSON_PROMPT_VERSION), (INTERVIEWER_STREAM_TASK, INTERVIEWER_V7_PROMPT_VERSION)],
 )
 def test_a_main_question_write_gets_the_notes_after_the_job_description_in_rank_order(task, version):  # AC17
     built = CONTEXT_MANAGER.build(task, inputs(notes=tuple(reversed(NOTES))))
@@ -92,7 +92,7 @@ def test_a_main_question_write_gets_the_notes_after_the_job_description_in_rank_
 def test_the_first_question_gets_the_notes_too():  # AC17: the first question is a main-question write
     built = CONTEXT_MANAGER.build(INTERVIEWER_TASK, inputs(n_turns=0))
 
-    assert "<reference_notes>" in first_user(built) and built.prompt_version == INTERVIEWER_V6_JSON_PROMPT_VERSION
+    assert "<reference_notes>" in first_user(built) and built.prompt_version == INTERVIEWER_V7_JSON_PROMPT_VERSION
 
 
 @pytest.mark.parametrize(
@@ -160,7 +160,7 @@ def test_over_the_limit_even_without_history_the_notes_go_and_the_question_is_st
     without = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION).build(data, 0)
     limit = sum(len(m.content) for m in without.messages) // 4 + 1  # fits without the notes, not with them
     plain = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION, limit=limit)
-    notes_aware = WithReferenceNotes(plain, INTERVIEWER_V6_JSON_PROMPT_VERSION, allowance=0)
+    notes_aware = WithReferenceNotes(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION, allowance=0)
     manager = ContextManager({"w": Task(default="w", strategies={"w": notes_aware})})
 
     built = manager.build("w", data)
@@ -171,7 +171,7 @@ def test_over_the_limit_even_without_history_the_notes_go_and_the_question_is_st
 
 def test_interviews_without_notes_keep_the_plain_limit():  # AC17: the allowance is for notes only
     plain = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION)
-    notes_aware = WithReferenceNotes(plain, INTERVIEWER_V6_JSON_PROMPT_VERSION)
+    notes_aware = WithReferenceNotes(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION)
     with_notes = notes_aware.limit_for(inputs())
 
     assert notes_aware.limit_for(inputs(notes=())) == plain.limit == WINDOW_INPUT_LIMIT
@@ -183,7 +183,7 @@ def test_older_history_is_trimmed_before_the_notes():  # AC29: notes are the las
     with_notes = CONTEXT_MANAGER.build(INTERVIEWER_TASK, data)
     limit = with_notes.report.estimated_tokens - 20
     plain = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION, limit=limit)
-    manager = ContextManager({"w": Task(default="w", strategies={"w": WithReferenceNotes(plain, INTERVIEWER_V6_JSON_PROMPT_VERSION, allowance=0)})})
+    manager = ContextManager({"w": Task(default="w", strategies={"w": WithReferenceNotes(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION, allowance=0)})})
 
     built = manager.build("w", data)
 
@@ -192,13 +192,15 @@ def test_older_history_is_trimmed_before_the_notes():  # AC29: notes are the las
 
 @pytest.mark.parametrize(
     ("version", "base"),
-    [(INTERVIEWER_V6_PROMPT_VERSION, INTERVIEWER_V5_PROMPT_VERSION), (INTERVIEWER_V6_JSON_PROMPT_VERSION, INTERVIEWER_V4_PROMPT_VERSION)],
+    [(INTERVIEWER_V7_PROMPT_VERSION, INTERVIEWER_V5_PROMPT_VERSION), (INTERVIEWER_V7_JSON_PROMPT_VERSION, INTERVIEWER_V4_PROMPT_VERSION)],
 )
-def test_the_v6_prompts_keep_the_six_sections_and_their_bases_rules(version, base):
+def test_the_v7_prompts_keep_the_six_sections_and_their_bases_rules(version, base):
     text = load_prompt(version)
 
     assert [line for line in text.splitlines() if re.match(r"^# \w", line)] == SECTIONS
     assert "<reference_notes>" in text and "never quote" in text.lower()
+    # v6's regression: the notes chose the topic over the job description's skills. In v7 the job description does.
+    assert "never pick the topic" in text and "favouring the earlier notes" not in text
     role_line = text.splitlines()[1]
     assert role_line != load_prompt(base).splitlines()[1]  # the test llm fixture routes calls by prompt text
     rendered = render_interviewer_v2_prompt(
@@ -220,6 +222,6 @@ async def test_a_reset_retry_in_a_stream_reuses_the_same_notes(llm, clock):  # E
     settled = events[-1]
     assert isinstance(settled, Settled)
     written = settled.outcome.written
-    assert written is not None and written.prompt_version == INTERVIEWER_V6_PROMPT_VERSION
+    assert written is not None and written.prompt_version == INTERVIEWER_V7_PROMPT_VERSION
     first, retry = llm.fake.calls
     assert first == retry and "<reference_notes>" in first[1].content

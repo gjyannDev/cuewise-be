@@ -35,8 +35,8 @@ from ..constants.interviews_constants import (
     INTERVIEWER_TASK,
     INTERVIEWER_V4_PROMPT_VERSION,
     INTERVIEWER_V5_PROMPT_VERSION,
-    INTERVIEWER_V6_JSON_PROMPT_VERSION,
-    INTERVIEWER_V6_PROMPT_VERSION,
+    INTERVIEWER_V7_JSON_PROMPT_VERSION,
+    INTERVIEWER_V7_PROMPT_VERSION,
     MAX_FOLLOW_UPS,
     REFERENCE_NOTES_TOKEN_ALLOWANCE,
     SUMMARY_PROMPT_VERSION,
@@ -463,7 +463,7 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
                     # The JSON writer: the first question and the JSON answer route.
                     WINDOW_LEDGER: WithReferenceNotes(
                         WindowLedger(prompts.get(WINDOW_LEDGER, INTERVIEWER_V4_PROMPT_VERSION)),
-                        INTERVIEWER_V6_JSON_PROMPT_VERSION,
+                        INTERVIEWER_V7_JSON_PROMPT_VERSION,
                     ),
                     FULL_HISTORY: FullHistory(
                         prompts.get(FULL_HISTORY, INTERVIEWER_PROMPT_VERSION)
@@ -476,7 +476,7 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
                 default=WINDOW_LEDGER,
                 strategies={
                     WINDOW_LEDGER: WithReferenceNotes(
-                        WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True), INTERVIEWER_V6_PROMPT_VERSION
+                        WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True), INTERVIEWER_V7_PROMPT_VERSION
                     )
                 },
             ),
