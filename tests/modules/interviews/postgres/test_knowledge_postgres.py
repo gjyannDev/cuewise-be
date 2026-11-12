@@ -22,11 +22,11 @@ from alembic import command
 from app.core import config as app_config
 from app.modules.auth.models.auth_model import User
 from app.modules.interviews.constants.interviews_constants import KNOWLEDGE_VECTOR_SIZE
-from app.modules.interviews.models.interviews_knowledge_model import (
+from app.modules.interviews.dependencies.models.interviews_knowledge_model import (
     InterviewSessionChunk,
     KnowledgeChunk,
 )
-from app.modules.interviews.models.interviews_model import InterviewSession
+from app.modules.interviews.dependencies.models.interviews_model import InterviewSession
 from app.modules.interviews.repositories.interviews_knowledge_repository import (
     KnowledgeRepository,
 )

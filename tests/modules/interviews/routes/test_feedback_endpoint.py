@@ -41,7 +41,7 @@ from app.modules.interviews.dependencies.interviews_shared_dependencies import (
     get_now,
     get_tracer,
 )
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewFeedback,
     InterviewMessage,
     InterviewQuestion,

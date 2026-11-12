@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.auth.models.auth_model import User
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewQuestion,
     InterviewSession,
 )

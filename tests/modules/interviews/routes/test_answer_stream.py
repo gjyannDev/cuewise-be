@@ -16,7 +16,7 @@ from app.modules.interviews.ai.interviews_turn import Interviewer
 from app.modules.interviews.constants.interviews_constants import (
     INTERVIEWER_V5_PROMPT_VERSION,
 )
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
     InterviewSession,

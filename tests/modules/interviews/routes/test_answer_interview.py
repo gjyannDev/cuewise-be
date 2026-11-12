@@ -2,7 +2,7 @@ import uuid
 
 from sqlalchemy import select
 
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewSession,
 )

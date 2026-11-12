@@ -3,7 +3,7 @@ import uuid
 import pytest
 
 from app.main import app
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
     InterviewSession,

@@ -9,12 +9,12 @@ from app.core.ai.embedder import EmbeddingKind
 from app.core.ai.fake import FakeEmbedder
 from app.core.ai.provider import LLMServerError
 from app.modules.interviews.constants.interviews_constants import KNOWLEDGE_VECTOR_SIZE
-from app.modules.interviews.models.interviews_knowledge_model import (
+from app.modules.interviews.dependencies.models.interviews_knowledge_model import (
     InterviewSessionChunk,
     KnowledgeChunk,
     KnowledgeChunkScope,
 )
-from app.modules.interviews.models.interviews_model import InterviewSession
+from app.modules.interviews.dependencies.models.interviews_model import InterviewSession
 from app.modules.interviews.repositories.interviews_knowledge_repository import (
     KnowledgeRepository,
 )

@@ -23,7 +23,7 @@ from ..constants.interviews_constants import (
     QuestionKind,
     QuestionSource,
 )
-from ..models.interviews_model import InterviewQuestion, InterviewSession
+from ..dependencies.models.interviews_model import InterviewQuestion, InterviewSession
 from ..repositories.interviews_repository import InterviewsRepository
 from ..schemas.interviews_schema import BankQuestion
 from .interviews_knowledge_utils import ReferenceNote

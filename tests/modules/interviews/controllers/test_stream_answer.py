@@ -13,7 +13,7 @@ from app.core.ai.fake import FakeStream
 from app.modules.interviews.controllers.interviews_answer_controller import (
     AnswerController,
 )
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewSession,
 )

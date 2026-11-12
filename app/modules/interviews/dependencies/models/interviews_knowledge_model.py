@@ -16,7 +16,7 @@ from app.db.mixins import UUIDPrimaryKeyMixin
 from app.db.session import Base
 from app.db.types import portable_vector
 
-from ..constants.interviews_constants import KNOWLEDGE_VECTOR_SIZE
+from ...constants.interviews_constants import KNOWLEDGE_VECTOR_SIZE
 
 _ACTIVE = sql_text("active")
 

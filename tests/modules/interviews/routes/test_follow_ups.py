@@ -13,7 +13,7 @@ from app.modules.interviews.constants.interviews_constants import (
     DECISION_PROMPT_VERSION,
     MAX_FOLLOW_UPS,
 )
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
 )
@@ -236,7 +236,7 @@ def test_a_second_submit_of_an_answered_question_adds_no_follow_up(
 def test_a_session_with_stored_questions_makes_no_decide_call(
     make_user, answer, llm, db
 ):  # AC14, EC13
-    from app.modules.interviews.models.interviews_model import InterviewSession
+    from app.modules.interviews.dependencies.models.interviews_model import InterviewSession
     from app.modules.interviews.repositories.interviews_repository import (
         InterviewsRepository,
     )

@@ -25,7 +25,7 @@ from ..constants.interviews_constants import (
     QuestionSource,
     SessionStatus,
 )
-from ..models.interviews_model import (
+from ..dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
     InterviewSession,

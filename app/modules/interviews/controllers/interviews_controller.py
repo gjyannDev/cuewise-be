@@ -13,7 +13,7 @@ from ..constants.interviews_constants import (
     SessionStatus,
     SortDirection,
 )
-from ..models.interviews_model import InterviewQuestion
+from ..dependencies.models.interviews_model import InterviewQuestion
 from ..schemas.interviews_schema import (
     InterviewCreateIn,
     InterviewListItemOut,

@@ -43,7 +43,7 @@ from ..constants.interviews_constants import (
     SessionStatus,
     TurnPhase,
 )
-from ..models.interviews_model import (
+from ..dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
     InterviewSession,

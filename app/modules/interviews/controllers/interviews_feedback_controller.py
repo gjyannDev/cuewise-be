@@ -9,7 +9,7 @@ from ..constants.interviews_constants import (
     FEEDBACK_INSUFFICIENT_MESSAGE,
     FeedbackStatus,
 )
-from ..models.interviews_model import InterviewFeedback
+from ..dependencies.models.interviews_model import InterviewFeedback
 from ..schemas.interviews_schema import (
     FeedbackEvidenceOut,
     FeedbackOut,

@@ -5,7 +5,7 @@ import json
 import pytest
 from sqlalchemy import event
 
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewQuestion,
     InterviewSession,
 )

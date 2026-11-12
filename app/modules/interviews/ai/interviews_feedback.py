@@ -49,7 +49,7 @@ from ..constants.interviews_constants import (
     QuestionCategory,
     QuestionKind,
 )
-from ..models.interviews_model import InterviewMessage, InterviewQuestion
+from ..dependencies.models.interviews_model import InterviewMessage, InterviewQuestion
 from ..utils.interviews_utils import APP_TAG
 
 # --- The interview as the score call reads it ---

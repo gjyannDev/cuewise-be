@@ -26,7 +26,7 @@ from app.core.config import settings
 from app.core.logging import LOG_FILE
 from app.db import models  # noqa: F401  (registers every model before the session is used)
 from app.db.session import SessionLocal
-from app.modules.interviews.models.interviews_model import InterviewSession
+from app.modules.interviews.dependencies.models.interviews_model import InterviewSession
 from app.modules.interviews.repositories.interviews_repository import (
     InterviewsRepository,
 )

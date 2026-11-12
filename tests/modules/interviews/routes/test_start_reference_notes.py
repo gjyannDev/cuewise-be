@@ -14,7 +14,7 @@ from app.modules.interviews.constants.interviews_constants import KNOWLEDGE_VECT
 from app.modules.interviews.dependencies.interviews_shared_dependencies import (
     get_embedder,
 )
-from app.modules.interviews.models.interviews_knowledge_model import (
+from app.modules.interviews.dependencies.models.interviews_knowledge_model import (
     InterviewSessionChunk,
 )
 from app.modules.interviews.repositories.interviews_knowledge_repository import (

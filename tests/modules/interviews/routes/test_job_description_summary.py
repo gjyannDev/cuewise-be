@@ -8,7 +8,7 @@ from app.modules.interviews.constants.interviews_constants import (
     SUMMARY_THRESHOLD,
     SUMMARY_TIME_CAP_SECONDS,
 )
-from app.modules.interviews.models.interviews_model import InterviewSession
+from app.modules.interviews.dependencies.models.interviews_model import InterviewSession
 
 LONG_JD = ("We build booking software for fitness studios in TypeScript and React, with a Python API. " * 9)[:900]
 SUMMARY = "Booking software for fitness studios: TypeScript, React, Python API."

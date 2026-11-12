@@ -47,7 +47,7 @@ from ..constants.interviews_constants import (
     SessionStatus,
     TextSource,
 )
-from ..models.interviews_model import InterviewFeedback
+from ..dependencies.models.interviews_model import InterviewFeedback
 from ..repositories.interviews_repository import InterviewsRepository
 from ..utils.interviews_session_utils import owned_session
 

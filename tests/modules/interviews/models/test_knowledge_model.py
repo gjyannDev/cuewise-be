@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.interviews.constants.interviews_constants import KNOWLEDGE_VECTOR_SIZE
-from app.modules.interviews.models.interviews_knowledge_model import (
+from app.modules.interviews.dependencies.models.interviews_knowledge_model import (
     InterviewSessionChunk,
     KnowledgeChunk,
     KnowledgeChunkScope,

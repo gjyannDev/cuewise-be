@@ -55,7 +55,7 @@ from ..constants.interviews_constants import (
     QuestionKind,
     SessionStatus,
 )
-from ..models.interviews_model import InterviewMessage, InterviewQuestion
+from ..dependencies.models.interviews_model import InterviewMessage, InterviewQuestion
 from ..schemas.interviews_schema import (
     BankQuestion,
     QuestionBank,

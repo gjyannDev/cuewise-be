@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..constants.interviews_constants import GENERAL_ROLE
-from ..models.interviews_knowledge_model import (
+from ..dependencies.models.interviews_knowledge_model import (
     InterviewSessionChunk,
     KnowledgeChunk,
     KnowledgeChunkScope,

@@ -123,7 +123,7 @@ def test_usage_of_both_calls_is_summed_and_every_call_logs_metadata_only(
 
     answer(owner, session_id, q1, text="SECRET-ANSWER text.")
 
-    from app.modules.interviews.models.interviews_model import InterviewQuestion
+    from app.modules.interviews.dependencies.models.interviews_model import InterviewQuestion
 
     q2 = db.query(InterviewQuestion).filter_by(position=2).one()
     assert (q2.prompt_tokens, q2.completion_tokens, q2.latency_ms) == (300, 30, 800)

@@ -22,8 +22,8 @@ from ..constants.interviews_constants import (
     SessionStatus,
     SortDirection,
 )
-from ..models.interviews_knowledge_model import InterviewSessionChunk, KnowledgeChunk
-from ..models.interviews_model import (
+from ..dependencies.models.interviews_knowledge_model import InterviewSessionChunk, KnowledgeChunk
+from ..dependencies.models.interviews_model import (
     InterviewFeedback,
     InterviewMessage,
     InterviewQuestion,

@@ -1,6 +1,6 @@
 import uuid
 
-from app.modules.interviews.models.interviews_model import InterviewQuestion
+from app.modules.interviews.dependencies.models.interviews_model import InterviewQuestion
 from app.modules.interviews.utils.interviews_utils import build_usage_report
 
 S1, S2 = uuid.UUID(int=1), uuid.UUID(int=2)

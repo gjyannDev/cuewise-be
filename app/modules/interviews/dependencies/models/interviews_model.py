@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.mixins import UUIDPrimaryKeyMixin
 from app.db.session import Base
 
-from ..constants.interviews_constants import (
+from ...constants.interviews_constants import (
     FIRST_POSITION,
     JOB_DESCRIPTION_MAX_LENGTH,
     NOTE_MAX_LENGTH,

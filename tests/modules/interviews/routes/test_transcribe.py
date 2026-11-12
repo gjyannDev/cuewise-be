@@ -15,7 +15,7 @@ from app.modules.interviews.constants.interviews_constants import (
     TRANSCRIPTION_MAX_BYTES,
     JobRole,
 )
-from app.modules.interviews.models.interviews_model import InterviewSession
+from app.modules.interviews.dependencies.models.interviews_model import InterviewSession
 
 # The `transcribe` fixture's default recording (conftest.WEBM_AUDIO): a WebM header and padding.
 WEBM_AUDIO = b"\x1a\x45\xdf\xa3" + b"\x00" * 256

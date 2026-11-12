@@ -1,6 +1,6 @@
 import uuid
 
-from app.modules.interviews.models.interviews_model import InterviewQuestion
+from app.modules.interviews.dependencies.models.interviews_model import InterviewQuestion
 from app.scripts.usage_report import main
 
 

@@ -16,7 +16,7 @@ from app.modules.interviews.constants.interviews_constants import (
     INTERVIEWER_TASK,
     SUMMARY_TASK,
 )
-from app.modules.interviews.models.interviews_model import (
+from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
     InterviewSession,
