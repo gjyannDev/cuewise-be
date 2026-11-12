@@ -4,33 +4,22 @@ The real-model runs (retrieval against the ingested corpus, three generation arm
 tests pin the metrics, the sheet and its parser, and one generation arm on the fake provider.
 """
 
-import json
 import uuid
-from argparse import Namespace
-from contextlib import contextmanager
-from contextvars import ContextVar
-from types import SimpleNamespace
 
 import pytest
 
-from app.core.ai.fake import FakeEmbedder, FakeProvider
-from app.core.ai.tracing import Tracer
+from app.core.ai.fake import FakeProvider
 from app.modules.interviews.constants.interviews_constants import (
     InterviewType,
     JobRole,
     Level,
 )
-from app.modules.interviews.repositories.interviews_knowledge_repository import (
-    KnowledgeRepository,
-)
 from app.modules.interviews.tooling.interviews_rag_evals import (
     ARMS,
-    GENERATION_KEYWORDS_PATH,
     CaseKind,
     RetrievalCase,
     SheetError,
     WrittenQuestion,
-    _run_generation,
     build_sheet,
     case_set_problems,
     competencies_of,
@@ -203,71 +192,6 @@ def test_run_scores_are_the_keyword_rules_for_one_interview():
     assert "skill_coverage" not in dict(run_scores(run, KEYWORDS, []))
 
 
-current_span: ContextVar[str | None] = ContextVar("current_span", default=None)
-
-
-class RecordingClient:
-    """A Langfuse client stand-in: records observations, outputs and scores."""
-
-    def __init__(self):
-        self.observations, self.scores, self.outputs, self.closed = [], [], {}, 0
-
-    @contextmanager
-    def start_as_current_observation(self, **kwargs):
-        trace_id = f"obs-{len(self.observations) + 1}"
-        self.observations.append({**kwargs, "trace_id": trace_id})
-        token = current_span.set(trace_id)
-        try:
-            yield SimpleNamespace(trace_id=trace_id)
-        finally:
-            current_span.reset(token)
-
-    def update_current_span(self, **kwargs):
-        self.outputs[current_span.get()] = kwargs["output"]
-
-    def create_score(self, **kwargs):
-        self.scores.append(kwargs)
-
-    def flush(self):
-        pass
-
-    def shutdown(self):
-        self.closed += 1
-
-
-def test_each_setup_and_arm_is_one_trace_with_its_retrieval_output_and_scores(db, tmp_path):
-    client, propagated = RecordingClient(), []
-
-    @contextmanager
-    def propagate(**attrs):
-        propagated.append(attrs)
-        yield
-
-    args = Namespace(repeat=1, pause_seconds=0, sheet=str(tmp_path / "blind.md"), seed=8)
-    llm = FakeProvider(default="CATEGORY: technical\nHow would you cache an API endpoint?")
-
-    code = _run_generation(
-        args, llm, FakeEmbedder({}), KnowledgeRepository(db), 400, tracer=Tracer(client, propagate=propagate), model="m"
-    )
-
-    assert code == 0
-    traces = [o for o in client.observations if o["as_type"] == "span"]
-    setups = json.loads(GENERATION_KEYWORDS_PATH.read_text(encoding="utf-8"))["setups"]
-    assert len(traces) == len(setups) * len(ARMS)
-    assert {t["name"] for t in traces} >= {f"generation: strong-backend-mid arm {arm}" for arm in ARMS}
-    # Arms B and C each run retrieval inside their trace; arm A has none.
-    assert sum(o["as_type"] == "chain" for o in client.observations) == len(setups) * 2
-    assert len({p["session_id"] for p in propagated}) == 1
-    assert {p["metadata"]["arm"] for p in propagated} == set(ARMS)
-    assert all(f"arm:{p['metadata']['arm']}" in p["tags"] for p in propagated)
-    for trace in traces:
-        assert "questions" in client.outputs[trace["trace_id"]]
-        names = {s["name"] for s in client.scores if s["trace_id"] == trace["trace_id"]}
-        assert {"valid_share", "distinct_competencies"} <= names
-    # The ranking sheet is still written and still hides the arms.
-    assert "arm" not in (tmp_path / "blind.md").read_text(encoding="utf-8").lower()
-
-
 # --- the blind ranking sheet (AC25, EC24, EC25) ---
 
 SETS = {
@@ -287,6 +211,16 @@ def test_the_sheet_hides_the_arms_is_reproducible_and_leaves_out_failed_setups()
         assert sorted(labels) == ["X", "Y", "Z"] and sorted(labels.values()) == list(ARMS)
     assert "Arm" not in sheet.text and " A\n" not in sheet.text
     assert sum(line.startswith("Ranking:") for line in sheet.text.splitlines()) == 2
+
+
+def test_every_set_has_an_optional_rating_and_note_line_and_the_sheet_still_names_no_arm():  # AC22
+    sheet = build_sheet(SETS, seed=7)
+
+    lines = sheet.text.splitlines()
+    assert sum(line == "Rating:" for line in lines) == 2 * 3  # two graded setups, three sets each
+    assert sum(line == "Note:" for line in lines) == 2 * 3
+    assert any("fit" in line and "relevance" in line and "variety" in line and "specificity" in line for line in lines[:8])
+    assert "arm" not in sheet.text.lower()
 
 
 def test_different_seeds_shuffle_the_labels():  # AC25: the order carries no hint

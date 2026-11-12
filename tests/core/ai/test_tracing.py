@@ -4,7 +4,7 @@ A fake Langfuse client records what the SDK would be told, so no test touches th
 """
 
 import contextlib
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 import pytest
 
@@ -12,6 +12,7 @@ from app.core.ai.fake import FakeProvider, FakeStream
 from app.core.ai.provider import ChatMessage, LLMResult, LLMServerError, LLMTimeoutError
 from app.core.ai.tracing import Tracer, TracingProvider, build_tracer
 from app.core.config import Settings
+from tests.fake_langfuse import FakeLangfuse
 
 pytestmark = pytest.mark.anyio
 
@@ -413,6 +414,22 @@ def test_score_failure_is_swallowed(app_logs):  # eval-langfuse EC1
     assert "score" in warning.getMessage() and "RuntimeError" in warning.getMessage()
 
 
+def test_a_score_with_a_stable_id_sends_it_so_a_repost_updates_it(tracer, client):  # langfuse-experiments Step 8
+    assert tracer.score("trace-1", "human_rank", 1.0, comment="clearest", score_id="human_rank-trace-1")
+
+    assert client.scores == [
+        {"trace_id": "trace-1", "name": "human_rank", "value": 1.0, "data_type": "NUMERIC", "comment": "clearest",
+         "score_id": "human_rank-trace-1"},
+    ]
+
+
+def test_score_reports_whether_it_was_sent():  # langfuse-experiments EC17: failed posts are counted
+    assert Tracer(FakeClient()).score("trace-1", "human_rank", 2.0) is True
+    assert not Tracer(FakeClient(fail=True)).score("trace-1", "human_rank", 2.0)
+    assert Tracer(None).score("trace-1", "human_rank", 2.0) is False
+    assert Tracer(FakeClient()).score(None, "human_rank", 2.0) is False
+
+
 def test_the_trace_output_is_set_on_the_current_trace(tracer, client):  # eval-langfuse readable traces
     with tracer.trace("eval-case", user_id="eval", session_id="run-1"):
         tracer.set_trace_output({"verdict": "PASS"})
@@ -453,6 +470,117 @@ def test_upserting_twice_sends_the_same_ids_so_nothing_duplicates(tracer, client
 def test_upsert_dataset_reports_false_when_off_or_failing_and_never_raises():  # eval-langfuse AC7, EC2
     assert Tracer(None).upsert_dataset("d", ITEMS) is False
     assert Tracer(FakeClient(fail=True)).upsert_dataset("d", ITEMS) is False
+
+
+# --- experiments (langfuse-experiments Step 1) ------------------------------------------------------------------
+
+
+def experiment(tracer, items=ITEMS, **overrides):
+    """Runs `tracer.run_experiment` with a task that echoes the item id, and records the ids it saw."""
+    seen: list[str] = []
+
+    def task(*, item, **_):
+        seen.append(item.id)
+        return {"id": item.id}
+
+    fields = {
+        "dataset": "interviews-eval/write", "items": items, "name": "write", "run_name": "write/r1", "task": task,
+        "metadata": {"task": "write", "repeat": "1"},
+    }
+    return tracer.run_experiment(**{**fields, **overrides}), seen
+
+
+def test_an_experiment_runs_every_current_item_once_as_a_named_run():  # AC1
+    lf = FakeLangfuse()
+
+    record, seen = experiment(Tracer(lf, propagate=lambda **_: nullcontext()))
+
+    assert seen == ["write:strong-1", "write:vague-1"]
+    assert record.run_name == "write/r1" and record.url == "https://langfuse.test/experiments/write/r1"
+    assert record.trace_ids == {"write:strong-1": "trace-write/r1-write:strong-1", "write:vague-1": "trace-write/r1-write:vague-1"}
+
+
+def test_an_experiment_is_a_no_op_returning_none_when_tracing_is_off():  # AC8, EC1
+    record, seen = experiment(Tracer(None))
+
+    assert record is None and seen == []
+
+
+def quiet(client):
+    return Tracer(client, propagate=lambda **_: nullcontext())
+
+
+def test_items_run_in_the_callers_order_even_when_langfuse_returns_them_reversed():  # AC6
+    _, seen = experiment(quiet(FakeLangfuse(reverse_fetch=True)))
+
+    assert seen == ["write:strong-1", "write:vague-1"]
+
+
+def test_a_case_removed_from_the_file_is_not_run_although_its_item_stays_in_langfuse():  # AC9, EC6
+    lf = FakeLangfuse()
+    experiment(quiet(lf))
+
+    _, seen = experiment(quiet(lf), items=ITEMS[:1], run_name="write/r2")
+
+    assert seen == ["write:strong-1"]
+    assert set(lf.datasets["interviews-eval/write"]) == {"write:strong-1", "write:vague-1"}
+
+
+def test_an_edited_case_updates_its_item_and_the_run_sees_the_new_input():  # AC9, EC7
+    lf = FakeLangfuse()
+    experiment(quiet(lf))
+    edited = [{**ITEMS[0], "input": {"answer": "edited"}}, ITEMS[1]]
+    inputs = []
+
+    quiet(lf).run_experiment(
+        dataset="interviews-eval/write", items=edited, name="write", run_name="write/r2",
+        task=lambda *, item, **_: inputs.append(item.input),
+    )
+
+    assert inputs[0] == {"answer": "edited"} and len(lf.datasets["interviews-eval/write"]) == 2
+
+
+def test_the_run_goes_out_one_item_at_a_time_with_its_name_description_and_metadata():  # AC2, AC6, AC21
+    lf = FakeLangfuse()
+
+    experiment(quiet(lf), description="new follow-up prompt; expect fewer over-probes")
+
+    [run] = lf.experiments
+    assert run["max_concurrency"] == 1
+    assert (run["name"], run["run_name"]) == ("write", "write/r1")
+    assert run["description"] == "new follow-up prompt; expect fewer over-probes"
+    assert run["metadata"] == {"task": "write", "repeat": "1"}
+
+
+def test_item_and_run_evaluators_reach_the_run():  # AC3
+    lf = FakeLangfuse()
+
+    experiment(
+        quiet(lf),
+        evaluators=[lambda *, output, **_: {"name": "seen", "value": 1.0, "data_type": "NUMERIC"}],
+        run_evaluators=[lambda *, item_results, **_: {"name": "count", "value": float(len(item_results))}],
+    )
+
+    assert [s["name"] for s in lf.item_scores("write/r1")] == ["seen", "seen"]
+    assert lf.run_score("write/r1", "count")["value"] == 2.0
+
+
+@pytest.mark.parametrize(
+    ("client", "ran"),
+    [
+        (FakeLangfuse(fail_upsert=True), []),  # EC3: the sync failed, nothing ran
+        (FakeLangfuse(missing={"write:vague-1"}), []),  # an item missing after the sync: never a partial run
+        (FakeLangfuse(fail_run=True), []),  # EC2: Langfuse failed when the run started
+        (FakeLangfuse(fail_after=1), ["write:strong-1"]),  # EC2: Langfuse failed mid-run
+    ],
+)
+def test_a_langfuse_failure_returns_none_never_raises_and_logs_the_class_only(client, ran, app_logs):  # EC2, EC3
+    record, seen = experiment(quiet(client))
+
+    assert record is None and seen == ran
+    messages = [r.getMessage() for r in app_logs.records if r.name == "app.llm"]
+    assert messages and all("RuntimeError" in m or "missing" in m for m in messages)
+    assert not any("langfuse down" in m or "lost the run" in m for m in messages)
 
 
 # --- flush / shutdown -------------------------------------------------------------------------------------------

@@ -14,7 +14,7 @@ Full prompt and reply text is sent on purpose (owner's decision, see docs/featur
 import logging
 from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, ExitStack, aclosing, contextmanager
-from typing import Any
+from typing import Any, NamedTuple
 
 from .provider import ChatMessage, LLMError, LLMProvider, LLMResult, ReasoningEffort
 
@@ -24,6 +24,15 @@ logger = logging.getLogger("app.llm")
 TraceLabels = Mapping[str, str | int | None]
 
 DEFAULT_GENERATION_NAME = "llm-call"
+
+
+class ExperimentRun(NamedTuple):
+    """What a recorded experiment run left behind: its name and link, and the trace of each item (by item id)."""
+
+    run_name: str
+    experiment_id: str
+    url: str | None
+    trace_ids: dict[str, str]
 
 
 def _safe(action: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -205,10 +214,13 @@ class Tracer:
         value: bool | float,
         *,
         comment: str | None = None,
-    ) -> None:
-        """Attach a score to a trace (a bool becomes a Langfuse BOOLEAN). No-op when off or without a trace id."""
+        score_id: str | None = None,
+    ) -> bool:
+        """Attach a score to a trace (a bool becomes a Langfuse BOOLEAN). A stable `score_id` makes a repost update the
+        score instead of adding a second one. Returns whether it was sent: False when off or without a trace id, None
+        (falsy) when Langfuse failed."""
         if self._client is None or trace_id is None:
-            return
+            return False
         is_bool = isinstance(value, bool)
         self._client.create_score(
             trace_id=trace_id,
@@ -216,7 +228,9 @@ class Tracer:
             value=float(value),
             data_type="BOOLEAN" if is_bool else "NUMERIC",
             comment=comment,
+            **({"score_id": score_id} if score_id else {}),
         )
+        return True
 
     def upsert_dataset(self, name: str, items: Sequence[Mapping[str, Any]]) -> bool:
         """Create the dataset if needed and upsert its items (each carries its own `id`, so re-runs never duplicate).
@@ -231,6 +245,49 @@ class Tracer:
             logger.warning("langfuse dataset upsert failed (%s)", type(exc).__name__)
             return False
         return True
+
+    def run_experiment(
+        self,
+        *,
+        dataset: str,
+        items: Sequence[Mapping[str, Any]],
+        name: str,
+        run_name: str,
+        task: Callable[..., Any],
+        evaluators: Sequence[Callable[..., Any]] = (),
+        run_evaluators: Sequence[Callable[..., Any]] = (),
+        metadata: Mapping[str, str] | None = None,
+        description: str | None = None,
+    ) -> ExperimentRun | None:
+        """Run `task` once per item as one Langfuse experiment run (a dataset run the UI can compare), one item at a
+        time and in the order given. The dataset is synced from `items` first and only those ids are run, so a case
+        removed from the file is never run again. Returns None when nothing was recorded (off, sync failed, an item
+        missing after the sync, or the run failed); the caller then runs what is left locally. Never raises."""
+        if self._client is None or not self.upsert_dataset(dataset, items):
+            return None
+        try:
+            fetched = {item.id: item for item in self._client.get_dataset(dataset).items}
+            data = [fetched.get(item["id"]) for item in items]
+            if any(item is None for item in data):
+                logger.warning("langfuse experiment skipped (dataset items missing after the sync)")
+                return None
+            result = self._client.run_experiment(
+                name=name,
+                run_name=run_name,
+                description=description,
+                data=data,
+                task=task,
+                evaluators=list(evaluators),
+                run_evaluators=list(run_evaluators),
+                # One at a time: free-tier rate limits, and cases that read an earlier case's result.
+                max_concurrency=1,
+                metadata=dict(metadata or {}),
+            )
+            trace_ids = {r.item.id: r.trace_id for r in result.item_results}
+            return ExperimentRun(result.run_name, result.experiment_id, result.experiment_url, trace_ids)
+        except Exception as exc:  # noqa: BLE001  fail-open like every Tracer call: Langfuse must not stop an eval
+            logger.warning("langfuse experiment failed (%s)", type(exc).__name__)
+            return None
 
     def start_generation(
         self,

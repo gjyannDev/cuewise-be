@@ -3,8 +3,7 @@ Langfuse helpers run against a fake grader; real-model runs are opt-in and never
 
 import json
 import re
-from contextlib import contextmanager, nullcontext
-from types import SimpleNamespace
+from contextlib import nullcontext
 
 import pytest
 
@@ -15,9 +14,11 @@ from app.modules.interviews.ai.interviews_feedback_turn import hint_for
 from app.modules.interviews.constants.interviews_constants import (
     CATEGORY_CRITERIA,
     FEEDBACK_SCORE_PROMPT_VERSION,
+    FEEDBACK_WRITE_PROMPT_VERSION,
     Criterion,
     QuestionCategory,
 )
+from app.modules.interviews.tooling import interviews_evals as evals_module
 from app.modules.interviews.tooling.interviews_evals import main
 from app.modules.interviews.tooling.interviews_feedback_evals import (
     FEEDBACK_DATASET,
@@ -28,7 +29,6 @@ from app.modules.interviews.tooling.interviews_feedback_evals import (
     criterion_spread,
     feedback_dataset_items,
     feedback_scores_for,
-    feedback_trace_input,
     feedback_trace_output,
     level_gap_check,
     load_feedback_cases,
@@ -36,6 +36,7 @@ from app.modules.interviews.tooling.interviews_feedback_evals import (
     summarize_feedback,
 )
 from app.modules.interviews.utils.interviews_utils import load_prompt
+from tests.fake_langfuse import FakeLangfuse
 
 SCORE_MARKER = load_prompt(FEEDBACK_SCORE_PROMPT_VERSION).splitlines()[1].split("{{")[0]
 CASES = load_feedback_cases(FEEDBACK_EVAL_CASES_PATH)
@@ -263,12 +264,10 @@ def test_the_dataset_items_carry_the_interview_and_the_expected_bands():
     assert first["expected_output"]["criteria"]["1:outcome"] == {"low": 4, "high": 5}
 
 
-def test_trace_input_output_and_scores_are_readable():
+def test_the_output_and_scores_are_readable():
     c = case("strong-behavioral")
     result = run_feedback_case(Grader(1), c, **RUN)
 
-    shown = feedback_trace_input(c)
-    assert shown == {"kind": "strong", "role": "backend", "level": "junior", "interview_type": "behavioral", "questions": 2}
     output = feedback_trace_output(c, result)
     assert output["verdict"].startswith("FAIL: ") and output["overall"] == 1.0
     assert output["expected_overall"] == {"low": 3.5, "high": 5.0} and output["scores"]["1:outcome"] == 1
@@ -327,107 +326,124 @@ def test_a_case_scored_when_it_should_not_have_been_points_at_the_pre_check():
     assert any("pre-check" in h for h in feedback_trace_output(c, result)["hints"])
 
 
-class RecordingClient:
-    """Records traces (spans), steps (chains) and checks (guardrails) apart, like the Langfuse UI shows them."""
-
-    def __init__(self, fail=False):
-        self.fail = fail
-        self.traces, self.scores, self.outputs, self.datasets, self.items = [], [], {}, [], []
-        self.steps, self.checks = [], []
-
-    @contextmanager
-    def start_as_current_observation(self, **kwargs):
-        if self.fail:
-            raise RuntimeError("langfuse down")
-        if kwargs.get("as_type") == "chain":
-            step = {**kwargs, "trace": self.current}
-            self.steps.append(step)
-            yield SimpleNamespace(update=lambda **fields: step.update(fields))
-            return
-        trace_id = f"trace-{len(self.traces) + 1}"
-        self.traces.append({**kwargs, "trace_id": trace_id})
-        self.current = trace_id
-        yield SimpleNamespace(trace_id=trace_id)
-
-    def start_observation(self, **kwargs):
-        self.checks.append({**kwargs, "trace": self.current})
-        return SimpleNamespace(end=lambda: None)
-
-    def update_current_span(self, **kwargs):
-        self.outputs[self.current] = kwargs["output"]
-
-    def create_score(self, **kwargs):
-        self.scores.append(kwargs)
-
-    def create_dataset(self, **kwargs):
-        if self.fail:
-            raise RuntimeError("langfuse down")
-        self.datasets.append(kwargs["name"])
-
-    def create_dataset_item(self, **kwargs):
-        self.items.append(kwargs)
-
-    def flush(self):
-        pass
-
-    def shutdown(self):
-        pass
+@pytest.fixture
+def lf(monkeypatch):
+    """A fake Langfuse client and a fixed git state (feedback runs as a Langfuse experiment, langfuse-experiments Step 10)."""
+    monkeypatch.setattr(evals_module, "git_commit", lambda: "abc1234")
+    return FakeLangfuse()
 
 
 def run_main(client, argv, provider):
-    return main(["--task", "feedback", *argv], provider=provider, tracer=Tracer(client, propagate=lambda **_: nullcontext()))
+    tracer = Tracer(client, propagate=lambda **_: nullcontext()) if client is not None else Tracer(None)
+    return main(["--task", "feedback", *argv], provider=provider, tracer=tracer)
 
 
-def test_main_runs_every_case_traces_it_and_mirrors_the_dataset(capsys):  # AC22, plan step 8
-    client = RecordingClient()
+def trace_of(client, case_id, repeat=1):
+    run = client.experiments[repeat - 1]["run_name"]
+    return f"trace-{run}-feedback:{case_id}"
 
-    assert run_main(client, [], Grader(4)) == 0
 
-    assert [t["name"] for t in client.traces] == [f"feedback: {c.id}" for c in CASES]
-    assert client.datasets == [FEEDBACK_DATASET] and len(client.items) == len(CASES)
-    names = {s["name"] for s in client.scores if s["trace_id"] == "trace-1"}
-    assert {"valid_reply", "overall_in_band", "quotes_verified", "write_valid", "case_passed"} <= names
-    first_case = [s for s in client.steps if s["trace"] == "trace-1"]
-    assert [s["name"] for s in first_case] == ["score", "write"]  # each case trace shows both steps
-    assert first_case[0]["output"]["outcome"] == "ok" and first_case[1]["output"]["text_source"] == "llm"
-    assert [c["name"] for c in client.checks if c["trace"] == "trace-1"] == ["check-score-reply", "check-write-reply"]
+def scores_on(client, case_id, repeat=1):
+    trace_id = trace_of(client, case_id, repeat)
+    return {s["name"]: s for s in client.scores if s.get("trace_id") == trace_id and "run_name" in s}
+
+
+def test_main_runs_every_case_as_one_run_and_mirrors_the_dataset(lf, capsys):  # AC15, eval-langfuse plan step 8
+    assert run_main(lf, [], Grader(4)) == 0
+
+    [run] = lf.experiments
+    assert run["item_ids"] == [f"feedback:{c.id}" for c in CASES]
+    assert set(lf.datasets) == {FEEDBACK_DATASET} and len(lf.datasets[FEEDBACK_DATASET]) == len(CASES)
+    names = set(scores_on(lf, CASES[0].id))
+    assert {"valid_reply", "overall_in_band", "quotes_verified", "write_valid", "case_passed", "errored"} <= names
+    first = f"feedback:{CASES[0].id}"
+    steps = [o for o in lf.observations if o.get("as_type") == "chain" and o["item"] == first]
+    assert [s["name"] for s in steps] == ["score", "write"]  # each case's result shows both steps under it
+    assert steps[0]["output"]["outcome"] == "ok" and steps[1]["output"]["text_source"] == "llm"
+    checks = [o["name"] for o in lf.observations if str(o.get("name", "")).startswith("check-") and o["item"] == first]
+    assert checks == ["check-score-reply", "check-write-reply"]
     out = capsys.readouterr().out
     assert "valid replies" in out and "overall in band" in out
 
 
-def test_with_repeats_the_spread_is_printed_and_scored_on_each_cases_last_trace(capsys):  # AC22
-    client = RecordingClient()
+def test_each_run_carries_both_prompts_and_its_settings(lf):  # AC2, AC15
+    run_main(lf, ["--repeat", "2", "--note", "rubric v3"], Grader(4))
+
+    first, second = lf.experiments
+    assert first["run_name"].startswith(f"feedback/{FEEDBACK_SCORE_PROMPT_VERSION}/") and first["run_name"].endswith("/r1")
+    meta = first["metadata"]
+    assert (meta["prompt.score"], meta["prompt.write"]) == (FEEDBACK_SCORE_PROMPT_VERSION, FEEDBACK_WRITE_PROMPT_VERSION)
+    assert {"flag.score_max_tokens", "flag.write_max_tokens", "flag.score_temperature", "flag.budget_seconds"} <= set(meta)
+    assert (meta["note"], first["description"], second["metadata"]["repeat"]) == ("rubric v3", "rubric v3", "2")
+
+
+def test_the_run_scores_equal_the_console_summary(lf, capsys):  # AC15
+    run_main(lf, [], Grader(4))
+
+    out = capsys.readouterr().out
+    line = re.search(r"passed (\d+)/(\d+)  valid replies (\d+)/\d+  overall in band (\d+)/(\d+).*"
+                     r"quotes rejected (\d+)  template texts (\d+)", out)
+    passed, total, valid, in_band, labelled, rejected, templates = (int(n) for n in line.groups())
+    run = lf.experiments[0]["run_name"]
+    assert lf.run_score(run, "pass_rate")["value"] == pytest.approx(passed / total)
+    assert lf.run_score(run, "valid_reply_rate")["value"] == pytest.approx(valid / total)
+    assert lf.run_score(run, "overall_in_band_rate")["value"] == pytest.approx(in_band / labelled)
+    assert lf.run_score(run, "quotes_rejected_count")["value"] == rejected
+    assert lf.run_score(run, "template_text_count")["value"] == templates
+    assert lf.run_score(run, "errored_count")["value"] == 0.0
+
+
+def test_cases_run_in_file_order_so_the_senior_case_finds_its_junior_pair(monkeypatch, capsys):  # AC6, AC15
+    monkeypatch.setattr(evals_module, "git_commit", lambda: "abc1234")
+    reversed_fetch = FakeLangfuse(reverse_fetch=True)
+
+    run_main(reversed_fetch, [], Grader(3))  # the same score at both levels: no gap
+
+    assert reversed_fetch.task_calls == [f"feedback:{c.id}" for c in CASES]
+    gap = scores_on(reversed_fetch, "same-answer-senior")["level_gap"]
+    assert gap["value"] == 0.0
+    assert "level_gap(3.0 vs same-answer-junior 3.0: gap 0, needs 0.5)" in capsys.readouterr().out
+
+
+def test_with_repeats_the_spread_is_printed_and_posted_on_each_cases_last_run(lf, capsys):  # AC15, AC22 (feedback)
     scored_cases = [c for c in CASES if not c.expect_insufficient]
     values = [3] * len(scored_cases) + [5] * len(scored_cases)
 
-    run_main(client, ["--repeat", "2"], Grader(score_values=values))
+    run_main(lf, ["--repeat", "2"], Grader(score_values=values))
 
-    spreads = [s for s in client.scores if s["name"] == "criterion_spread_max"]
+    spreads = [s for s in lf.scores if s["name"] == "criterion_spread_max"]
     assert len(spreads) == len(scored_cases) and all(s["value"] == 2.0 for s in spreads)
+    last_run = lf.experiments[1]["run_name"]
+    assert all(s["trace_id"].startswith(f"trace-{last_run}-") for s in spreads)
+    assert all(s["score_id"] == f"criterion_spread_max-{s['trace_id']}" for s in spreads)
     assert "criterion spread" in capsys.readouterr().out
 
 
-def test_a_langfuse_outage_does_not_change_the_run(capsys):
-    assert run_main(RecordingClient(fail=True), [], Grader(4)) == 0
-    assert "overall in band" in capsys.readouterr().out
+def test_a_single_run_posts_no_spread(lf):  # EC19
+    run_main(lf, [], Grader(4))
+
+    assert not [s for s in lf.scores if s["name"] == "criterion_spread_max"]
 
 
-def test_the_console_shows_a_failing_cases_hints(capsys):
-    run_main(RecordingClient(), [], Grader(1))
+def test_a_langfuse_outage_does_not_change_the_run(monkeypatch, capsys):  # EC2
+    monkeypatch.setattr(evals_module, "git_commit", lambda: "abc1234")
+
+    assert run_main(FakeLangfuse(fail_run=True), [], Grader(4)) == 0
 
     out = capsys.readouterr().out
-    assert "hint: The overall is outside the expected band" in out
+    assert "overall in band" in out and out.rstrip("\n").splitlines()[-1].startswith("Langfuse: not recorded")
 
 
-def test_a_run_scores_the_level_gap_on_the_higher_levels_trace(capsys):
-    client = RecordingClient()
+def test_without_keys_the_last_line_says_nothing_was_recorded(capsys):  # AC8
+    assert run_main(None, [], Grader(4)) == 0
 
-    run_main(client, [], Grader(3))  # the same score at both levels: no gap
+    assert capsys.readouterr().out.rstrip("\n").splitlines()[-1] == "Langfuse: not recorded (no LANGFUSE keys set)."
 
-    senior_trace = f"trace-{[c.id for c in CASES].index('same-answer-senior') + 1}"
-    gaps = [s for s in client.scores if s["name"] == "level_gap"]
-    assert [(s["trace_id"], s["value"]) for s in gaps] == [(senior_trace, False)]
-    assert "level_gap(3.0 vs same-answer-junior 3.0: gap 0, needs 0.5)" in capsys.readouterr().out
+
+def test_the_console_shows_a_failing_cases_hints(lf, capsys):
+    run_main(lf, [], Grader(1))
+
+    assert "hint: The overall is outside the expected band" in capsys.readouterr().out
 
 
 def test_the_existing_tasks_are_unchanged():

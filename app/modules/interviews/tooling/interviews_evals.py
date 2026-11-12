@@ -19,12 +19,15 @@ runner reports accuracy, over-probing (a follow-up nobody needed) and under-prob
 The stream task runs the same write cases through the streamed turn's call (interviewer_v5, read with `stream()`):
 the same rule checks as `write`, so v4 and v5 compare on one table, plus the time to the first visible token.
 
-With LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY set, a run is also sent to Langfuse (environment "eval"): each case is
-one trace in a session named after the run (task/prompt/strategy/model/effort/time), tagged with those same values, and
-every check is a boolean score on it (`case_passed`, plus `over_probing` / `under_probing` for decide). The cases are
-mirrored into the datasets `interviews-eval/write` and `interviews-eval/decide` (ids `write:<case id>`), so re-runs
-replace items instead of duplicating them. In Langfuse, compare runs by filtering traces on a tag (e.g. `prompt:...`)
-and grouping scores. Without keys nothing changes and nothing is sent. A Langfuse failure never fails the run.
+With LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY set, a run is also sent to Langfuse. The decide task runs as a
+Langfuse *experiment*: each repeat is one run of the dataset `interviews-eval/decide`, one result per case, so two runs
+can be compared case by case on the Experiments page (environment `sdk-experiment`). Each run's metadata records what
+produced it (commit, model, prompt version, flags, repeat), `--note` becomes its description, every case carries its
+check scores plus `over_probing`, `under_probing` and `errored`, and the run carries `pass_rate`, `decision_accuracy`
+and the error counts. The other tasks still send one trace per case to a session named after the run
+(task/prompt/strategy/model/effort/time, environment "eval"), with the same boolean scores, until they move too
+(docs/features/langfuse-experiments). Without keys nothing changes and nothing is sent; the last console line says what
+was recorded. A Langfuse failure never fails the run.
 """
 
 import argparse
@@ -34,7 +37,6 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -44,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from app.core.ai.context import ContextManager, ContextTooLargeError
 from app.core.ai.provider import LLMError, LLMProvider, LLMResult, ReasoningEffort
-from app.core.ai.tracing import Tracer
+from app.core.ai.tracing import ExperimentRun, Tracer
 
 from ..ai.interviews_context import (
     CONTEXT_MANAGER,
@@ -61,12 +63,17 @@ from ..ai.interviews_reply import (
     validate_summary,
 )
 from ..constants.interviews_constants import (
+    DECISION_PROMPT_VERSION,
     DECISION_TASK,
     FULL_HISTORY,
+    INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_STREAM_TASK,
     INTERVIEWER_TASK,
+    INTERVIEWER_V4_PROMPT_VERSION,
+    INTERVIEWER_V5_PROMPT_VERSION,
     MODULE_DIR,
     PROMPTS_DIR,
+    SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
     SUMMARY_THRESHOLD,
     WINDOW_LEDGER,
@@ -79,11 +86,20 @@ from ..constants.interviews_constants import (
     QuestionKind,
 )
 from ..utils.interviews_utils import QuestionTurn
+from .interviews_eval_runs import (
+    Score,
+    final_line,
+    git_commit,
+    run_cases,
+    run_description,
+    run_metadata,
+    run_name,
+    run_stamp,
+)
 from .interviews_rag_evals import RAG_TASKS, run_rag_task
 
 EVAL_CASES_PATH = MODULE_DIR / "data" / "eval_cases.json"
-# In Langfuse: the user every eval trace belongs to, and the prefix of the dataset each task's cases are mirrored to.
-EVAL_USER = "eval"
+# In Langfuse: the prefix of the dataset each task's cases are mirrored to.
 DATASET_PREFIX = "interviews-eval"
 # Cases this long are printed with their setup, for the manual quality review.
 LONG_HISTORY = 8
@@ -601,16 +617,6 @@ def verdict_for(result: CaseResult) -> str:
     return f"FAIL: {', '.join(failed)}" if failed else "PASS"
 
 
-def trace_input(case: EvalCase) -> dict:
-    """What the case judged, for the trace list: its kind, the last question and the candidate's answer (and the job
-    description when there is one, since some cases attack through it)."""
-    last = case.history[-1] if case.history else None
-    shown = {"kind": case.kind, "question": last.question if last else None, "answer": last.answer if last else None}
-    if case.job_description:
-        shown["job_description"] = case.job_description[:300]
-    return shown
-
-
 def _action_and_gap(action: str | None, gap: str | None) -> str | None:
     return None if action is None else f"{action} / {gap}" if gap else str(action)
 
@@ -701,6 +707,24 @@ def scores_for(result: CaseResult) -> list[tuple[str, bool, str | None]]:
     return scores
 
 
+def experiment_scores_for(result: CaseResult) -> list[Score]:
+    """A case's scores in an experiment run: `scores_for`, plus `errored` so infrastructure failures (rate limits,
+    provider errors) can be filtered out of quality numbers in Langfuse."""
+    return [*scores_for(result), ("errored", result.error is not None, result.error)]
+
+
+def decide_run_scores(results: Sequence[CaseResult]) -> list[tuple[str, float]]:
+    """The run-level numbers of a decide run, from the same summaries the console prints."""
+    summary, decisions = summarize(results), summarize_decisions(results)
+    return [
+        ("pass_rate", summary.passed / summary.total),
+        ("decision_accuracy", decisions.correct / decisions.labelled),
+        ("over_probing_count", decisions.over_probing),
+        ("under_probing_count", decisions.under_probing),
+        ("errored_count", sum(r.error is not None for r in results)),
+    ]
+
+
 def dataset_name(task: str) -> str:
     """The stream task reads the same cases as write, so they share one dataset."""
     return f"{DATASET_PREFIX}/{'decide' if task == 'decide' else 'write'}"
@@ -719,17 +743,6 @@ def dataset_items(cases: Sequence[EvalCase], task: str) -> list[dict]:
             "metadata": {"kind": case.kind, "notes": case.notes},
         }
         for case in cases
-    ]
-
-
-def run_tags(args: argparse.Namespace, model: str | None) -> list[str]:
-    """The tags that make runs comparable in Langfuse: what was run, and with which prompt, strategy, model, effort."""
-    return [
-        f"task:{args.task}",
-        f"prompt:{args.prompt or 'default'}",
-        f"strategy:{args.strategy or 'default'}",
-        f"model:{model or 'default'}",
-        f"effort:{args.reasoning_effort or '-'}",
     ]
 
 
@@ -757,6 +770,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--notes", choices=["on", "off"], default="on")
     parser.add_argument("--summary", choices=["on", "off"], default="on")
     parser.add_argument("--repeat", type=_positive, default=1)
+    parser.add_argument(
+        "--note",
+        help="why you are running this (and what you expect): saved as the Langfuse run's description",
+    )
     parser.add_argument(
         "--task",
         choices=["write", "decide", "stream", "feedback", *RAG_TASKS],
@@ -820,55 +837,30 @@ def main(
     )
     decide = args.task == "decide"
     runs, decisions = [], []
-    # Every trace of this run shares one Langfuse session, named by what was run and when.
-    label = "/".join(
-        [
-            args.task,
-            args.prompt or "default",
-            args.strategy or "default",
-            model or "default",
-            args.reasoning_effort or "-",
-            datetime.now(UTC).strftime("%Y%m%d-%H%M%S"),
-        ]
-    )
-    tags = run_tags(args, model)
+    records: list[ExperimentRun | None] = []
     # One event loop for every streamed call, so the provider's async connections are reused, never moved between loops.
     with start_blocking_portal() as portal:
         try:
+            stamp = run_stamp()
+            # Read only when a run is recorded: it goes into the run's metadata.
+            commit = git_commit() if tracer.enabled else "unknown"
             if args.task == "feedback":
                 # Its own cases, checks and summary (interviews_feedback_evals.py); imported here to avoid a cycle.
                 from ..tooling.interviews_feedback_evals import run_feedback
 
-                run_feedback(args, provider, tracer, settings, label=label, tags=tags)
+                run_feedback(args, provider, tracer, settings, model=model, commit=commit, stamp=stamp)
                 return 0
             cases = load_cases(EVAL_CASES_PATH)
             if decide:
                 cases = [c for c in cases if c.expect]
-            if tracer.enabled:
-                tracer.upsert_dataset(dataset_name(args.task), dataset_items(cases, args.task))
             for run in range(1, args.repeat + 1):
                 print(f"=== run {run}/{args.repeat}")
-                results = []
-                for case in cases:
-                    with tracer.trace(
-                        f"{args.task}: {case.id}",
-                        user_id=EVAL_USER,
-                        session_id=label,
-                        input=trace_input(case),
-                        tags=tags,
-                        metadata={
-                            "case_id": case.id,
-                            "repeat": str(run),
-                            "notes": args.notes,
-                            "summary": args.summary,
-                        },
-                    ) as trace_id:
-                        result = _run_one(provider, case, args, context, settings.llm_max_tokens, portal)
-                        tracer.set_trace_output(trace_output(case, result, args.task))
-                    for name, value, comment in scores_for(result):
-                        tracer.score(trace_id, name, value, comment=comment)
-                    results.append(result)
-                    _print_case(case, result)
+                # Each repeat is one Langfuse experiment run (langfuse-experiments).
+                results, record = _run_as_experiment(
+                    provider, cases, args, context, settings.llm_max_tokens, portal, tracer,
+                    model=model, commit=commit, stamp=stamp, repeat=run,
+                )  # fmt: skip
+                records.append(record)
                 runs.append(summarize(results))
                 _print_summary(runs[-1])
                 if decide:
@@ -890,9 +882,94 @@ def main(
             f"over_probing={sum(d.over_probing for d in decisions)} "
             f"under_probing={sum(d.under_probing for d in decisions)} (over all runs)"
         )
-    if tracer.enabled:
-        print(f"\nLangfuse session: {label}")
+    print(f"\n{final_line(records, enabled=tracer.enabled)}")
     return 0
+
+
+def interviewer_prompt_version(task: str, strategy: str | None, prompt: str | None) -> str:
+    """The interviewer prompt a write or stream run actually used: `--prompt` for the chosen strategy, else the
+    strategy's default (window_ledger: v4, full_history: v1); the streamed turn always uses v5 (no reference notes in
+    the eval cases)."""
+    if task == "stream":
+        return INTERVIEWER_V5_PROMPT_VERSION
+    if prompt:
+        return prompt
+    return INTERVIEWER_V4_PROMPT_VERSION if (strategy or WINDOW_LEDGER) == WINDOW_LEDGER else INTERVIEWER_PROMPT_VERSION
+
+
+def write_run_scores(results: Sequence[CaseResult]) -> list[tuple[str, float]]:
+    """The run-level numbers of a write or stream run, from the summary the console prints."""
+    summary = summarize(results)
+    scores = [
+        ("pass_rate", summary.passed / summary.total),
+        ("errored_count", sum(r.error is not None for r in results)),
+        ("finish_length_count", summary.finish_length),
+        ("avg_latency_ms", summary.average_latency_ms),
+    ]
+    if summary.average_first_token_ms is not None:
+        scores.append(("avg_first_token_ms", summary.average_first_token_ms))
+    return scores
+
+
+def _run_as_experiment(
+    provider: LLMProvider,
+    cases: Sequence[EvalCase],
+    args: argparse.Namespace,
+    context: ContextManager,
+    max_tokens: int,
+    portal: BlockingPortal,
+    tracer: Tracer,
+    *,
+    model: str | None,
+    commit: str,
+    stamp: str,
+    repeat: int,
+) -> tuple[list[CaseResult], ExperimentRun | None]:
+    """One repeat of a moved task as one Langfuse experiment run: same cases, same console lines, plus a run that
+    carries what produced it and the scores the console summary is built from."""
+    item_by_case = dict(zip((c.id for c in cases), dataset_items(cases, args.task), strict=True))
+    description = run_description(args.note)
+    flags: dict[str, object] = {"reasoning_effort": args.reasoning_effort, "max_tokens": max_tokens}
+    if args.task == "decide":
+        prompts: dict[str, str | None] = {"decision": DECISION_PROMPT_VERSION}
+        run_scores_of = decide_run_scores
+    else:
+        prompts = {"interviewer": interviewer_prompt_version(args.task, args.strategy, args.prompt)}
+        if args.summary == "on":
+            prompts["summary"] = SUMMARY_PROMPT_VERSION
+        flags |= {"notes": args.notes, "summary": args.summary}
+        if args.task == "write":
+            flags["strategy"] = args.strategy or WINDOW_LEDGER
+        run_scores_of = write_run_scores
+
+    def run_one(case: EvalCase) -> CaseResult:
+        result = _run_one(provider, case, args, context, max_tokens, portal)
+        _print_case(case, result)
+        return result
+
+    return run_cases(
+        tracer,
+        dataset=dataset_name(args.task),
+        cases=cases,
+        item_of=lambda case: item_by_case[case.id],
+        run_one=run_one,
+        output_of=lambda case, result: trace_output(case, result, args.task),
+        scores_of=experiment_scores_for,
+        run_scores_of=run_scores_of,
+        name=args.task,
+        # What a run tests is its main prompt and model: the name says so, so runs can be told apart in a list.
+        run_name=run_name(args.task, stamp, repeat, label=f"{next(iter(prompts.values()))}/{model or 'default-model'}"),
+        metadata=run_metadata(
+            task=args.task,
+            commit=commit,
+            model=model,
+            prompts=prompts,
+            repeat=repeat,
+            flags=flags,
+            extra={"note": description},
+        ),
+        description=description,
+    )
 
 
 def _print_case(case: EvalCase, result: CaseResult) -> None:

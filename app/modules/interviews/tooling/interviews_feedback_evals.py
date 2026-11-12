@@ -18,13 +18,13 @@ import uuid
 from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMProvider, LLMResult
-from app.core.ai.tracing import Tracer
+from app.core.ai.tracing import ExperimentRun, Tracer
 
 from ..ai.interviews_context import (
     CONTEXT_MANAGER,
@@ -41,6 +41,8 @@ from ..ai.interviews_feedback import (
 from ..ai.interviews_feedback_turn import FeedbackGenerator, hint_for
 from ..constants.interviews_constants import (
     CATEGORY_CRITERIA,
+    FEEDBACK_SCORE_PROMPT_VERSION,
+    FEEDBACK_WRITE_PROMPT_VERSION,
     MODULE_DIR,
     SCORE_MAX,
     SCORE_MIN,
@@ -51,7 +53,14 @@ from ..constants.interviews_constants import (
     QuestionKind,
     TextSource,
 )
-from ..tooling.interviews_evals import DATASET_PREFIX, EVAL_USER, Check
+from ..tooling.interviews_evals import DATASET_PREFIX, Check
+from .interviews_eval_runs import (
+    final_line,
+    run_cases,
+    run_description,
+    run_metadata,
+    run_name,
+)
 
 FEEDBACK_EVAL_CASES_PATH = MODULE_DIR / "data" / "feedback_eval_cases.json"
 FEEDBACK_DATASET = f"{DATASET_PREFIX}/feedback"
@@ -338,7 +347,16 @@ def run_feedback_case(
     )
 
 
-def _usage(results: Sequence[LLMResult]) -> dict[str, int]:
+class _Usage(TypedDict):
+    """The four usage fields of FeedbackCaseResult, so `**_usage(...)` is checked field by field."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    latency_ms: int
+    finish_length: int
+
+
+def _usage(results: Sequence[LLMResult]) -> _Usage:
     return {
         "prompt_tokens": sum(r.prompt_tokens or 0 for r in results),
         "completion_tokens": sum(r.completion_tokens or 0 for r in results),
@@ -457,17 +475,6 @@ def feedback_dataset_items(cases: Sequence[FeedbackEvalCase]) -> list[dict[str, 
     ]
 
 
-def feedback_trace_input(case: FeedbackEvalCase) -> dict[str, Any]:
-    setup = case.setup
-    return {
-        "kind": case.kind,
-        "role": setup.role.value,
-        "level": setup.level.value,
-        "interview_type": setup.interview_type.value,
-        "questions": len(case.questions),
-    }
-
-
 def feedback_trace_output(case: FeedbackEvalCase, result: FeedbackCaseResult) -> dict[str, Any]:
     """What came out next to what was wanted: the verdict, the overall against its band, the scores."""
     return {
@@ -497,61 +504,111 @@ def feedback_scores_for(result: FeedbackCaseResult) -> list[tuple[str, bool, str
 
 
 def run_feedback(
-    args: argparse.Namespace, provider: LLMProvider, tracer: Tracer, settings: Any, *, label: str, tags: list[str]
+    args: argparse.Namespace,
+    provider: LLMProvider,
+    tracer: Tracer,
+    settings: Any,
+    *,
+    model: str | None,
+    commit: str,
+    stamp: str,
 ) -> None:
+    """Every case, in file order, once per repeat; each repeat is one Langfuse experiment run of the feedback dataset.
+    The console is unchanged apart from its last line, which names the runs (or says why nothing was recorded)."""
     cases = load_feedback_cases(FEEDBACK_EVAL_CASES_PATH)
     print(
         f"feedback: score_max_tokens={settings.feedback_score_max_tokens} "
         f"write_max_tokens={settings.feedback_write_max_tokens} temperature={settings.feedback_score_temperature} "
         f"budget={settings.feedback_total_budget_seconds}s cases={len(cases)}\n"
     )
-    if tracer.enabled:
-        tracer.upsert_dataset(FEEDBACK_DATASET, feedback_dataset_items(cases))
+    item_by_case = dict(zip((c.id for c in cases), feedback_dataset_items(cases), strict=True))
+    description = run_description(args.note)
     runs: list[list[FeedbackCaseResult]] = []
-    last_trace: dict[str, str | None] = {}
+    records: list[ExperimentRun | None] = []
     for run in range(1, args.repeat + 1):
         print(f"=== run {run}/{args.repeat}")
-        results = []
-        for case in cases:
-            with tracer.trace(
-                f"feedback: {case.id}",
-                user_id=EVAL_USER,
-                session_id=label,
-                input=feedback_trace_input(case),
-                tags=tags,
-                metadata={"case_id": case.id, "repeat": str(run)},
-            ) as trace_id:
-                result = run_feedback_case(
-                    provider,
-                    case,
-                    score_max_tokens=settings.feedback_score_max_tokens,
-                    write_max_tokens=settings.feedback_write_max_tokens,
-                    score_temperature=settings.feedback_score_temperature,
-                    budget_seconds=settings.feedback_total_budget_seconds,
-                    tracer=tracer,
-                )
-                gap = level_gap_check(case, result, {r.case_id: r for r in results})
-                if gap is not None:
-                    result.checks.append(gap)
-                tracer.set_trace_output(feedback_trace_output(case, result))
-            for name, value, comment in feedback_scores_for(result):
-                tracer.score(trace_id, name, value, comment=comment)
-            last_trace[case.id] = trace_id
-            results.append(result)
+        # Cases run in file order, so a later case of a level pair finds its earlier case here.
+        earlier: dict[str, FeedbackCaseResult] = {}
+
+        def run_one(case: FeedbackEvalCase, earlier: dict[str, FeedbackCaseResult] = earlier) -> FeedbackCaseResult:
+            result = run_feedback_case(
+                provider,
+                case,
+                score_max_tokens=settings.feedback_score_max_tokens,
+                write_max_tokens=settings.feedback_write_max_tokens,
+                score_temperature=settings.feedback_score_temperature,
+                budget_seconds=settings.feedback_total_budget_seconds,
+                tracer=tracer,
+            )
+            gap = level_gap_check(case, result, earlier)
+            if gap is not None:
+                result.checks.append(gap)
+            earlier[case.id] = result
             _print_case(result)
+            return result
+
+        results, record = run_cases(
+            tracer,
+            dataset=FEEDBACK_DATASET,
+            cases=cases,
+            item_of=lambda case: item_by_case[case.id],
+            run_one=run_one,
+            output_of=feedback_trace_output,
+            scores_of=lambda result: [*feedback_scores_for(result), ("errored", result.error is not None, result.error)],
+            run_scores_of=feedback_run_scores,
+            name="feedback",
+            run_name=run_name("feedback", stamp, run, label=f"{FEEDBACK_SCORE_PROMPT_VERSION}/{model or 'default-model'}"),
+            metadata=run_metadata(
+                task="feedback",
+                commit=commit,
+                model=model,
+                prompts={"score": FEEDBACK_SCORE_PROMPT_VERSION, "write": FEEDBACK_WRITE_PROMPT_VERSION},
+                repeat=run,
+                flags={
+                    "score_max_tokens": settings.feedback_score_max_tokens,
+                    "write_max_tokens": settings.feedback_write_max_tokens,
+                    "score_temperature": settings.feedback_score_temperature,
+                    "budget_seconds": settings.feedback_total_budget_seconds,
+                },
+                extra={"note": description},
+            ),
+            description=description,
+        )
+        records.append(record)
         runs.append(results)
         _print_summary(summarize_feedback(results))
     if args.repeat > 1:
         spread = criterion_spread(runs)
-        for case_id, value in spread.items():
-            tracer.score(last_trace.get(case_id), "criterion_spread_max", float(value))
+        _post_spread(tracer, records[-1], spread)
         over = sorted(case_id for case_id, value in spread.items() if value > SPREAD_TARGET)
         print(
             f"criterion spread max={max(spread.values(), default=0)} (target <= {SPREAD_TARGET}); "
             f"cases over target: {', '.join(over) or 'none'}"
         )
-    if tracer.enabled:
-        print(f"\nLangfuse session: {label}")
+    print(f"\n{final_line(records, enabled=tracer.enabled)}")
+
+
+def feedback_run_scores(results: Sequence[FeedbackCaseResult]) -> list[tuple[str, float]]:
+    """The run-level numbers of a feedback run, from the summary the console prints."""
+    summary = summarize_feedback(results)
+    in_band = summary.overall_in_band / summary.overall_labelled if summary.overall_labelled else 0.0
+    return [
+        ("pass_rate", summary.passed / summary.total),
+        ("valid_reply_rate", summary.valid / summary.total),
+        ("overall_in_band_rate", in_band),
+        ("quotes_rejected_count", summary.quotes_rejected),
+        ("template_text_count", summary.template_texts),
+        ("errored_count", sum(r.error is not None for r in results)),
+    ]
+
+
+def _post_spread(tracer: Tracer, last_run: ExperimentRun | None, spread: dict[str, int]) -> None:
+    """Each case's spread on its result in the last run, with a stable id so a repost updates it."""
+    if last_run is None:
+        return
+    for case_id, value in spread.items():
+        trace_id = last_run.trace_ids.get(f"feedback:{case_id}")
+        tracer.score(trace_id, "criterion_spread_max", float(value), score_id=f"criterion_spread_max-{trace_id}")
 
 
 def _print_case(result: FeedbackCaseResult) -> None:

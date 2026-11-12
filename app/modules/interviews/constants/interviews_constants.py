@@ -406,6 +406,9 @@ INTERVIEWER_V4_PROMPT_VERSION = "interviewer_v4"
 INTERVIEWER_V5_PROMPT_VERSION = "interviewer_v5"
 INTERVIEWER_STREAM_TASK = "interviewer_stream"
 DECISION_TASK = "follow_up_decision"
+# v2 decides in two steps, completeness first, aimed at fewer needless follow-ups (over-probing). It is an experiment:
+# switch this to "follow_up_decision_v2" only after a v1 baseline run, then compare (docs/evaluation-guide.md §6a). This
+# constant is also what the live app uses.
 DECISION_PROMPT_VERSION = "follow_up_decision_v1"
 SUMMARY_PROMPT_VERSION = "job_description_summary_v2"
 # Starting values, tuned by the eval comparison (docs/features/context-management/learnings.md).
@@ -516,8 +519,18 @@ CLOSING_REACTIONS: dict[LevelGroup, tuple[str, ...]] = {
 
 # --- End-of-interview feedback: a score call (closed JSON), then a write call (plain text) ---
 CATEGORY_CRITERIA: dict[QuestionCategory, tuple[Criterion, ...]] = {
-    QuestionCategory.behavioral: (Criterion.structure, Criterion.specificity, Criterion.ownership, Criterion.outcome),
-    QuestionCategory.technical: (Criterion.correctness, Criterion.depth, Criterion.trade_offs, Criterion.clarity),
+    QuestionCategory.behavioral: (
+        Criterion.structure,
+        Criterion.specificity,
+        Criterion.ownership,
+        Criterion.outcome,
+    ),
+    QuestionCategory.technical: (
+        Criterion.correctness,
+        Criterion.depth,
+        Criterion.trade_offs,
+        Criterion.clarity,
+    ),
 }
 SCORE_MIN = 1
 SCORE_MAX = 5
@@ -542,7 +555,13 @@ STRENGTHS_LABEL = "STRENGTHS"
 IMPROVEMENTS_LABEL = "IMPROVEMENTS"
 NEXT_STEPS_LABEL = "NEXT STEPS"
 NOTES_LABEL = "NOTES"
-SECTION_LABELS = (SUMMARY_LABEL, STRENGTHS_LABEL, IMPROVEMENTS_LABEL, NEXT_STEPS_LABEL, NOTES_LABEL)
+SECTION_LABELS = (
+    SUMMARY_LABEL,
+    STRENGTHS_LABEL,
+    IMPROVEMENTS_LABEL,
+    NEXT_STEPS_LABEL,
+    NOTES_LABEL,
+)
 # Fills {{tone}} in the write prompt, by level group (like the reactions: warmer early on, briefer later).
 FEEDBACK_TONE = {
     LevelGroup.early: "warm and encouraging; they are early in their career, so start with what went well.",
@@ -553,7 +572,10 @@ FEEDBACK_WRITE_TASK = "feedback_write"
 # Langfuse: each call is a step holding its attempts (generations) and the code's check of each reply (guardrails).
 FEEDBACK_SCORE_STEP = "score"
 FEEDBACK_WRITE_STEP = "write"
-FEEDBACK_CHECKS = {FEEDBACK_SCORE_TASK: "check-score-reply", FEEDBACK_WRITE_TASK: "check-write-reply"}
+FEEDBACK_CHECKS = {
+    FEEDBACK_SCORE_TASK: "check-score-reply",
+    FEEDBACK_WRITE_TASK: "check-write-reply",
+}
 # v2 (2026-11-06): one-sentence quotes, no evidence item when no single sentence shows a criterion (eval: a
 # whole-answer `structure` quote broke the 200-character limit on both attempts). v1 stays for comparison.
 FEEDBACK_SCORE_PROMPT_VERSION = "feedback_score_v2"
@@ -586,7 +608,7 @@ CRITERION_LABELS: dict[Criterion, str] = {
 CRITERION_TIPS: dict[Criterion, str] = {
     Criterion.structure: "Tell each story in order: the situation, your task, what you did, and the result.",
     Criterion.specificity: "Use one real example with concrete details: names of tools, numbers, dates.",
-    Criterion.ownership: "Say what you did yourself (\"I\"), not only what the team did (\"we\").",
+    Criterion.ownership: 'Say what you did yourself ("I"), not only what the team did ("we").',
     Criterion.outcome: "End with the result: what changed, ideally with a number, and what you learned.",
     Criterion.correctness: "Check the core facts of your answer, and say so when you are unsure.",
     Criterion.depth: "Explain how it works underneath, not only what it is called.",

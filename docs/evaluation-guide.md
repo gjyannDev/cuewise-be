@@ -1,8 +1,9 @@
 # How to evaluate an AI feature: from the command to the fix
 
 A practical guide for every Cuewise eval: the interviewer's question writing (`write`), the streamed turn (`stream`),
-the follow-up decision (`decide`) and the end-of-interview feedback (`feedback`). Use it again for any AI feature you
-add later (section 10).
+the follow-up decision (`decide`), the end-of-interview feedback (`feedback`) and the knowledge-base retrieval
+(`retrieval`). Use it again for any AI feature you add later (section 10). Every task records each run as a Langfuse
+*experiment run* you compare in the Langfuse UI (section 6a).
 
 An eval run is only useful if each failure leads to a decision. The loop is the same for every task:
 
@@ -26,6 +27,9 @@ right *range*.
 | `stream` | The same cases through the streamed call (`interviewer_v5`) | same 19 | The same rules as `write`, so v4 and v5 compare on one table | pass rate, **time to first token** |
 | `decide` | Follow up or move on, and which gap | the 15 labelled cases in `eval_cases.json` | **Labels** (`expect`): `decision`, `gap`, `valid_reply`, `injection_ignored` | accuracy, **over-probing**, **under-probing**, per-gap |
 | `feedback` | Rubric scores, verified quotes, written feedback | `data/feedback_eval_cases.json` (10) | **Bands** (`expect_overall`, `expect_criteria`), plus `quotes_verified`, `write_valid`, `insufficient`, and `level_gap` for a case paired with an earlier one at a lower level (`lower_than`) | overall in band, valid replies, quotes rejected, template texts, **spread** |
+| `retrieval` | Whether the right reference note comes back for a job description | `data/retrieval_eval_cases.json` (21) | **Rank** of the labelled note, against a filter-only baseline | recall@5, MRR (vector vs filter), threshold sweep |
+
+The knowledge-base `generation` and `ranking` tasks are explained in `docs/features/knowledge-base-rag/`.
 
 Rules can't judge quality. `write` and `stream` print a `review:` line for long-history cases: read those replies
 yourself, because no check can tell whether a question is *good*.
@@ -69,6 +73,8 @@ uv run python -m app.modules.interviews.tooling.interviews_evals --task <write|d
 | `--prompt <version>` | Swaps the **interviewer** prompt for the chosen strategy | **`write` only** |
 | `--strategy` | `window_ledger` or `full_history` | `write` only |
 | `--notes on/off`, `--summary on/off` | Ablations: the running note, and the job description summary | `write`, `stream` |
+| `--note "<why>"` | Why you are running this and what you expect. Saved as the Langfuse run's description, so the reason travels with the numbers (cut to 300 characters) | `decide`, `retrieval` |
+| `--pause-seconds` | Wait between calls (free-tier limits) | `retrieval`, `generation` |
 
 **Trying a new prompt for another task.** `--prompt` doesn't reach `decide`, `stream` or `feedback` yet. Point the
 task's constant in `app/modules/interviews/constants/interviews_constants.py` at the new file for the run, then point it back:
@@ -79,10 +85,11 @@ task's constant in `app/modules/interviews/constants/interviews_constants.py` at
 | `stream` | `INTERVIEWER_V5_PROMPT_VERSION` |
 | `feedback` | `FEEDBACK_SCORE_PROMPT_VERSION`, `FEEDBACK_WRITE_PROMPT_VERSION` |
 
-With Langfuse keys set, the run ends with `Langfuse session: <task>/<prompt>/<strategy>/<model>/<effort>/<time>`. Each
-case is one trace in that session (environment `eval`), and every trace has the tags `task:`, `prompt:`, `strategy:`,
-`model:` and `effort:`. The cases are mirrored into the datasets `interviews-eval/write` (shared with `stream`),
-`interviews-eval/decide` and `interviews-eval/feedback`.
+With Langfuse keys set, each repeat is one **experiment run** (section 6a) and the run's last line reads
+`Langfuse runs: <run name> (<link>); ...`; without keys, or when Langfuse fails, it says why nothing was recorded. The
+console output is otherwise the same with and without keys. The cases are synced into the datasets
+`interviews-eval/write` (shared with `stream`), `interviews-eval/decide`, `interviews-eval/feedback`,
+`interviews-eval/retrieval` and `interviews-eval/generation` before each run.
 
 ---
 
@@ -96,8 +103,8 @@ PASS|FAIL  <case id>   <failed checks with their detail, or the error>
 
 | Task | Line 2 and beyond | Hints in the console? |
 |---|---|---|
-| `write`, `stream` | `tokens=in/out cached reasoning latency_ms finish` (`stream` adds `first_token_ms`), then `reply='...'` and, for long cases, `review:` | No: hints are in the Langfuse trace output |
-| `decide` | The same, with the reply | No: Langfuse trace output (over- or under-probing, injection) |
+| `write`, `stream` | `tokens=in/out cached reasoning latency_ms finish` (`stream` adds `first_token_ms`), then `reply='...'` and, for long cases, `review:` | No: hints are in the case's output in Langfuse |
+| `decide` | The same, with the reply | No: the case's output in Langfuse (over- or under-probing, injection) |
 | `feedback` | `overall insufficient text quotes_rejected tokens latency_ms`, then a `hint:` line per failure | Yes |
 
 **The summary.**
@@ -137,13 +144,15 @@ Sort **every** failure into one of these four types before touching anything. Th
 
 ## 6. Diagnose in Langfuse
 
-Filter on environment `eval`, open the session from the run's last line, and open the trace `<task>: <case id>`. The
-trace **output** holds the verdict, the reply, what was expected and the **hints**. Read those first.
+Open the run from the last line's link (or **Experiments**, environment `sdk-experiment`, the task's dataset), then a
+case's result. Its **output** holds the verdict, the reply, what was expected and the **hints**. Read those first. The
+calls and steps under it are laid out as below (the result's own name comes from the SDK; the shape underneath is
+ours).
 
 **`write`, `stream`, `decide`:**
 
 ```
-write: vague-answer-backend                trace: input = kind, last question and answer (and the job description)
+write:vague-answer-backend                 input = the case (setup, job description, history)
 │                                          output = verdict, reply, decided vs expected (decide), hints, notes
 ├── llm-call                               the job description summary (only for a long job description, --summary on)
 └── llm-call                               the exact prompt and reply, tokens, finish reason
@@ -153,7 +162,7 @@ scores: one boolean per check, case_passed (+ over_probing / under_probing for d
 **`feedback`** has more structure, because one case runs two calls with checks in between:
 
 ```
-feedback: same-answer-senior               output = verdict, overall vs expected band, scores, hints
+feedback:same-answer-senior                output = verdict, overall vs expected band, scores, hints
 ├── score                                  chain: outcome, attempts, quotes_rejected, scores (or hint)
 │   ├── feedback_score (attempt 1)         the exact prompt and reply
 │   ├── check-score-reply                  guardrail: passed, verdict (reason code), hint
@@ -180,6 +189,65 @@ To compare runs, filter traces by a tag (e.g. `prompt:interviewer_v5`) and group
 **Write down the cause in one sentence before fixing it**, e.g. "the model follows up on complete answers that mention
 a tool, because the prompt's 'missing detail' gap is too broad". If you can't write the sentence, you haven't diagnosed
 it yet.
+
+---
+
+## 6a. Compare experiment runs
+
+Every task records each run as a Langfuse **experiment run**: one result per case, linked to the dataset's items, so
+two runs line up case by case. You no longer save the console output and diff files to compare them.
+
+**What every run carries**
+
+- **A name that says what it tested**, then when: `<task>/<main prompt version or setting>/<model>/<local time>/r<n>`
+  (generation adds `/arm-A|B|C`; retrieval uses `threshold-<t>/notes-<fingerprint>` instead of a prompt).
+- **Metadata**: `task`, `commit` (`-dirty` with uncommitted changes, `unknown` without git), `model`, `prompt.*`,
+  `repeat`, `flag.*`, `note`; retrieval and generation add `embedding_model`, `embedding_dimensions`, `threshold`,
+  `notes_fingerprint` (changes when any ingested note changes); generation adds `arm`.
+- **Description**: your `--note`.
+- **`errored`** on every case: a rate limit or provider error counts as a failed case and is flagged, never dropped.
+
+**Scores per task**
+
+| Task | Dataset | Runs per command | Scores per case | Scores per run |
+|---|---|---|---|---|
+| `write` | `interviews-eval/write` | one per repeat | the checks, `case_passed`, `errored` | `pass_rate`, `errored_count`, `finish_length_count`, `avg_latency_ms` |
+| `stream` | `interviews-eval/write` (shared) | one per repeat, `task=stream` | the same | the same + `avg_first_token_ms` |
+| `decide` | `interviews-eval/decide` | one per repeat | the checks, `case_passed`, `over_probing`, `under_probing`, `errored` | `pass_rate`, `decision_accuracy`, `over_probing_count`, `under_probing_count`, `errored_count` |
+| `feedback` | `interviews-eval/feedback` | one per repeat; cases in file order | `valid_reply`, the checks, `case_passed`, `errored`; `criterion_spread_max` on the last run when repeating | `pass_rate`, `valid_reply_rate`, `overall_in_band_rate`, `quotes_rejected_count`, `template_text_count`, `errored_count` |
+| `retrieval` | `interviews-eval/retrieval` | one; `--repeat` is ignored | `vector_recall_at_5`, `vector_reciprocal_rank`, `filter_recall_at_5`, `filter_reciprocal_rank`, `errored` | `vector_recall_at_5`, `vector_mrr`, `filter_recall_at_5`, `filter_mrr`, `errored_count` |
+| `generation` | `interviews-eval/generation` (one item per setup) | one per repeat **and arm** | `valid_share`, `distinct_competencies`, `skill_coverage` (when the setup lists skills), `prompt_tokens`, `start_ms`, `errored` | the `_mean` of each, `errored_count` |
+| `ranking` | (posts onto generation's results) | none | `human_rank` (1 = best); when rated, `human_fit`, `human_relevance`, `human_variety`, `human_specificity`, `human_score` | none |
+
+The run scores are computed from the same summaries the console prints, so the two never disagree.
+
+**Generation and the blind ranking.** `--task generation` writes three local files next to the sheet: the sheet, its
+key, and `<sheet>.traces.json` (each setup and arm's Langfuse result). **Rank the sheet before opening the runs**: their
+names and metadata say which arm is which. Under each set you may also fill `Rating: fit relevance variety specificity`
+(four whole numbers 1 to 5; relevance `-` when the setup has no job description) and `Note: <one line>`. Then
+`--task ranking` prints the tally and posts your rank (and ratings) onto each arm's result, with stable ids, so running
+it again updates the scores instead of adding new ones. Ratings compare across runs (a 4 means the same in every run);
+ranks only within one sheet.
+
+**Reading the runs list.** The name says what a run tested, so the baseline and the new run are told apart by name:
+`decide/follow_up_decision_v1/...` against `decide/follow_up_decision_v2/...`. Score columns are listed in alphabetical
+order. A boolean score shows as `false: n / true: m` (how many cases had each value); a run score shows as a number.
+
+**How to compare**
+
+1. Before you change anything, run the task once (with `--note "baseline"`). That run is your baseline.
+2. Make one change and run again with a `--note` saying what changed and what you expect.
+3. In Langfuse, open **Experiments** (the runs' environment is `sdk-experiment`, not `eval`), pick the dataset, select
+   the baseline run and the new run, and compare.
+4. Read the **metadata difference** first: it says what changed (prompt version, commit, notes fingerprint,
+   threshold). If two things changed, the comparison can't tell you which one helped.
+5. Read the run scores, then the per-case scores: which cases flipped, in which direction. Open a flipped case's trace
+   to read the prompt and the reply.
+6. Judge noise as in section 8: with N cases, one case changing moves a rate by 1 / N.
+7. Write the eval log row with both run names and your decision.
+
+A baseline is not stored anywhere in Langfuse: you choose it in the compare view and name it in the eval log row.
+Without keys, or when Langfuse fails, the tasks run exactly as before and the last line says nothing was recorded.
 
 ---
 
@@ -234,7 +302,7 @@ Four kinds of information, each in its own place:
 
 | What | Where | Written by |
 |---|---|---|
-| Raw results: every call, reply and score | Langfuse: one session per run, one trace per case | Automatic |
+| Raw results: every call, reply and score | Langfuse: one experiment run per repeat, one result per case | Automatic |
 | The run: what changed, the totals, the decision | The **eval log** in the feature's `learnings.md`, section 7: one row per run | You, after each run |
 | Why a label, prompt or rubric changed | Next to the change: the case's `notes`, the comment on the version constant, the commit message, and `task.md` under Deviations from Plan | You, when you change it |
 | What you learned | `learnings.md`, section 7: predictions against results, surprises | You, when something surprises you |
@@ -256,9 +324,10 @@ instead; `stream` would log the time to first token.
 - **One change per row.** If you can't say in one sentence what changed, you changed too much.
 - **"None" is a valid change.** A re-run with nothing changed is how you learn which failures repeat.
 - **Always write the decision:** keep, revert, pending, or not counted (infrastructure). It's the most valuable column.
-- **Real numbers only.** Copy them from the summary line, or read them back from the Langfuse session. Write "—" for
+- **Real numbers only.** Copy them from the summary line, or read them back from the Langfuse run. Write "—" for
   anything you didn't measure.
-- **Keep the session time** in the Run column, so you can find the traces behind the row.
+- **Keep the run names** (baseline and new) in the Run column, so you can find the results behind the row (section
+  6a).
 
 **After each run (about two minutes):**
 
@@ -275,7 +344,7 @@ instead; `stream` would log the time to first token.
 Copy this for each failing case and fill it in, top to bottom. Don't skip ahead to the fix.
 
 ```
-Case:            <id>          Task: <task>          Run: <Langfuse session>
+Case:            <id>          Task: <task>          Run: <Langfuse run name>
 1. Type:         infrastructure / contract / quality / label        (section 5)
 2. Repeats?      seen in earlier runs? failed on every attempt?     (once only → re-run first)
 3. The rule:     where the code raises it (search the reason code) and its exact limit
@@ -305,7 +374,8 @@ Then: re-run `mixed`, `junior` and `senior` with `--repeat 2`, then the whole ta
 **Gaps in the runner today** (planned, not built):
 
 - `--cases <ids>`: run only some cases. Today every case runs.
-- `--pause <seconds>`: wait between calls, so free-tier runs don't hit rate limits.
+- `--pause <seconds>`: wait between calls, so free-tier runs don't hit rate limits. `retrieval` and `generation` have
+  `--pause-seconds`; the other tasks don't yet.
 - `--score-only` (feedback): skip the write call while tuning scores (halves the calls).
 - `--prompt` for `decide`, `stream` and `feedback`. Until then, switch the constant by hand (section 3).
 - Hints in the console for `write`, `stream` and `decide`. Today they're in the Langfuse trace output only.
@@ -323,7 +393,8 @@ Build the eval together with the feature, so prompt and model changes can be com
 3. **Write the checks as code**, with stable names and a `detail` that says what was wrong. Unit-test them with a fake
    provider, so `uv run pytest` never makes a real call.
 4. **Add a hint per check** that says where to look first.
-5. **Wire it into the runner** under its own `--task`: traces in environment `eval`, boolean scores per check, and the
+5. **Wire it into the runner** under its own `--task` as an experiment run (`run_cases` in
+   `tooling/interviews_eval_runs.py`): scores per check, run scores from the console's summary, and the
    cases mirrored into a dataset `interviews-eval/<task>`.
 6. **Run it once and record the baseline** as row 1 of the feature's eval log, before you change any prompt.
 
