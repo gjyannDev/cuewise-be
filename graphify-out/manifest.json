@@ -42,9 +42,9 @@
     "semantic_hash": ""
   },
   "app/core/errors.py": {
-    "mtime": 1794223609.772639,
-    "seen": 1794224497.4116812,
-    "ast_hash": "1e2586adc7d0518a768b711b295bfbbd",
+    "mtime": 1794558998.3604517,
+    "seen": 1794559113.564415,
+    "ast_hash": "69392bc42a53368c7938208c8e986099",
     "semantic_hash": ""
   },
   "app/core/exception_handlers.py": {
@@ -138,9 +138,9 @@
     "semantic_hash": ""
   },
   "pyproject.toml": {
-    "mtime": 1794225406.9734356,
-    "seen": 1794370139.0272877,
-    "ast_hash": "10931c72b025fabef7978df101aa23bc",
+    "mtime": 1794555480.0641973,
+    "seen": 1794556098.1669073,
+    "ast_hash": "f8eb2ce2dba54afd67bf5a8968774031",
     "semantic_hash": ""
   },
   "tests/conftest.py": {
@@ -312,8 +312,8 @@
     "semantic_hash": ""
   },
   "docs/ai-engineering-learning-path.md": {
-    "mtime": 1794227544.61258,
-    "seen": 1794370139.0274506,
+    "mtime": 1794553034.2408857,
+    "seen": 1794556098.1670933,
     "ast_hash": "0f2e58849390a01f550434723fce9a8d",
     "semantic_hash": ""
   },
@@ -1080,9 +1080,9 @@
     "semantic_hash": ""
   },
   "app/modules/interviews/constants/interviews_constants.py": {
-    "mtime": 1794475468.1692193,
-    "seen": 1794475539.8045952,
-    "ast_hash": "c98c0ff8c4ee127c9a87698a5cc11796",
+    "mtime": 1794558997.7694895,
+    "seen": 1794559113.564473,
+    "ast_hash": "d23c4ca994072af7a3be55be7c50abf6",
     "semantic_hash": ""
   },
   "app/modules/interviews/controllers/__init__.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "app/modules/interviews/routes/interviews_route.py": {
-    "mtime": 1794370097.981707,
-    "seen": 1794370139.0272372,
-    "ast_hash": "8843d17e10655e56c4614d8cf4ea0b54",
+    "mtime": 1794559037.3264408,
+    "seen": 1794559113.564506,
+    "ast_hash": "f948946c880540c7947a858dbcf5bda1",
     "semantic_hash": ""
   },
   "app/modules/interviews/schemas/__init__.py": {
@@ -1152,9 +1152,9 @@
     "semantic_hash": ""
   },
   "app/modules/interviews/schemas/interviews_schema.py": {
-    "mtime": 1794223609.7917242,
-    "seen": 1794224497.4117558,
-    "ast_hash": "51321b666b2c431f9accbd0690b71398",
+    "mtime": 1794558999.1701467,
+    "seen": 1794559113.5645084,
+    "ast_hash": "6409315aac1626f7ca55271694698cf0",
     "semantic_hash": ""
   },
   "app/modules/interviews/services/__init__.py": {
@@ -2139,6 +2139,126 @@
     "mtime": 1794475457.1420338,
     "seen": 1794475539.804891,
     "ast_hash": "4556870e5af5446e4b0b1f478115db31",
+    "semantic_hash": ""
+  },
+  "app/core/safe_fetch.py": {
+    "mtime": 1794556588.8044002,
+    "seen": 1794557293.7495332,
+    "ast_hash": "67305bea411e08ff1b0fe188becdbdc4",
+    "semantic_hash": ""
+  },
+  "app/modules/interviews/controllers/interviews_job_url_controller.py": {
+    "mtime": 1794559025.7453487,
+    "seen": 1794559113.5644789,
+    "ast_hash": "7552c62ef2cc79a6b003f472d3d39777",
+    "semantic_hash": ""
+  },
+  "app/modules/interviews/dependencies/interviews_job_url_dependencies.py": {
+    "mtime": 1794559026.0498393,
+    "seen": 1794559113.5644927,
+    "ast_hash": "61b6cdcc4e5c79ed6a73b75f5a498963",
+    "semantic_hash": ""
+  },
+  "app/modules/interviews/services/interviews_job_url_service.py": {
+    "mtime": 1794559025.2092843,
+    "seen": 1794559113.564513,
+    "ast_hash": "69e3fe2b434153ef09db6f0f22bdc2d5",
+    "semantic_hash": ""
+  },
+  "app/modules/interviews/utils/interviews_job_url_utils.py": {
+    "mtime": 1794558905.6234415,
+    "seen": 1794559113.5645306,
+    "ast_hash": "17af3ac4975b8545554e202779bf4c09",
+    "semantic_hash": ""
+  },
+  "tests/core/test_safe_fetch.py": {
+    "mtime": 1794556077.7097769,
+    "seen": 1794556098.166923,
+    "ast_hash": "ea53db1b7c55e41cc66661a27f15b887",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/routes/test_job_url.py": {
+    "mtime": 1794558980.5285442,
+    "seen": 1794559113.5646138,
+    "ast_hash": "7f4c28a6a67d42364e4ed9edb34ac25e",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/utils/test_job_url_utils.py": {
+    "mtime": 1794558944.2758262,
+    "seen": 1794559113.5646384,
+    "ast_hash": "b158711207423b0a4f58b7662b3cbb89",
+    "semantic_hash": ""
+  },
+  "docs/features/job-url/plan.md": {
+    "mtime": 1794558843.2201352,
+    "seen": 1794559113.564764,
+    "ast_hash": "6eb1321dfcaa96f38678e0e84773db06",
+    "semantic_hash": ""
+  },
+  "docs/features/job-url/spec.md": {
+    "mtime": 1794558831.0371168,
+    "seen": 1794559113.5647652,
+    "ast_hash": "0f0967a0bfc981e2dd131ae15de8f311",
+    "semantic_hash": ""
+  },
+  "docs/features/job-url/task.md": {
+    "mtime": 1794557247.6705832,
+    "seen": 1794557293.749903,
+    "ast_hash": "246ac43ec63447e6045db729f8e41b48",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/article_posting.html": {
+    "mtime": 1794555719.100534,
+    "seen": 1794556098.1671746,
+    "ast_hash": "288adf7058aa2aded04c61ce049e156c",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/cookie_wall.html": {
+    "mtime": 1794555719.736585,
+    "seen": 1794556098.1671758,
+    "ast_hash": "a339f142ef831ff9494101eec65fb703",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/injection.html": {
+    "mtime": 1794555719.9594142,
+    "seen": 1794556098.1671767,
+    "ast_hash": "0109e65c4bd592d21e8022c528782e85",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/js_shell.html": {
+    "mtime": 1794555719.3344898,
+    "seen": 1794556098.1671774,
+    "ast_hash": "2503b26174c25f693e8dc893ce585803",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/jsonld_board.html": {
+    "mtime": 1794555718.7323313,
+    "seen": 1794556098.1671784,
+    "ast_hash": "55fb5c08c62700350b758ac17976fdf6",
+    "semantic_hash": ""
+  },
+  "docs/features/job-url/learnings.md": {
+    "mtime": 1794557283.544141,
+    "seen": 1794557293.749899,
+    "ast_hash": "cded3eaa5c812eae78a413f0f06ec017",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/news_article.html": {
+    "mtime": 1794557096.9020476,
+    "seen": 1794557293.7499573,
+    "ast_hash": "d48f5244beed71821f46fe69ea06bfb1",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/recipe.html": {
+    "mtime": 1794557097.3175724,
+    "seen": 1794557293.7499585,
+    "ast_hash": "b05359a1ab85983dd252cd83b5c2fba4",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/data/job_pages/clipboard_posting.html": {
+    "mtime": 1794558853.9919598,
+    "seen": 1794559113.5648165,
+    "ast_hash": "6f6e68427c559af68a4f0e2c6fd0c949",
     "semantic_hash": ""
   }
 }
