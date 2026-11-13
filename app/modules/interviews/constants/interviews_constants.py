@@ -206,6 +206,66 @@ TRANSCRIPTIONS_PER_MINUTE = 10
 # Feedback generation spends two LLM calls (the first reads the whole interview); a retry is only needed after a failure.
 FEEDBACKS_PER_MINUTE = 3
 
+# Job URL import (Slice 8b). Each request makes the server fetch a page someone else chose, so it is capped per user.
+JOB_URLS_PER_MINUTE = 10
+JOB_URL_MAX_LENGTH = 2048
+# Whole fetch, every redirect hop and the body read included; below the web app's 25 s forwarder timeout.
+JOB_URL_TOTAL_SECONDS = 8.0
+JOB_URL_CONNECT_SECONDS = 3.0
+# A posting page is rarely over a few hundred KB of HTML; more is a file, a feed or an attack.
+JOB_URL_MAX_BYTES = 1024 * 1024
+JOB_URL_MAX_REDIRECTS = 3
+JOB_URL_ALLOWED_PORTS = frozenset({80, 443})
+# Below this, the page is a JavaScript shell, a login wall or a cookie wall: ask the candidate to paste the text.
+# Tuned on the fixture pages in tests/modules/interviews/data/job_pages/.
+JOB_TEXT_MIN_CHARS = 200
+# "Does this text look like a job posting": distinct terms present, matched lower case as substrings (so stems like
+# "responsibilit" match "Responsibilities"). A convenience filter for honest wrong links, not a security control: a
+# page can stuff keywords, and the candidate's review stays the real check. English only. Words common outside job
+# ads ("team", "role", "manager", "years of", "compensation") are left out: a news page uses them too.
+# Tuned on tests/modules/interviews/data/job_pages/ (postings 6-7 hits, news and recipe 0); retune from app.job_url logs.
+JOB_TERMS = (
+    "responsibilit",
+    "requirement",
+    "qualification",
+    "experience",
+    "you will",
+    "you'll",
+    "we are looking",
+    "we're looking",
+    "what we offer",
+    "benefits",
+    "salary",
+    "full-time",
+    "full time",
+    "part-time",
+    "remote",
+    "hybrid",
+    "apply",
+    "hiring",
+    "candidate",
+    "skills",
+    "engineer",
+    "developer",
+)
+JOB_TERMS_MIN_HITS = 3
+JOB_URL_UNREACHABLE_MESSAGE = "We couldn't open that link. Please paste the job description instead."
+JOB_URL_UNREADABLE_MESSAGE = "We couldn't read a job description from that page. Please paste the job description instead."
+# Paste fallback for sites that block our fetch: the candidate copies the whole page from their own browser. A page's
+# clipboard HTML can be large (inline styles), so the cap matches the fetch byte cap rather than the 2000-char result.
+JOB_PASTE_MAX_CHARS = 1_000_000
+JOB_TEXT_UNREADABLE_MESSAGE = (
+    "We couldn't find a job description in what you pasted. Please paste just the job description into the box."
+)
+
+
+class JobTextFormat(StrEnum):
+    """Which clipboard copy the client sent: the HTML one when the browser has it (its structure lets us drop menus
+    and footers), else the plain text one."""
+
+    html = "html"
+    text = "text"
+
 # Terms Deepgram should favour when it transcribes an answer (keyterm prompting, Nova-3). Without them the spike heard
 # "useEffect" as "use event" and "Redis" as "Redix"; keyterms only help the terms listed, so domain phrases are here too.
 # Plain text, no weights; each role's list stays far below Deepgram's 500-token cap.
