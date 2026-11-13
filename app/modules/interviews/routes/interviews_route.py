@@ -24,6 +24,10 @@ from ..dependencies.interviews_feedback_dependencies import (
     FeedbackControllerDep,
     limit_feedback,
 )
+from ..dependencies.interviews_job_url_dependencies import (
+    JobUrlControllerDep,
+    limit_job_imports,
+)
 from ..dependencies.interviews_start_dependencies import InterviewsControllerDep
 from ..dependencies.interviews_transcription_dependencies import (
     TranscriptionControllerDep,
@@ -36,6 +40,9 @@ from ..schemas.interviews_schema import (
     InterviewCreateIn,
     InterviewListOut,
     InterviewOut,
+    JobTextIn,
+    JobUrlIn,
+    JobUrlOut,
     TranscriptionOut,
     TranscriptOut,
 )
@@ -78,6 +85,46 @@ def start_interview(
     ctrl: InterviewsControllerDep,
 ) -> InterviewOut:
     return ctrl.start(user, data)
+
+
+@router.post(
+    "/job-url",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(limit_job_imports)],
+    responses={429: {"model": ErrorResponse}},
+)
+def import_job_url(
+    data: JobUrlIn,
+    user: Annotated[User, require_permissions(Permission.interviews_create)],
+    ctrl: JobUrlControllerDep,
+) -> JobUrlOut:
+    """Read the job description from a posting link, for the candidate to review before starting an interview.
+
+    Nothing is stored. Send the (edited) text as `job_description` in POST /interviews. 422 `JOB_URL_UNREACHABLE`:
+    the link could not be opened (or is not allowed); 422 `JOB_URL_UNREADABLE`: no job description could be read from
+    the page (not HTML, too large, or a page that needs JavaScript or a login). Both ask the candidate to paste the
+    text instead. `truncated` is true when the text was cut to fit the job description."""
+    return ctrl.import_job_text(user, data)
+
+
+@router.post(
+    "/job-text",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(limit_job_imports)],
+    responses={429: {"model": ErrorResponse}},
+)
+def import_job_text_paste(
+    data: JobTextIn,
+    user: Annotated[User, require_permissions(Permission.interviews_create)],
+    ctrl: JobUrlControllerDep,
+) -> JobUrlOut:
+    """Clean a whole posting page the candidate copied from their own browser: the fallback for sites that refuse
+    POST /interviews/job-url. Send the clipboard's HTML (`format: html`) when the browser has it, else its plain text.
+
+    Same response and rules as POST /interviews/job-url; nothing is stored. 422 `JOB_TEXT_UNREADABLE`: no job
+    description was found in the paste, so ask the candidate to paste just the description into the job description
+    box. Shares the job import rate limit with POST /interviews/job-url."""
+    return ctrl.import_pasted_text(user, data)
 
 
 @router.get("", status_code=status.HTTP_200_OK)

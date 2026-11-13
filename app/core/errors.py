@@ -94,6 +94,24 @@ class TranscriptionUnavailableError(AppError):
     status_code, code = 503, "TRANSCRIPTION_UNAVAILABLE"
 
 
+class JobUrlUnreachableError(AppError):
+    """Any network-side failure of a job link. One message for every cause, so refusals can't map internal hosts."""
+
+    status_code, code = 422, "JOB_URL_UNREACHABLE"
+
+
+class JobUrlUnreadableError(AppError):
+    """The job link answered, but no job description could be read from it (not HTML, too large, too little text)."""
+
+    status_code, code = 422, "JOB_URL_UNREADABLE"
+
+
+class JobTextUnreadableError(AppError):
+    """A pasted page held no job description (too little text, or not recognisably a posting)."""
+
+    status_code, code = 422, "JOB_TEXT_UNREADABLE"
+
+
 class UnauthorizedError(AppError):
     status_code, code = 401, "UNAUTHORIZED"
     headers = {"WWW-Authenticate": "Bearer"}  # noqa: RUF012

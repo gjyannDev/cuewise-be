@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal, NamedTuple, Self
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
@@ -16,6 +17,8 @@ from app.core.pagination import Page
 from ..constants.interviews_constants import (
     CATEGORY_CRITERIA,
     JOB_DESCRIPTION_MAX_LENGTH,
+    JOB_PASTE_MAX_CHARS,
+    JOB_URL_MAX_LENGTH,
     MAX_ANSWER_LENGTH,
     MAX_QUESTION_COUNT,
     MIN_QUESTION_COUNT,
@@ -25,6 +28,7 @@ from ..constants.interviews_constants import (
     FeedbackStatus,
     InterviewType,
     JobRole,
+    JobTextFormat,
     Level,
     LevelGroup,
     MessageKind,
@@ -216,6 +220,55 @@ class TranscriptionOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str
+
+
+def _job_url(value: str) -> str:
+    """Shape only: http(s), a host, a valid port, no credentials. Whether the address may be reached is the fetcher's
+    job (it re-checks every redirect too). Messages never echo the URL."""
+    parts = urlsplit(value)
+    try:
+        parts.port  # noqa: B018 - raises on a non-numeric or out-of-range port
+    except ValueError as exc:
+        raise ValueError("the port is not valid") from exc
+    if parts.scheme.lower() not in {"http", "https"}:
+        raise ValueError("only http and https links are accepted")
+    if not parts.hostname:
+        raise ValueError("the link has no host")
+    if "@" in parts.netloc:
+        raise ValueError("links with a user name or password are not accepted")
+    return value
+
+
+class JobUrlIn(BaseModel):
+    """POST /interviews/job-url: a job posting link to read the job description from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=JOB_URL_MAX_LENGTH),
+        AfterValidator(_job_url),
+    ]
+
+
+class JobTextIn(BaseModel):
+    """POST /interviews/job-text: a whole posting page the candidate copied from their own browser (for sites that
+    block our fetch). Send the clipboard's HTML copy when there is one, else its plain text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=JOB_PASTE_MAX_CHARS)]
+    format: JobTextFormat
+
+
+class JobUrlOut(BaseModel):
+    """The posting's text for the candidate to review and edit, then send as `job_description` when starting. Also the
+    response of POST /interviews/job-text (same shape, same rules)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    truncated: bool = Field(description=f"True when the text was cut to {JOB_DESCRIPTION_MAX_LENGTH} characters.")
 
 
 # --- End-of-interview feedback (POST and GET /interviews/{id}/feedback) ---
