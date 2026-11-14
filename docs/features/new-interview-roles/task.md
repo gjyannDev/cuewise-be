@@ -19,7 +19,7 @@ Not committed (you commit). Suggested message:
     Candidates can now practise as a UI/UX designer, a quality engineer or a DevOps engineer. Each role gets
     voice keyterms, two technical bank questions covering every level, and reference notes for every level:
     one note from real job postings and one drafted note per role. The role columns are plain strings, so no
-    migration. Prompts still say "{{role}} developer role" until interviewer_v7.
+    migration. Prompts still say "{{role}} developer role" until interviewer_v8 (8d, profile interviews only).
 
     Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
@@ -61,7 +61,7 @@ Not committed (you commit). Suggested message:
 
 ## Known Issues
 - `test_turn_budget.py::test_usage_of_both_calls_is_summed_and_every_call_logs_metadata_only` fails on this machine (`budget_left_ms=29998`, expected `30000`). It uses the real clock, not the `clock` fixture, so it needs under 0.5 ms between deadline and decide call. Checked: the same code and tests (this whole diff) pass 3/3 on a clean `git archive` copy without the local `.env`; `DEBUG=false` and blank Langfuse keys did not change it. Passed in this morning's baseline run. Not caused by this feature; fix separately by giving the test the `clock` fixture.
-- Prompts say "{{level}} {{role}} developer role" (accepted; `interviewer_v7`, Slice 8d).
+- Prompts say "{{level}} {{role}} developer role" (accepted; `interviewer_v8`, Slice 8d, for profile interviews).
 
 ## Deviations from Plan
 - Finding (Step 1): `test_question_bank.py` (unknown-role case) and `test_create_interview.py` (unknown-role case) used `devops` as their sample unknown role. -> Sample changed to `sre`; the assertion (unknown role refused) is unchanged, so no test was loosened. -> Approved by: pending your review.

@@ -402,7 +402,7 @@ Slice 8 is a family of five slices. Only **8a is retrieval proper**, and it is t
 | 8a. Knowledge-base RAG | Role × level notes, chunking, `Embedder`, pgvector, retrieval at interview start, injected into the main-question writer (`interviewer_v6`). Starts with a behavior-preserving split of `interviews_turn.py`. | 12, 2, 8, 9 |
 | 8b. Job URL | Fetch a posting, extract its text, feed the existing job-description path; SSRF defences | 8, 6 |
 | 8c. Résumé upload | PDF/DOCX upload, text extraction, a validated candidate profile, a delete path | 4, 8, 9 |
-| 8d. Résumé-aware interview | The profile feeds the question prompt and the retrieval query (`interviewer_v7`) | 12, 5, 8 |
+| 8d. Résumé-aware interview | The profile (opt-in per interview) feeds the main-question prompt (`interviewer_v8`) and the retrieval query (quota merge) | 12, 5, 8 |
 | 8e. Feedback grounding | Retrieved strong-answer notes in the feedback prompt | 12, 11 |
 
 Order: 8a, 8b, 8c, 8d, 8e. 8a, 8b and 8c are independent of each other; 8d needs 8a and 8c; 8e needs 8a.
@@ -472,11 +472,11 @@ Order: 8a, 8b, 8c, 8d, 8e. 8a, 8b and 8c are independent of each other; 8d needs
 
 **Goal:** Questions that refer to the candidate's own background.
 
-**What you build:** the profile goes into the question prompt and into the retrieval query (`interviewer_v7`). Embedding résumé chunks is optional and only worth it if a résumé is too long to send; if you do, every query is scoped to the user.
+**What you build:** an opt-in `use_profile` flag per interview. With it, the stored profile goes into every main-question prompt (`interviewer_v8`: the job description still picks the topic, the profile only shapes the angle) and into the retrieval query at start (a quota merge: job-description notes first, at most 2 of 6 from the profile). The profile is read live each turn, never copied, and calls that carry it are redacted in Langfuse. No résumé chunks are embedded: the profile is small enough to send whole.
 
-**You learn:** personalising a prompt safely; why embedding candidate data needs a reason (concepts 12, 8).
+**You learn:** personalising a prompt safely; why embedding candidate data needs a reason; measuring a gain against a baseline with a noise margin (concepts 12, 8).
 
-**Done when:** questions measurably reference résumé items, and a test shows one user never retrieves another user's chunks.
+**Done when:** a three-arm eval (v7, v8 prompt only, v8 prompt and query) reports how often questions name profile-only items, the job-description coverage guard holds within v7's own spread, and a test shows user A's profile never appears in user B's interview.
 
 #### 8e: Feedback grounding
 

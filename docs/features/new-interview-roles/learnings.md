@@ -40,7 +40,7 @@ One request: `POST /api/v1/interviews {"role": "qa", "level": "senior", "intervi
 | The shipped bank can't back a technical interview | 409 `NOT_ENOUGH_QUESTIONS` | `test_a_new_role_starts_a_technical_interview_from_the_shipped_bank` |
 | A note tagged with another role | A designer gets QA notes | `test_a_new_role_gets_its_own_notes_and_never_another_new_roles` |
 | A note naming a role before the enum has it | The whole corpus refuses to load | the parser (`CorpusError: unknown role`) |
-| Prompt wording | "designer developer role" | none: known limitation, fixed in `interviewer_v7` (Slice 8d) |
+| Prompt wording | "designer developer role" | none: known limitation; `interviewer_v8` (Slice 8d) drops "developer" for profile interviews; prompts without a profile keep it until a later bump |
 
 ## 6. Try it yourself
 1. Predict: what status does `POST /api/v1/interviews` return for `"role": "sre"`? Run
@@ -76,8 +76,8 @@ One request: `POST /api/v1/interviews {"role": "qa", "level": "senior", "intervi
 ## 9. Still open
 - The three Step 5 notes are `drafted`; replace them with posting or your own material when you find it (the 8a gate
   now needs 7 non-drafted notes of 21; there are 3).
-- Interviewer, decide and feedback prompts say "{{role}} developer role"; fix in `interviewer_v7` (Slice 8d) and its
-  siblings.
+- Interviewer, decide and feedback prompts say "{{role}} developer role"; `interviewer_v8` (Slice 8d) drops it for
+  interviews that use a profile. Prompts without a profile keep the wording (byte-identical) until a later bump.
 - The client role dropdown and the BFF must offer `designer`, `qa`, `devops` (outside this repo).
 - After the next ingest, check on the dev database that the three retagged notes' old rows were retired and re-embedded.
 - `test_turn_budget` timing assertion: make it use the `clock` fixture (separate fix).

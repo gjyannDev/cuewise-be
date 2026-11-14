@@ -70,25 +70,16 @@ Rules:
 - Don't log PII, tokens, or passwords.
 
 ## FastAPI Best Practices & Standards
-- One `APIRouter` per feature with `prefix` and `tags`; register in `main.py`.
-- Use dependency injection (`Depends`) for DB sessions, current user, settings; no globals.
 - Explicit `status_code` and `response_model` on every route; document errors via `responses=`.
 - Keep routes and controllers thin; no business logic or DB calls in either.
 - DB: one session per request via dependency; transactions managed in service/repository boundary; schema changes only through **Alembic migrations** (never edit DB by hand, never rely on `create_all`).
 - Version the API (`/api/v1`). Use plural nouns, proper HTTP verbs/status codes; paginate list endpoints.
-- Structured logging with request ID tracing (see `core/logging.py`, `core/middleware.py`).
-- Provide health/readiness endpoints.
-- Python: PEP 8, type hints, `ruff` for lint/format; no bare `except`; no mutable default args.
-- Dependencies managed with `uv` (`pyproject.toml` + `uv.lock`).
 
 ## Testing
 - `pytest` under `tests/`, mirroring `app/modules`. Cover happy path, validation errors, auth/authz failures.
 - Run tests after changes (`uv run pytest`) and report real results.
 
 ## Common Commands
-- Install deps: `uv sync`
-- Run dev server: `uv run fastapi dev app/main.py` (or `uv run uvicorn app.main:app --reload`)
-- Tests: `uv run pytest`
 - Lint/format: `uv run --with ruff ruff check .` (ruff is not a project dependency; don't reformat the whole repo)
 - Migrations: `uv run alembic revision --autogenerate -m "<msg>"` then `uv run alembic upgrade head` (always review the generated migration)
 

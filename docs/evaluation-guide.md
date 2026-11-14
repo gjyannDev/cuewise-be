@@ -84,6 +84,7 @@ uv run python -m app.modules.profile.tooling.profile_evals --model gemini-3.5-fl
 | `--notes on/off`, `--summary on/off` | Ablations: the running note, and the job description summary | `write`, `stream` |
 | `--note "<why>"` | Why you are running this and what you expect. Saved as the Langfuse run's description, so the reason travels with the numbers (cut to 300 characters) | all |
 | `--pause-seconds` | Wait between cases, and between repeats (free-tier limits). Default 2.5 for `retrieval` and `generation`, 0 for the others | all |
+| `--arms C,D,E` | Which generation arms run (two or more of A-E). Default `A,B,C`. D and E add the résumé-aware arms and two generation-only setups (injection, mismatch) | `generation` only |
 
 **Trying a new prompt for another task.** `--prompt` doesn't reach `decide`, `stream` or `feedback` yet. Point the
 task's constant in `app/modules/interviews/constants/interviews_constants.py` at the new file for the run, then point it back:
@@ -214,7 +215,7 @@ two runs line up case by case. You no longer save the console output and diff fi
 **What every run carries**
 
 - **A name that says what it tested**, then when: `<task>/<main prompt version or setting>/<model>/<local time>/r<n>`
-  (generation adds `/arm-A|B|C`; retrieval uses `threshold-<t>/notes-<fingerprint>` instead of a prompt).
+  (generation adds `/arm-A|B|C|D|E`; retrieval uses `threshold-<t>/notes-<fingerprint>` instead of a prompt).
 - **Metadata**: `task`, `commit` (`-dirty` with uncommitted changes, `unknown` without git), `model`, `prompt.*`,
   `repeat`, `flag.*`, `note`; retrieval and generation add `embedding_model`, `embedding_dimensions`, `threshold`,
   `notes_fingerprint` (changes when any ingested note changes); generation adds `arm`.
@@ -230,7 +231,7 @@ two runs line up case by case. You no longer save the console output and diff fi
 | `decide` | `interviews-eval/decide` | one per repeat | the checks, `case_passed`, `over_probing`, `under_probing`, `errored` | `pass_rate`, `decision_accuracy`, `over_probing_count`, `under_probing_count`, `errored_count` |
 | `feedback` | `interviews-eval/feedback` | one per repeat; cases in file order | `valid_reply`, the checks, `case_passed`, `errored`; `criterion_spread_max` on the last run when repeating | `pass_rate`, `valid_reply_rate`, `overall_in_band_rate`, `quotes_rejected_count`, `template_text_count`, `errored_count` |
 | `retrieval` | `interviews-eval/retrieval` | one; `--repeat` is ignored | `vector_recall_at_5`, `vector_reciprocal_rank`, `filter_recall_at_5`, `filter_reciprocal_rank`, `errored` | `vector_recall_at_5`, `vector_mrr`, `filter_recall_at_5`, `filter_mrr`, `errored_count` |
-| `generation` | `interviews-eval/generation` (one item per setup) | one per repeat **and arm** | `valid_share`, `distinct_competencies`, `skill_coverage` (when the setup lists skills), `prompt_tokens`, `start_ms`, `errored` | the `_mean` of each, `errored_count` |
+| `generation` | `interviews-eval/generation` (one item per setup) | one per repeat **and arm** | `valid_share`, `distinct_competencies`, `skill_coverage` (when the setup lists skills), `prompt_tokens`, `start_ms`, `errored`; with a D or E arm also `profile_only_mention_share`, `presumption_flags`, `profile_notes`, and `injection_ignored` on the injection setup | the `_mean` of each, `errored_count`; with D or E, `profile_only_mention_share_mean`, `presumption_flags_total`, `profile_notes_mean`, `injection_ignored_mean` |
 | `ranking` | (posts onto generation's results) | none | `human_rank` (1 = best); when rated, `human_fit`, `human_relevance`, `human_variety`, `human_specificity`, `human_score` | none |
 
 The run scores are computed from the same summaries the console prints, so the two never disagree.
@@ -242,6 +243,27 @@ names and metadata say which arm is which. Under each set you may also fill `Rat
 `--task ranking` prints the tally and posts your rank (and ratings) onto each arm's result, with stable ids, so running
 it again updates the scores instead of adding new ones. Ratings compare across runs (a 4 means the same in every run);
 ranks only within one sheet.
+
+**The résumé-aware arms (8d).** `--task generation --arms C,D,E --repeat 3` compares C (`interviewer_v7`, job-description
+notes, no profile), D (`interviewer_v8` with the setup's synthetic profile from `data/generation_eval_profiles.json`,
+the same notes: the prompt change alone) and E (v8 and the quota-merged notes: prompt and query). After the usual table
+it prints a second one, computed for **every** arm, C included, against each setup's profile:
+- `profile_only_mentions`: the share of main questions that name a profile item the job description does **not** also
+  name (whole terms, case-insensitive). Shared items are left out, or following the job description would look
+  personalised. The gain is D - C and E - C; no pass mark until there is a baseline.
+- `presumption_flags`: questions matching a phrase such as "since you led" or "your résumé". Crude: read every hit by
+  hand; repeated hits mean v8's "never as a verified fact" rule needs a new prompt version.
+- `profile_notes`, `notes_overlap_vs_C` (Jaccard of chunk ids; below 1 means the profile query changed the notes) and
+  `injection_ignored` (the injection setup's forbidden strings never appeared).
+- `guard D` / `guard E`: pass when `skill_coverage` is not below C's mean by more than C's own spread across repeats
+  (max - min of its per-repeat means: the run-to-run noise), and the injection was ignored every time. With fewer than
+  3 repeats the guard says `refused`: one repeat has no spread to measure. If E fails a guard D passes, set
+  `RETRIEVAL_PROFILE_SLOTS = 0` (the query change off, code kept) and record why.
+
+The synthetic profiles are fake people; their eval traces keep full prompts (only the app's own profile calls are
+redacted). `--task retrieval` also scores five `profile` cases (a profile's short items as the query) apart from the
+job-description cases: the job-description `recall@5` / `MRR` must match the last run, and `profile cases` gives the
+profile half its own baseline.
 
 **Reading the runs list.** The name says what a run tested, so the baseline and the new run are told apart by name:
 `decide/follow_up_decision_v1/...` against `decide/follow_up_decision_v2/...`. Score columns are listed in alphabetical
