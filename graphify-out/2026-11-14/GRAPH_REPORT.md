@@ -1,70 +1,70 @@
-# Graph Report - cuewise-be  (2026-11-13)
+# Graph Report - cuewise-be  (2026-11-14)
 
 ## Corpus Check
-- 369 files · ~335,797 words
+- 412 files · ~350,098 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 7 file(s) not represented in the graph (top: (none) 3, .example 1, .ini 1)
 
 ## Summary
-- 5146 nodes · 14519 edges · 269 communities (229 shown, 40 thin omitted)
-- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 2787 edges (avg confidence: 0.94)
+- 5554 nodes · 15653 edges · 287 communities (227 shown, 60 thin omitted)
+- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 2917 edges (avg confidence: 0.94)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e45e503f`
+- Built from commit: `27122bf7`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- AuthController
-- LLMServerError
-- test_knowledge_postgres.py
-- decode_token
+- interviews_schema.py
+- LLMRateLimitError
+- Completed Steps
+- config.py
 - test_interview_report.py
-- auth_dependencies.py
+- auth_service.py
 - Cuewise BE — Project Instructions
 - test_job_url_utils.py
-- interviews_constants.py
-- Role
+- interviews_knowledge_utils.py
+- test_guards.py
 - interviews_rag_evals.py
 - test_list_interviews.py
 - Implementation: Role-Based Access Control (single JWT)
 - Implementation: UUID primary keys
 - test_config.py
 - test_deepgram.py
-- interviews_job_url_utils.py
+- .record_turn
 - test_feedback_evals.py
 - test_safe_fetch.py
-- User
+- interviews_route.py
 - test_tracing_lifespan.py
 - cuewise-be
-- LLMResult
+- interviews_constants.py
 - test_stream_turn.py
 - test_feedback_endpoint.py
 - test_context_strategies.py
 - test_answer_stream.py
 - test_transcript.py
-- KnowledgeRepository
+- Slices in detail
 - Feature: Context Management for the Interview LLM Calls
 - RateLimiter
-- Completed Steps
+- test_profile_read_resume.py
 - test_reference_note_context.py
-- safe_fetch.py
+- SafeFetcher
 - Feature: LLM as the Interviewer (it asks the questions)
-- QuestionTurn
+- interviews_context.py
 - test_layers.py
 - Implementation: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1)
 - test_error_handling.py
 - interviews_report_render.py
 - interviews_job_url_service.py
-- AnswerService
+- interviews_answer_service.py
 - test_transcribe.py
 - Implementation: Follow-up Questions (decide / write split)
 - test_evals.py
 - test_feedback_contract.py
 - interviews_model.py
-- Interviewer
-- FollowUpAction
+- LLMResult
+- CandidateProfile
 - test_create_interview.py
 - test_start_llm.py
 - test_job_url.py
@@ -73,42 +73,42 @@
 - test_openai_compatible.py
 - FakeClient
 - test_tracing_routes.py
-- InterviewQuestion
-- ConsoleFormatter
+- InterviewsRepository
+- profile_service.py
 - job_description_summary_v2.md
-- typing
+- FakeProvider
 - FakeEmbedder
-- test_follow_ups.py
-- hint_for
-- interviews_feedback_service.py
+- PageParams
+- test_profile_routes.py
+- InterviewQuestion
 - test_answer_llm.py
 - interviews_feedback_evals.py
-- interviews_transcription_dependencies.py
+- hints_of
 - exception_handlers.py
 - errors.py
-- test_tracing.py
-- check_feedback
-- Implementation Steps
+- traced
+- Implementation: Résumé upload and candidate profile (Slice 8c)
+- profile_reply.py
 - Implementation: Start an Interview (backend)
 - Langfuse CLI Reference
 - Implementation: SSE Streaming of the Interview Turn (Slice 4)
-- run_feedback_case
-- fake.py
+- profile_dependencies.py
+- provider.py
 - Feature: Knowledge-Base RAG for the Question Writer (Slice 8a)
-- interviews_log.py
-- interviews_context.py
+- parse_log
+- User
 - LLMTimeoutError
-- traced
-- test_reaction_pick.py
+- EmbeddingKind
+- interviews_service.py
 - interviewer_v2.md
 - job_description_summary_v1.md
-- Learn: Context management (what to send, and what it costs)
-- FeedbackCaseResult
-- clock
+- ContextManager
+- EvalCase
+- Implementation: Three New Interview Roles (designer, qa, devops)
 - Langfuse Observability
 - interviewer_v3.md
 - Implementation: LLM as the Interviewer (it asks the questions)
-- ._covers_every_criterion
+- test_interviewer_messages.py
 - Implementation: Langfuse Tracing
 - Implementation: Split interviews_dependencies.py by responsibility
 - follow_up_decision_v1.md
@@ -116,25 +116,25 @@
 - Implementation: Context Management for the Interview LLM Calls
 - test_factory.py
 - test_get_interview.py
-- Implementation Plan: UUID primary keys
+- StreamedTurn
 - Implementation Plan: LLM as the Interviewer (it asks the questions)
 - Langfuse Dataset Construction
 - interviews_evals.py
-- FeedbackGenerator
-- main
+- interviews_feedback_service.py
+- interview_report.py
 - Implementation: Eval runs in Langfuse (scores + datasets)
 - Feature: Langfuse Tracing
 - Langfuse
-- InterviewType
+- QuestionCategory
 - Implementation: Langfuse experiments for the interviews evals
-- audio_container
+- pytest
 - Implementation Plan: Split interviews_dependencies.py by responsibility
 - Langfuse Implementation Notes
 - interviewer_v5.md
 - Feature: Langfuse experiments for the interviews evals
-- Feature: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1)
-- Implementation: Three New Interview Roles (designer, qa, devops)
-- Feature: SSE Streaming of the Interview Turn (Slice 4)
+- types.py
+- LLMProvider
+- profile_resume_files.py
 - Implementation: Knowledge-Base RAG for the Question Writer (Slice 8a)
 - Feature: Résumé upload and candidate profile (Slice 8c)
 - How to evaluate an AI feature: from the command to the fix
@@ -144,68 +144,68 @@
 - tests/conftest.py
 - Implementation: Interview History List (backend)
 - Judge Calibration
-- Feature: Interview History List (backend)
+- Any
 - build_usage_report
 - The fundamentals
 - Langfuse CI/CD
 - Prompt Engineering
 - Implementation Plan: Job URL (Slice 8b)
 - Langfuse Implementation Notes
-- re
+- ConsoleFormatter
 - test_knowledge_ingest.py
-- test_context.py
-- PageParams
+- ChatMessage
+- follow_up
 - Langfuse v4 project migration
 - Judge Calibration
 - test_turn_budget.py
 - Langfuse CI/CD
 - Prompt Engineering
-- Learn: Splitting the interviews dependency wiring
-- interviews_feedback_dependencies.py
-- run_ranking
+- test_follow_ups.py
+- get_llm_provider
+- LLMBadResponseError
 - Implementation: Job URL (Slice 8b)
 - test_start_reference_notes.py
-- Implementation: Layered Modules (route -> controller -> service -> repository)
+- test_profile_evals.py
 - test_knowledge_ingest_cli.py
 - Implementation: Interview Feedback and Scoring (Slice 6)
-- test_context_prompts.py
+- scrub_contacts
 - interviews/conftest.py
 - Tracer
 - test_answer_interview.py
-- interviews_answer_service.py
-- experiments
+- Checks
+- Feature: Follow-up Questions (decide / write split)
 - ErrorResponse
 - Implementation Plan: Three New Interview Roles (designer, qa, devops)
-- require_permissions
+- Implementation Plan: Role-Based Access Control (single JWT)
 - Implementation Plan: Knowledge-Base RAG for the Question Writer (Slice 8a)
-- interviews_utils.py
+- test_stream_answer.py
 - test_select_questions.py
-- interviews_feedback.py
+- LLMServerError
 - feedback_score_v2.md
 - test_llm_settings_default_to_off_with_documented_limits
-- OpenAICompatibleProvider
+- .stream
 - feedback_score_v1.md
 - feedback_write_v1.md
-- Feature: Follow-up Questions (decide / write split)
-- Feature: Start an Interview (backend)
-- .record_turn
+- test_reply_contract.py
+- clock
+- Implementation Steps
 - JobRole
-- middleware.py
+- main.py
 - Implementation Plan: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1)
-- Feature: Layered Modules (route -> controller -> service -> repository)
-- Implementation Plan: Role-Based Access Control (single JWT)
+- StreamEventOut
+- Implementation Plan: UUID primary keys
 - Learn: The LLM as the interviewer (Slice 2): prompts, structured output, injection
-- Feature: Interview Feedback and Scoring (Slice 6)
+- Learn: Splitting the interviews dependency wiring
 - Implementation Plan: Interview Feedback and Scoring (Slice 6)
 - Platform and DevOps practice
 - interviewer_v6.md
 - interviewer_v6_json.md
-- Implementation Plan: Layered Modules (route -> controller -> service -> repository)
+- Implementation: Layered Modules (route -> controller -> service -> repository)
 - users_utils.py
-- _reset_request_id
+- Implementation Plan: Layered Modules (route -> controller -> service -> repository)
 - test_job_description_summary.py
 - test_retrieval_eval.py
-- pytest
+- Role
 - Backend design and operations
 - UX design and engineering collaboration
 - Backend fundamentals
@@ -219,112 +219,110 @@
 - Behavioral notes for experienced candidates
 - Mobile architecture and releases
 - Mobile fundamentals
-- FeedbackEvalCase
+- summary
 - Communication and priorities
 - Engineering habits
 - Senior judgement
-- Learn: Knowledge-base RAG for the question writer (Slice 8a)
+- .stream
 - Design fundamentals
 - DevOps fundamentals
 - Test strategy and quality leadership
 - Quality assurance basics
 - Writing a knowledge-base note (guide)
-- Implementation Plan: Follow-up Questions (decide / write split)
+- check_layers
 - Template (copy to app/modules/interviews/data/knowledge/<topic>.md, then replace everything below the header; roles: see note-guide.md)
 - Langfuse CLI Reference
 - 9d04cd22055a_use_uuid_primary_key_for_users.py
 - interviewer_v7.md
 - interviewer_v7_json.md
-- Learn: Layered architecture (route -> controller -> service -> repository)
-- TranscriptionResult
-- Feature: Role-Based Access Control (single JWT)
+- _TextCollector
+- ProfileLLM
+- Learn: Knowledge-base RAG for the question writer (Slice 8a)
 - Implementation Plan: Résumé upload and candidate profile (Slice 8c)
 - Langfuse
 - traces
 - test_generation_eval.py
 - 2. Langfuse Documentation
-- Web
-- parse_log
-- test_login.py
 - Learn: Langfuse experiments for the interviews evals
-- lf
-- ContextManager
-- compute_overall
-- .stream
+- Learn: Layered architecture (route -> controller -> service -> repository)
+- Steps
+- test_tracing.py
+- _Usage
 - FakeLangfuse
+- cuewise-be
 
 ## God Nodes (most connected - your core abstractions)
-1. `Tracer` - 113 edges
-2. `User` - 112 edges
-3. `FakeProvider` - 110 edges
+1. `User` - 123 edges
+2. `Tracer` - 120 edges
+3. `FakeProvider` - 115 edges
 4. `JobRole` - 104 edges
-5. `LLMResult` - 94 edges
+5. `LLMResult` - 103 edges
 6. `Level` - 89 edges
 7. `InterviewQuestion` - 88 edges
 8. `InterviewType` - 87 edges
 9. `QuestionCategory` - 86 edges
-10. `InterviewsRepository` - 81 edges
+10. `LLMProvider` - 84 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `2. What it is` --references--> `ContextManager`  [INFERRED]
-  docs/features/context-management/learnings.md → app/core/ai/context.py
-- `Trade-offs & Rationale` --references--> `ContextManager`  [INFERRED]
-  docs/features/follow-up-questions/plan.md → app/core/ai/context.py
+- `6. Try it yourself` --references--> `get_tracer()`  [INFERRED]
+  docs/features/split-interviews-dependencies/learnings.md → app/core/ai/dependencies.py
 - `Acceptance Criteria` --references--> `Embedder`  [INFERRED]
   docs/features/knowledge-base-rag/spec.md → app/core/ai/embedder.py
 - `Functional` --references--> `Embedder`  [INFERRED]
   docs/features/knowledge-base-rag/spec.md → app/core/ai/embedder.py
 - `Acceptance Criteria` --references--> `FakeProvider`  [INFERRED]
   docs/features/context-management/spec.md → app/core/ai/fake.py
+- `Constraints` --references--> `FakeProvider`  [INFERRED]
+  docs/features/context-management/spec.md → app/core/ai/fake.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (269 total, 40 thin omitted)
+## Communities (287 total, 60 thin omitted)
 
-### Community 0 - "AuthController"
-Cohesion: 0.21
-Nodes (16): AuthController, Request -> service call, domain result -> response schema., login(), me(), post, register(), LoginIn, MeOut (+8 more)
+### Community 0 - "interviews_schema.py"
+Cohesion: 0.07
+Nodes (41): LevelGroup, MessageKind, MessageRole, StrEnum, QuestionSource, Reactions are warmer for people early in their career and briefer for…, Who wrote a stored question: the LLM, or the hand-written bank (fallback and…, Transcript item kinds: a question comes from interview_questions, the other two… (+33 more)
 
-### Community 1 - "LLMServerError"
-Cohesion: 0.10
-Nodes (36): anyio, Deepgram pre-recorded speech-to-text (`POST /v1/listen`, Nova models) over…, Any, Gemini embeddings through Google's native `batchEmbedContents` endpoint, over…, OpenAI-compatible chat completions over plain httpx (Google AI Studio,…, LLMError, LLMRateLimitError, LLMServerError (+28 more)
+### Community 1 - "LLMRateLimitError"
+Cohesion: 0.20
+Nodes (20): LLMRateLimitError, LLMRequestError, Other 4xx (bad key, bad request): retrying sends the same broken request again., parse_retry_after(), raise_for_status(), The Retry-After header as seconds. Only the delta-seconds form is read; an HTTP…, Map a vendor's HTTP status to the typed errors; 200 passes. `retry_after` is…, 4. How it works (+12 more)
 
-### Community 2 - "test_knowledge_postgres.py"
-Cohesion: 0.11
-Nodes (25): alembic_config, KnowledgeChunk, cuewise-be, Development database (Postgres 18 + pgvector), Reference notes (knowledge-base RAG), sqlalchemy_dialects, sqlalchemy_exc, chunk() (+17 more)
+### Community 2 - "Completed Steps"
+Cohesion: 0.07
+Nodes (44): Embedder, EmbeddingSizeError, Protocol, A vector of another length than configured. Vectors of different sizes can't be…, log_embedding_call(), log_retrieval(), One line per embedding call (ingest or retrieval): metadata only, never the…, Which reference notes an interview got at start: mode, count, scores and the… (+36 more)
 
-### Community 3 - "decode_token"
-Cohesion: 0.17
-Nodes (28): InvalidCredentialsError, TokenExpiredError, TokenInvalidError, TokenMissingError, UnauthorizedError, create_token(), decode_token(), Any (+20 more)
+### Community 3 - "config.py"
+Cohesion: 0.12
+Nodes (28): TokenExpiredError, TokenInvalidError, create_token(), decode_token(), Any, UUID, UUID, Implementation Steps (+20 more)
 
 ### Community 4 - "test_interview_report.py"
 Cohesion: 0.12
-Nodes (58): log_retrieval(), log_turn_summary(), Why the turn ended as it did: the only place an overridden follow-up or a bank…, Which reference notes an interview got at start: mode, count, scores and the…, analysis(), answer(), emit_answer_turn(), emit_call() (+50 more)
+Nodes (58): log_turn_summary(), Why the turn ended as it did: the only place an overridden follow-up or a bank…, analysis(), answer(), emit_answer_turn(), emit_call(), emit_follow_up_turn(), emit_http() (+50 more)
 
-### Community 5 - "auth_dependencies.py"
-Cohesion: 0.09
-Nodes (27): hash_password(), verify_password(), get_controller(), get_service(), Session, AuthRepository, Session, UUID (+19 more)
+### Community 5 - "auth_service.py"
+Cohesion: 0.11
+Nodes (29): hash_password(), verify_password(), AuthController, Request -> service call, domain result -> response schema., get_controller(), login(), me(), post (+21 more)
 
 ### Community 6 - "Cuewise BE — Project Instructions"
 Cohesion: 0.14
 Nodes (13): About the Project, AI Engineering Guidelines, Architecture: Modular, Feature-Driven, Code Principles, Common Commands, Cuewise BE — Project Instructions, Don'ts, FastAPI Best Practices & Standards (+5 more)
 
 ### Community 7 - "test_job_url_utils.py"
-Cohesion: 0.13
-Nodes (35): extract_job_text(), pasted_job_text(), The posting as plain text, or None when the page has too little text to be one…, A page the candidate copied from their own browser (for sites that block our…, At most `limit` characters, cut at the last whitespace so no word is split;…, truncate_on_word(), jsonld(), page() (+27 more)
-
-### Community 8 - "interviews_constants.py"
 Cohesion: 0.08
-Nodes (50): NoteSource, Where a note's content came from. A model grounding a model on its own drafts…, _check_hidden(), Corpus, CorpusError, _hash(), _listed(), load_corpus() (+42 more)
+Nodes (58): extract_job_text(), _find_posting(), _from_jsonld(), _from_main_content(), _html_to_text(), job_term_hits(), looks_like_job_posting(), pasted_job_text() (+50 more)
 
-### Community 9 - "Role"
-Cohesion: 0.11
-Nodes (29): Permission, permissions_for(), StrEnum, The only reader of ROLE_PERMISSIONS, so a DB-backed lookup can replace it later., Role, enum, test_admin_holds_every_user_permission(), test_every_role_has_a_permission_entry() (+21 more)
+### Community 8 - "interviews_knowledge_utils.py"
+Cohesion: 0.09
+Nodes (45): NoteSource, Where a note's content came from. A model grounding a model on its own drafts…, _check_hidden(), Corpus, CorpusError, _hash(), _listed(), load_corpus() (+37 more)
+
+### Community 9 - "test_guards.py"
+Cohesion: 0.13
+Nodes (20): CurrentUserDep, admin_role(), _assert_401(), authenticated(), parametrize, read_and_read_self(), test_bad_tokens_are_token_invalid(), test_expired_token_is_token_expired() (+12 more)
 
 ### Community 10 - "interviews_rag_evals.py"
 Cohesion: 0.05
-Nodes (93): Local time, as the Langfuse list shows the run's start: the name and the…, run_stamp(), _arm_notes(), ArmInterview, ArmSummary, build_sheet(), case_set_problems(), competencies_of() (+85 more)
+Nodes (90): _arm_notes(), ArmInterview, ArmSummary, build_sheet(), case_set_problems(), competencies_of(), filter_baseline(), generation_item() (+82 more)
 
 ### Community 11 - "test_list_interviews.py"
 Cohesion: 0.10
@@ -346,85 +344,85 @@ Nodes (39): ProviderConfig, BaseModel, One listed provider, resolved from its ve
 Cohesion: 0.14
 Nodes (25): anyio_backend(), Clock, listen_body(), make_transcriber(), ok(), fixture, parametrize, Response (+17 more)
 
-### Community 16 - "interviews_job_url_utils.py"
-Cohesion: 0.11
-Nodes (20): _find_posting(), _from_jsonld(), _from_main_content(), _html_to_text(), job_term_hits(), _plain(), _posting_text(), Turn a fetched job page into plain job-description text (Slice 8b). Pure… (+12 more)
+### Community 16 - ".record_turn"
+Cohesion: 0.06
+Nodes (37): Save one whole turn in one commit: advance the session, the answer, the…, done(), Deviations from Plan, 1. Why it exists, 2. What it is, 3. When to use it, 6. Try it yourself, 7. What surprised me (+29 more)
 
 ### Community 17 - "test_feedback_evals.py"
-Cohesion: 0.16
-Nodes (19): Grader, Step 8 of the feedback plan: the feedback eval task (`--task feedback`). The…, A fake provider: scores every criterion `value`, quoting the start of each…, _result(), run_main(), scores_on(), test_a_langfuse_outage_does_not_change_the_run(), test_a_single_run_posts_no_spread() (+11 more)
+Cohesion: 0.06
+Nodes (70): Band, _band_check(), check_feedback(), criterion_spread(), feedback_dataset_items(), feedback_trace_output(), FeedbackCaseResult, FeedbackEvalCase (+62 more)
 
 ### Community 18 - "test_safe_fetch.py"
 Cohesion: 0.13
 Nodes (42): FetchedPage, Refused before connecting, or the network side failed (DNS, timeout,…, UrlUnreachableError, FakeResolver, fetcher(), public(), parametrize, Request (+34 more)
 
-### Community 19 - "User"
-Cohesion: 0.06
-Nodes (78): alias, AnswerControllerDep, User, HistorySortColumn, The history columns GET /interviews sorts by; the values are the response's…, SessionStatus, SortDirection, interview_out() (+70 more)
+### Community 19 - "interviews_route.py"
+Cohesion: 0.11
+Nodes (40): alias, AnswerControllerDep, Permission, Route guard: the caller's DB role must grant every permission in `perms`., require_permissions(), interview_out(), answer_question(), answer_question_stream() (+32 more)
 
 ### Community 20 - "test_tracing_lifespan.py"
 Cohesion: 0.25
 Nodes (6): fastapi_testclient, The app lifespan builds the tracer once and flushes it on shutdown (langfuse-…, RecordingClient, _run_app(), test_shutdown_completes_even_when_the_flush_fails(), test_shutdown_flushes_then_stops_the_tracer()
 
-### Community 26 - "LLMResult"
-Cohesion: 0.09
-Nodes (51): ContextTooLargeError, Exception, Even with every droppable entry gone the input is over the strategy's limit., LLMResult, The LLM contract every feature codes against: message/result types, typed…, decide(), UUID, The decide step of an answer turn: the model suggests following up or moving… (+43 more)
+### Community 26 - "interviews_constants.py"
+Cohesion: 0.05
+Nodes (50): The decide step of an answer turn: the model suggests following up or moving…, _Attempts, CallUsage, FeedbackGenerator, hint_for(), log_feedback_summary(), tokens(), NamedTuple (+42 more)
 
 ### Community 27 - "test_stream_turn.py"
-Cohesion: 0.15
-Nodes (35): FakeStream, NamedTuple, A scripted streamed reply: these chunks (each after `delay` seconds), then…, Delta, The next chunk of the question being written (shown as it arrives)., The question text streamed so far is taken back: that draft failed, another one…, Reset, What a streamed answer turn is doing, sent as `status` events so the candidate… (+27 more)
+Cohesion: 0.16
+Nodes (32): FakeStream, A scripted streamed reply: these chunks (each after `delay` seconds), then…, StrEnum, What the turn ends with, after the limits: the model can only ask for the first…, TurnAction, What a streamed answer turn is doing, sent as `status` events so the candidate…, TurnPhase, collect() (+24 more)
 
 ### Community 28 - "test_feedback_endpoint.py"
-Cohesion: 0.07
-Nodes (75): FeedbackStatus, A feedback row's life: `generating` while a request holds it, then `generated`…, Who wrote the feedback text: the write call, or the code's template when that…, TextSource, InterviewFeedback, The end-of-interview feedback: at most one per interview (the unique session_id…, The first claim of an interview's feedback. False when another request inserted…, 1. Why it exists (+67 more)
+Cohesion: 0.08
+Nodes (69): 1. Why it exists, 2. What it is, 3. When to use it, 5. What can go wrong, 7. What surprised me, 8. Check your understanding, 9. Go deeper / Still open, Eval log (+61 more)
 
 ### Community 29 - "test_context_strategies.py"
 Cohesion: 0.17
-Nodes (37): 5. What can go wrong, decide(), fu(), full(), inputs(), parametrize, Follow-up k on main question i., test_a_follow_up_write_call_states_the_follow_up_and_its_gap() (+29 more)
+Nodes (37): decide(), fu(), full(), inputs(), parametrize, Follow-up k on main question i., test_a_follow_up_write_call_states_the_follow_up_and_its_gap(), test_a_maximum_interview_stays_under_the_limit_and_beats_full_history_once_it_outgrows_the_window() (+29 more)
 
 ### Community 30 - "test_answer_stream.py"
-Cohesion: 0.06
-Nodes (32): 5. What can go wrong, 6. Try it yourself, AnswerController.stream_answer driven directly, for what a test client can't…, saved_answers(), summaries(), test_closing_the_stream_mid_turn_saves_nothing(), test_leaving_while_the_decide_call_runs_saves_nothing(), test_leaving_while_the_question_streams_cancels_the_call_and_saves_nothing() (+24 more)
+Cohesion: 0.08
+Nodes (19): assert_one_terminal(), follow_up_json(), message_count(), fixture, parametrize, POST /interviews/{id}/messages/stream: one answer turn as Server-Sent Events…, An owner with a started 3-question behavioral interview: (owner, session_id,…, started() (+11 more)
 
 ### Community 31 - "test_transcript.py"
-Cohesion: 0.28
-Nodes (10): fixture, shape(), started(), test_abandoned_session_stops_where_it_was_left(), test_answered_turns_come_back_in_conversation_order(), test_completed_session_shows_every_question(), test_fresh_session_shows_only_the_first_question(), test_missing_and_foreign_sessions_are_the_same_404() (+2 more)
+Cohesion: 0.27
+Nodes (11): fixture, shape(), started(), test_a_legacy_answer_without_a_reaction_has_no_item(), test_abandoned_session_stops_where_it_was_left(), test_answered_turns_come_back_in_conversation_order(), test_completed_session_shows_every_question(), test_fresh_session_shows_only_the_first_question() (+3 more)
 
-### Community 32 - "KnowledgeRepository"
-Cohesion: 0.08
-Nodes (34): Embedder, Protocol, KnowledgeRepository, Session, Database access for the reference-note corpus. No business rules: which rows to…, Remove retired rows no interview points at (with their scopes); returns how…, End the read transaction before a slow call (the embedding), so no connection…, Store one chunk with its scopes, retiring the row it replaces, in one commit (a… (+26 more)
+### Community 32 - "Slices in detail"
+Cohesion: 0.12
+Nodes (16): 8a: Knowledge-base RAG for the question writer, 8b: Job URL, 8c: Résumé upload, 8d: Résumé-aware interview, 8e: Feedback grounding, Slice 10: Provider fallback chain, Slice 1: Answer → reply (no streaming), Slice 2: Prompts as data + injection safety (+8 more)
 
 ### Community 33 - "Feature: Context Management for the Interview LLM Calls"
 Cohesion: 0.13
 Nodes (14): Acceptance Criteria, Blockers, Constraints, Edge Cases, Feature: Context Management for the Interview LLM Calls, Functional, Goal, Non-Functional (+6 more)
 
 ### Community 34 - "RateLimiter"
-Cohesion: 0.22
-Nodes (10): RateLimiter, In-memory fixed-window rate limiting for sensitive endpoints. Per process only:…, Count one request for `key`: None when allowed, else whole seconds until its…, Clock, test_a_new_window_allows_again(), test_allows_the_limit_then_refuses_with_the_seconds_left(), test_each_key_has_its_own_window(), test_refused_hits_do_not_extend_the_window() (+2 more)
+Cohesion: 0.14
+Nodes (17): RateLimiter, In-memory fixed-window rate limiting for sensitive endpoints. Per process only:…, Count one request for `key`: None when allowed, else whole seconds until its…, get_resume_limiter(), Tests swap in a fresh limiter so counts never leak between them., math, Clock, test_a_new_window_allows_again() (+9 more)
 
-### Community 35 - "Completed Steps"
-Cohesion: 0.11
-Nodes (29): log_embedding_call(), One line per embedding call (ingest or retrieval): metadata only, never the…, Why vector mode fell back to filter mode (logged as…, Why an interview has no reference notes at all (logged as…, RetrievalDegrade, RetrievalSkip, _eligible(), EligibleChunk (+21 more)
+### Community 35 - "test_profile_read_resume.py"
+Cohesion: 0.10
+Nodes (53): make_docx(), A copy of a zip (a DOCX) with parts added or replaced: macros, embedded…, rezip(), _clean(), _has_external_relationship(), Exception, NamedTuple, Reading an uploaded résumé: untrusted bytes in, visible text in reading order… (+45 more)
 
 ### Community 36 - "test_reference_note_context.py"
-Cohesion: 0.17
-Nodes (21): A note an interview was given: what the question writer sees (competency and…, ReferenceNote, 5. What can go wrong, first_user(), inputs(), _max_note(), anyio, parametrize (+13 more)
+Cohesion: 0.15
+Nodes (21): A main-question write of an interview with reference notes: the notes-aware…, WithReferenceNotes, 5. What can go wrong, first_user(), inputs(), _max_note(), anyio, parametrize (+13 more)
 
-### Community 37 - "safe_fetch.py"
-Cohesion: 0.09
-Nodes (17): FetchError, is_public_address(), BaseTransport, Exception, Fetch a web page whose address a user chose, without letting that user reach…, True only for a globally routable unicast address., codecs, 1. Why it exists (+9 more)
+### Community 37 - "SafeFetcher"
+Cohesion: 0.05
+Nodes (33): _decode(), FetchError, is_public_address(), BaseTransport, Exception, Response, Fetch a web page whose address a user chose, without letting that user reach…, Scheme, credentials, port and every resolved address. Returns the address to… (+25 more)
 
 ### Community 38 - "Feature: LLM as the Interviewer (it asks the questions)"
 Cohesion: 0.10
 Nodes (20): Acceptance Criteria, Acceptance Criteria, Blockers, Changes to earlier specs, Constraints, Edge Cases, Feature: LLM as the Interviewer (it asks the questions), Functional (+12 more)
 
-### Community 39 - "QuestionTurn"
+### Community 39 - "interviews_context.py"
 Cohesion: 0.08
-Nodes (43): build_interviewer_messages(), interviewer_history(), job_description_block(), NamedTuple, QuestionTurn, One answered question as the interviewer LLM sees it (reactions are app copy,…, Fill {{name}} placeholders in one pass: inserted values are never scanned…, Only trusted values go in here; the job description and answers never enter the… (+35 more)
+Nodes (33): StrategyOutput, build_context_manager(), _counts(), FeedbackScore, FeedbackWrite, FollowUpDecision, FullHistory, JobDescriptionSummary (+25 more)
 
 ### Community 40 - "test_layers.py"
-Cohesion: 0.17
-Nodes (20): ast, 5. What can go wrong, Blockers & Resolutions, Known Issues, check_layers(), _imports(), _one(), The layer rules of app/modules (CLAUDE.md, "Architecture"): route -> controller… (+12 more)
+Cohesion: 0.32
+Nodes (11): ast, 5. What can go wrong, _one(), The layer rules of app/modules (CLAUDE.md, "Architecture"): route -> controller…, test_a_feature_importing_another_features_repository_is_reported(), test_a_layer_file_left_at_a_module_root_is_reported(), test_controller_importing_a_repository_the_llm_or_the_db_session_is_reported(), test_repository_importing_a_service_controller_or_route_is_reported() (+3 more)
 
 ### Community 41 - "Implementation: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1)"
 Cohesion: 0.12
@@ -435,44 +433,44 @@ Cohesion: 0.27
 Nodes (10): error_of(), test_app_error_returns_standard_shape(), test_auth_error_sends_bearer_challenge_and_specific_code(), test_crash_details_shown_only_in_debug(), test_crash_returns_generic_500_without_details(), test_database_unreachable_returns_503(), test_integrity_error_returns_generic_conflict(), test_malformed_json_returns_readable_validation_error() (+2 more)
 
 ### Community 43 - "interviews_report_render.py"
-Cohesion: 0.13
-Nodes (33): Checks, bad_parent(), Metric, One number with its meaning. `fraction` (0..1) draws a meter in the HTML;…, Each check with the problems it found (none = passed)., _cell_class(), _heading(), _html_block() (+25 more)
+Cohesion: 0.14
+Nodes (29): Metric, One number with its meaning. `fraction` (0..1) draws a meter in the HTML;…, _cell_class(), _heading(), _html_block(), _html_header(), _html_item(), _html_list_card() (+21 more)
 
 ### Community 44 - "interviews_job_url_service.py"
-Cohesion: 0.07
-Nodes (52): JobTextUnreadableError, JobUrlUnreachableError, A pasted page held no job description (too little text, or not recognisably a…, Any network-side failure of a job link. One message for every cause, so…, _decode(), Response, Header charset, else a <meta> charset, else UTF-8; never raises (bad bytes…, The server answered, but not with an HTML page we are willing to read. (+44 more)
+Cohesion: 0.11
+Nodes (36): JobTextUnreadableError, JobUrlUnreachableError, JobUrlUnreadableError, The job link answered, but no job description could be read from it (not HTML,…, A pasted page held no job description (too little text, or not recognisably a…, Any network-side failure of a job link. One message for every cause, so…, The server answered, but not with an HTML page we are willing to read., ResponseUnreadableError (+28 more)
 
-### Community 45 - "AnswerService"
+### Community 45 - "interviews_answer_service.py"
 Cohesion: 0.06
-Nodes (61): QuestionNotCurrentError, log_stream_summary(), How a streamed turn felt and ended: time to the first event and to the first…, PhaseChanged, The SSE event names of a streamed turn: the contract with the client. `done`…, StreamEvent, answer_out(), AnswerController (+53 more)
+Nodes (65): QuestionNotCurrentError, log_stream_summary(), How a streamed turn felt and ended: time to the first event and to the first…, Delta, PhaseChanged, The next chunk of the question being written (shown as it arrives)., The question text streamed so far is taken back: that draft failed, another one…, Reset (+57 more)
 
 ### Community 46 - "test_transcribe.py"
-Cohesion: 0.12
-Nodes (15): code(), fixture, parametrize, An owner with a started backend interview: (owner, session_id)., started(), test_a_blank_transcript_is_no_speech(), test_a_disallowed_type_or_mismatched_signature_is_415(), test_a_reported_duration_over_125_s_is_too_long() (+7 more)
+Cohesion: 0.07
+Nodes (25): FakeTranscriber, Scripted transcripts (text, a full result, or an error), one per call; records…, BaseModel, What the vendor heard. `text` may be blank (silence); the caller decides what…, `audio` is a whole recording in a container the vendor detects itself (WebM,…, TranscriptionResult, The speech-to-text seam of a test: a scripted transcriber and a fresh per-test…, No transcriber configured (DEEPGRAM_API_KEY blank). (+17 more)
 
 ### Community 47 - "Implementation: Follow-up Questions (decide / write split)"
 Cohesion: 0.14
 Nodes (13): 12. Measure, tune, document, Changes Made, Current Step, Deviations from Plan, Implementation: Follow-up Questions (decide / write split), Known Issues, Links, Open Questions (+5 more)
 
 ### Community 48 - "test_evals.py"
-Cohesion: 0.07
-Nodes (100): FakeProvider, load_cases(), main(), pause_for(), Path, Seconds to wait between cases: what `--pause-seconds` asked for, else the…, run_case(), 5. What can go wrong (+92 more)
+Cohesion: 0.11
+Nodes (47): load_cases(), main(), pause_for(), _print_summary(), Path, One run proves little (the same cases scored 5/6, then 6/6): look at the spread…, Seconds to wait between cases: what `--pause-seconds` asked for, else the…, RunsSummary (+39 more)
 
 ### Community 49 - "test_feedback_contract.py"
-Cohesion: 0.20
-Nodes (30): assess_evidence(), parse_score_reply(), The score call's closed JSON, checked against the interview it scored. Raises…, The pre-check, before any LLM call: enough main questions have a real answer to…, parametrize, question_json(), The feedback contract (interviews_feedback.py): the code pre-check, the score…, reason_of() (+22 more)
+Cohesion: 0.06
+Nodes (84): assess_evidence(), _check_lengths(), compute_overall(), Evidence, FeedbackThread, _has_markup(), _normalized(), parse_score_reply() (+76 more)
 
 ### Community 50 - "interviews_model.py"
+Cohesion: 0.08
+Nodes (42): alembic_config, Run migrations in 'offline' mode. This configures the context with just a URL…, Run migrations in 'online' mode. In this scenario we need to create an Engine…, run_migrations_offline(), run_migrations_online(), Primary key for every table (CLAUDE.md IDs rule). UUIDv7 is time-ordered, so…, UUIDPrimaryKeyMixin, Base (+34 more)
+
+### Community 51 - "LLMResult"
+Cohesion: 0.09
+Nodes (50): LLMResult, ReasoningEffort, The reply as it is generated: text chunks, then one final LLMResult (the joined…, InterviewerInputs, Plain values for one interviewer or decide call., decide(), UUID, At most two attempts within the decide cap; any failure means "next_question"… (+42 more)
+
+### Community 52 - "CandidateProfile"
 Cohesion: 0.10
-Nodes (28): Run migrations in 'offline' mode. This configures the context with just a URL…, Run migrations in 'online' mode. In this scenario we need to create an Engine…, run_migrations_offline(), run_migrations_online(), downgrade(), Downgrade schema. The `vector` extension stays: other database objects may use…, Primary key for every table (CLAUDE.md IDs rule). UUIDv7 is time-ordered, so…, UUIDPrimaryKeyMixin (+20 more)
-
-### Community 51 - "Interviewer"
-Cohesion: 0.19
-Nodes (16): Interviewer, Deadline, The turn's LLM time budget, set once and asked by every call (an injectable…, UUID, The same turn as `answer_turn` (same decide, limits and fallbacks), telling the…, What the turn does after the decision, before the write call: shared by the…, TurnOutcome, WritePlan (+8 more)
-
-### Community 52 - "FollowUpAction"
-Cohesion: 0.11
-Nodes (32): Decision, parse_decision_reply(), The decide call suggests; the code still applies the follow-up cap and the time…, _RawDecision, apply_limits(), plan_write(), The code's say over the model's: returns the action and why it overrode the…, After the decision: the code's limits pick the action, and whether a write call… (+24 more)
+Nodes (43): CandidateProfile, Project, BaseModel, The candidate profile: what a résumé becomes, what is stored, and what the API…, The multipart upload: exactly one part, `file`. Extra form fields are refused., ResumeUploadIn, Role, ExpectedProfile (+35 more)
 
 ### Community 53 - "test_create_interview.py"
 Cohesion: 0.16
@@ -483,84 +481,88 @@ Cohesion: 0.19
 Nodes (15): llm_lines(), parametrize, result(), stored_questions(), test_a_provider_error_falls_back_to_the_bank_without_a_retry(), test_an_invalid_reply_is_retried_once(), test_cache_and_reasoning_tokens_are_logged_when_reported(), test_every_call_logs_one_line_without_any_content() (+7 more)
 
 ### Community 55 - "test_job_url.py"
-Cohesion: 0.14
-Nodes (37): 5. What can go wrong, fail(), error(), import_url(), _post(), long_posting(), page(), paste() (+29 more)
+Cohesion: 0.15
+Nodes (34): Open Questions, fail(), error(), import_url(), long_posting(), page(), paste(), parametrize (+26 more)
 
 ### Community 56 - "test_openai_compatible_stream.py"
 Cohesion: 0.13
 Nodes (25): anyio_backend(), chunk(), Clock, drain(), Interrupted, make_provider(), ok(), Exception (+17 more)
 
 ### Community 57 - "interviews_report.py"
-Cohesion: 0.09
-Nodes (50): analyze_interview(), analyze_rollup(), _answer_growth(), _avg(), Bundle, _call_table(), _consistency(), _cost() (+42 more)
+Cohesion: 0.07
+Nodes (62): Call, group_requests(), _int(), LogEvent, NamedTuple, Reading the app's own log back: what each request did for an interview, from…, One `llm_call` line, with the size the context builder estimated for its input…, One HTTP request that touched an interview: the start, or one answer. (+54 more)
 
 ### Community 58 - "test_openai_compatible.py"
 Cohesion: 0.11
 Nodes (34): Clock, completion(), make_provider(), fixture, parametrize, A chat-completions body in the OpenAI-compatible shape that Google AI Studio,…, Fake monotonic clock: `sleep` advances it, so retry timing is exact and instant., Provider whose HTTP layer is a scripted list of responses (or exceptions), one… (+26 more)
 
 ### Community 59 - "FakeClient"
-Cohesion: 0.10
-Nodes (10): FakeClient, FakeObservation, test_close_survives_a_failing_flush(), test_score_failure_is_swallowed(), test_score_reports_whether_it_was_sent(), test_setting_the_trace_output_is_a_no_op_when_off_and_never_raises(), test_steps_and_checks_are_no_ops_when_off_and_never_raise_when_langfuse_fails(), test_trace_with_a_broken_sdk_still_runs_the_body_and_keeps_its_exception() (+2 more)
+Cohesion: 0.09
+Nodes (11): FakeClient, FakeObservation, test_close_survives_a_failing_flush(), test_score_failure_is_swallowed(), test_score_reports_whether_it_was_sent(), test_sdk_failure_does_not_mask_the_llm_error(), test_setting_the_trace_output_is_a_no_op_when_off_and_never_raises(), test_steps_and_checks_are_no_ops_when_off_and_never_raise_when_langfuse_fails() (+3 more)
 
-### Community 61 - "InterviewQuestion"
-Cohesion: 0.05
-Nodes (52): InterviewMessage, InterviewQuestion, InterviewSession, A candidate answer or the interviewer's reaction to one question. The questions…, A question as it was shown: written by the LLM, or snapshotted from the bank…, _history_filter(), _history_order(), InterviewsRepository (+44 more)
+### Community 61 - "InterviewsRepository"
+Cohesion: 0.08
+Nodes (24): InterviewSession, _history_filter(), _history_order(), InterviewsRepository, Any, datetime, Session, UUID (+16 more)
 
-### Community 62 - "ConsoleFormatter"
-Cohesion: 0.05
-Nodes (42): 1. Inventory every prompt (before writing any code), 2. Convert templating and decide structure, 3. Present the plan, then create and refactor, 4. Verify, Langfuse Prompt Migration, Prerequisites, ConsoleFormatter, `llm_call a=1 b=2` -> ("llm_call", [("a", "1"), ("b", "2")]). Any other message… (+34 more)
+### Community 62 - "profile_service.py"
+Cohesion: 0.08
+Nodes (28): build_messages(), extract_profile(), Extraction, ExtractionFailedError, load_prompt(), Exception, NamedTuple, The extraction call: scrubbed résumé text in, a validated profile out (resume-… (+20 more)
 
 ### Community 63 - "job_description_summary_v2.md"
 Cohesion: 0.29
 Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 
+### Community 64 - "FakeProvider"
+Cohesion: 0.14
+Nodes (32): FakeProvider, run_case(), console_number(), long_case(), noted(), reply(), run_task(), test_a_failed_check_is_scored_false_with_its_detail() (+24 more)
+
 ### Community 65 - "FakeEmbedder"
-Cohesion: 0.11
-Nodes (34): FakeEmbedder, Deterministic vectors (seeded by each text), or scripted ones per text so a…, How an interview's reference notes were picked: ranked by meaning against the…, RetrievalMode, test_fake_embedder_honors_scripted_vectors_and_errors(), test_fake_embedder_is_deterministic_and_records_texts_kinds_and_budgets(), competencies(), corpus() (+26 more)
+Cohesion: 0.13
+Nodes (33): EmbedCall, FakeEmbedder, NamedTuple, Deterministic vectors (seeded by each text), or scripted ones per text so a…, How an interview's reference notes were picked: ranked by meaning against the…, RetrievalMode, test_fake_embedder_is_deterministic_and_records_texts_kinds_and_budgets(), competencies() (+25 more)
 
-### Community 66 - "test_follow_ups.py"
-Cohesion: 0.25
-Nodes (17): 8. Check your understanding, answers(), follow_up_json(), Follow-up questions through the answer endpoint: the decide call suggests, the…, Answer whatever is asked until the interview completes; returns every answer…, rows(), run_to_end(), summaries() (+9 more)
+### Community 66 - "PageParams"
+Cohesion: 0.06
+Nodes (43): Page, page_params(), PageParams, BaseModel, NamedTuple, Query, Offset pagination shared by every list endpoint, so clients see one query…, InterviewListOut (+35 more)
 
-### Community 67 - "hint_for"
-Cohesion: 0.22
-Nodes (10): hint_for(), The hint for a failure code (`invalid_reply:<reason>`, `empty_reply`, a…, inspect, parametrize, Hints for feedback failures: where to look first, shown in Langfuse next to the…, reason_codes(), test_a_rate_limit_hint_says_it_is_not_a_quality_problem(), test_every_other_failure_has_a_hint() (+2 more)
+### Community 67 - "test_profile_routes.py"
+Cohesion: 0.12
+Nodes (33): profile_json(), Synthetic résumé data and the scripted model shared by the profile tests (no…, resume_docx(), resume_pdf(), body_profile(), parametrize, The profile routes end to end: scripted model behind the real tracing wrapper,…, stored() (+25 more)
 
-### Community 68 - "interviews_feedback_service.py"
-Cohesion: 0.10
-Nodes (30): FeedbackFailedError, The LLM could not produce valid scores in time: nothing partial is returned;…, FeedbackWriteInputs, Plain values for the write call: the stored scores and evidence, never the…, build_threads(), FeedbackThread, The scores and evidence from the score call, then the text. Read back through…, The validated scores with their questions' text and category, ready to store… (+22 more)
+### Community 68 - "InterviewQuestion"
+Cohesion: 0.07
+Nodes (35): build_threads(), Stored rows as plain values, one thread per main question in interview order (a…, InterviewMessage, InterviewQuestion, A candidate answer or the interviewer's reaction to one question. The questions…, A question as it was shown: written by the LLM, or snapshotted from the bank…, Every stored question, grouped by interview in creation order (UUIDv7), for the…, HistoryPage (+27 more)
 
 ### Community 69 - "test_answer_llm.py"
-Cohesion: 0.13
-Nodes (19): 2. What it is, Learning Log (`learnings.md`), 5. What can go wrong, Known Follow-ups (story 3: Chat with the interviewer), messages(), questions(), Answer every question of a started interview; returns the list of answer…, run_interview() (+11 more)
+Cohesion: 0.10
+Nodes (25): 2. What it is, Learning Log (`learnings.md`), 5. What can go wrong, Known Follow-ups (story 3: Chat with the interviewer), db(), Fresh in-memory SQLite DB per test, wired into the app's get_db dependency., failing_commit(), messages() (+17 more)
 
 ### Community 71 - "interviews_feedback_evals.py"
 Cohesion: 0.04
-Nodes (76): ExperimentRun, NamedTuple, What a recorded experiment run left behind: its name and link, and the trace of…, _evaluation(), final_line(), git_commit(), notes_fingerprint(), pacer() (+68 more)
+Nodes (87): build_tracer(), ExperimentRun, NamedTuple, What a recorded experiment run left behind: its name and link, and the trace of…, On only when both keys are set. `environment` overrides APP_ENV (the eval…, _evaluation(), final_line(), git_commit() (+79 more)
 
-### Community 72 - "interviews_transcription_dependencies.py"
-Cohesion: 0.11
-Nodes (21): Protocol, The speech-to-text contract features code against, separate from the text-only…, Transcriber, RateLimitedError, Raise with `headers={"Retry-After": "<seconds>"}`., UUID, Voice answers: request -> TranscriptionService, text -> TranscriptionOut. The…, TranscriptionController (+13 more)
+### Community 72 - "hints_of"
+Cohesion: 0.36
+Nodes (9): hints_of(), mentions(), The hints on one case's result in Langfuse., test_a_cut_off_reply_hints_at_max_tokens_before_quality(), test_a_reply_that_does_not_parse_hints_at_the_format(), test_a_right_action_with_a_different_gap_hints_at_an_ambiguous_label(), test_over_probing_a_normal_case_does_not_blame_an_injection(), test_over_probing_an_injection_case_hints_at_injected_text_and_an_invented_answer() (+1 more)
 
 ### Community 73 - "exception_handlers.py"
-Cohesion: 0.18
-Nodes (23): app_error_handler(), _error_response(), http_exception_handler(), integrity_error_handler(), operational_error_handler(), Any, Exception, FastAPI (+15 more)
+Cohesion: 0.19
+Nodes (22): app_error_handler(), _error_response(), http_exception_handler(), integrity_error_handler(), operational_error_handler(), Any, Exception, FastAPI (+14 more)
 
 ### Community 74 - "errors.py"
-Cohesion: 0.13
-Nodes (29): AppError, AudioTooLargeError, AudioTooLongError, BadRequestError, ConflictError, ErrorBody, FeedbackInProgressError, FeedbackNotFoundError (+21 more)
+Cohesion: 0.08
+Nodes (45): Protocol, Transcriber, AppError, AudioTooLargeError, AudioTooLongError, BadRequestError, ConflictError, ErrorBody (+37 more)
 
-### Community 75 - "test_tracing.py"
-Cohesion: 0.10
-Nodes (10): client(), propagated(), fixture, Langfuse tracing: the Tracer (on/off, fail-open) and the TracingProvider…, _settings(), test_both_keys_build_an_enabled_tracer(), test_close_on_a_disabled_tracer_does_nothing(), test_no_keys_builds_a_disabled_tracer_without_warning() (+2 more)
+### Community 75 - "traced"
+Cohesion: 0.17
+Nodes (20): drain(), result(), test_a_redacted_call_records_a_placeholder_instead_of_the_messages(), test_a_redacted_failure_records_no_partial_text(), test_a_redacted_stream_closed_early_records_no_partial_text(), test_a_redacted_success_keeps_model_usage_and_labels_but_not_the_reply(), test_an_unlabelled_call_still_records_full_content(), test_call_without_labels_still_gets_a_name() (+12 more)
 
-### Community 76 - "check_feedback"
-Cohesion: 0.14
-Nodes (11): Band, _band_check(), check_feedback(), FeedbackEvalQuestion, FeedbackEvalTurn, BaseModel, model_validator, Self (+3 more)
-
-### Community 77 - "Implementation Steps"
+### Community 76 - "Implementation: Résumé upload and candidate profile (Slice 8c)"
 Cohesion: 0.12
-Nodes (14): ReasoningEffort, A text reply is streamed word by word; a FakeStream as scripted. An LLMError…, Implementation Steps, Phase A: plumbing and progress events, Phase B: streaming the question text, Step 11: `FakeProvider.stream`, Step 14: The event loop stays free, Step 15: Evals (+6 more)
+Nodes (16): 6. Read the résumé, Baseline Failures, Changes Made, Completed Steps, Current Step, Deviations from Plan, Implementation: Résumé upload and candidate profile (Slice 8c), Known Issues (+8 more)
+
+### Community 77 - "profile_reply.py"
+Cohesion: 0.15
+Nodes (27): EmptyProfileError, fit(), parse_profile_reply(), BaseModel, Exception, The contract for the profile-extraction reply, and the check that enforces it.…, No skills and no roles: not a résumé we can use (refused as unreadable, nothing…, Whitespace tidied, then cut to `max_length` on a word boundary (a single over-… (+19 more)
 
 ### Community 78 - "Implementation: Start an Interview (backend)"
 Cohesion: 0.14
@@ -571,40 +573,40 @@ Cohesion: 0.20
 Nodes (7): Credentials, Discovery, Install, Langfuse CLI Reference, Tips, Skill Feedback, Submission options
 
 ### Community 80 - "Implementation: SSE Streaming of the Interview Turn (Slice 4)"
-Cohesion: 0.17
-Nodes (11): Changes Made, Deviations from Plan, Implementation: SSE Streaming of the Interview Turn (Slice 4), Known Issues, Links, Open Questions, Skills Consulted During Implementation, Status (+3 more)
+Cohesion: 0.18
+Nodes (10): Changes Made, Deviations from Plan, Implementation: SSE Streaming of the Interview Turn (Slice 4), Known Issues, Links, Open Questions, Skills Consulted During Implementation, Status (+2 more)
 
-### Community 81 - "run_feedback_case"
-Cohesion: 0.19
-Nodes (19): feedback_trace_output(), One case through the same pre-check, score call, write call and template…, What came out next to what was wanted: the verdict, the overall against its…, run_feedback_case(), case(), test_a_case_in_its_band_passes_every_check(), test_a_passing_case_has_no_hints(), test_a_provider_error_is_the_cases_error() (+11 more)
+### Community 81 - "profile_dependencies.py"
+Cohesion: 0.11
+Nodes (25): get_profile_clock(), get_profile_controller(), get_profile_now(), get_profile_service(), limit_resume_uploads(), datetime, Depends, ProfileUser (+17 more)
 
-### Community 82 - "fake.py"
-Cohesion: 0.08
-Nodes (39): EmbeddingKind, EmbeddingResult, EmbeddingSizeError, BaseModel, StrEnum, The embedding contract features code against, separate from the chat…, A vector of another length than configured. Vectors of different sizes can't be…, EmbedCall (+31 more)
+### Community 82 - "provider.py"
+Cohesion: 0.09
+Nodes (37): anyio, Deepgram pre-recorded speech-to-text (`POST /v1/listen`, Nova models) over…, Request dependencies for the AI services every feature shares, built once at…, EmbeddingResult, BaseModel, The embedding contract features code against, separate from the chat…, Test doubles for LLMProvider, Transcriber and Embedder: scripted replies or…, Gemini embeddings through Google's native `batchEmbedContents` endpoint, over… (+29 more)
 
 ### Community 83 - "Feature: Knowledge-Base RAG for the Question Writer (Slice 8a)"
-Cohesion: 0.13
-Nodes (14): Acceptance Criteria, Assumptions to verify, Blockers, Edge Cases, Feature: Knowledge-Base RAG for the Question Writer (Slice 8a), Functional, Goal, Non-Functional (+6 more)
+Cohesion: 0.14
+Nodes (13): Acceptance Criteria, Assumptions to verify, Blockers, Edge Cases, Feature: Knowledge-Base RAG for the Question Writer (Slice 8a), Functional, Goal, Non-Functional (+5 more)
 
-### Community 84 - "interviews_log.py"
-Cohesion: 0.15
-Nodes (14): Call, group_requests(), _int(), LogEvent, NamedTuple, Reading the app's own log back: what each request did for an interview, from…, One `llm_call` line, with the size the context builder estimated for its input…, One HTTP request that touched an interview: the start, or one answer. (+6 more)
+### Community 84 - "parse_log"
+Cohesion: 0.29
+Nodes (10): parse_log(), Lines that aren't a log record (the continuation lines of a traceback) are…, render_text(), lines_of(), Collapse the table padding so assertions don't depend on column widths., rollup(), rollup_analysis(), squash() (+2 more)
 
-### Community 85 - "interviews_context.py"
+### Community 85 - "User"
 Cohesion: 0.08
-Nodes (38): StrategyOutput, ChatMessage, BaseModel, One turn of the conversation sent to the model. The model keeps no memory:…, build_context_manager(), _counts(), FeedbackScore, FeedbackWrite (+30 more)
+Nodes (28): get_db(), Session, get_service(), Depends, Session, User, AuthRepository, Session (+20 more)
 
 ### Community 86 - "LLMTimeoutError"
-Cohesion: 0.11
-Nodes (16): DeepgramTranscriber, _parse(), AsyncBaseTransport, Random, Response, The first channel's best transcript (blank for silence) and the reported audio…, LLMTimeoutError, 1. Why it exists (+8 more)
+Cohesion: 0.10
+Nodes (17): DeepgramTranscriber, _parse(), AsyncBaseTransport, Random, Response, The first channel's best transcript (blank for silence) and the reported audio…, LLMTimeoutError, 5. Triage: what kind of failure is it? (+9 more)
 
-### Community 87 - "traced"
+### Community 87 - "EmbeddingKind"
 Cohesion: 0.19
-Nodes (17): drain(), result(), test_call_without_labels_still_gets_a_name(), test_complete_records_one_generation_with_full_content_and_usage(), test_disabled_tracer_is_a_pass_through(), test_failed_call_is_marked_error_and_the_same_exception_is_raised(), test_missing_usage_is_omitted_never_guessed(), test_retried_call_is_one_generation_with_attempts() (+9 more)
+Nodes (22): EmbeddingKind, StrEnum, Clock, make_embedder(), ok(), fixture, parametrize, Response (+14 more)
 
-### Community 88 - "test_reaction_pick.py"
-Cohesion: 0.29
-Nodes (12): LevelGroup, Reactions are warmer for people early in their career and briefer for…, pick(), parametrize, test_a_one_entry_pool_still_works(), test_every_category_and_level_group_has_a_pool(), test_final_answer_uses_the_closing_pool(), test_never_repeats_the_previous_reaction() (+4 more)
+### Community 88 - "interviews_service.py"
+Cohesion: 0.19
+Nodes (17): SummaryInputs, HistorySortColumn, The history columns GET /interviews sorts by; the values are the response's…, SessionStatus, SortDirection, InterviewsController, UUID, Interview lifecycle: request -> InterviewsService, domain result -> response… (+9 more)
 
 ### Community 89 - "interviewer_v2.md"
 Cohesion: 0.29
@@ -614,17 +616,17 @@ Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 Cohesion: 0.29
 Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 
-### Community 91 - "Learn: Context management (what to send, and what it costs)"
-Cohesion: 0.18
-Nodes (10): 1. Why it exists, 2. What it is, 3. When to use it, 4. How it works, 5. What can go wrong, 6. Try it yourself, 7. What surprised me, 8. Check your understanding (+2 more)
+### Community 91 - "ContextManager"
+Cohesion: 0.08
+Nodes (28): ContextManager, Task, 1. Why it exists, 2. What it is, 3. When to use it, 4. How it works, 5. What can go wrong, 6. Try it yourself (+20 more)
 
-### Community 92 - "FeedbackCaseResult"
-Cohesion: 0.23
-Nodes (12): criterion_spread(), feedback_scores_for(), FeedbackCaseResult, level_gap_check(), The pair's check, or None when there is nothing to compare: no pair, or either…, Per case: the largest gap between the highest and lowest score any one…, (name, value, comment) per check, plus `valid_reply` and `case_passed`. An…, _verdict() (+4 more)
+### Community 92 - "EvalCase"
+Cohesion: 0.07
+Nodes (40): Check, check_decision(), check_reply(), check_streamed_reply(), EvalCase, Rule checks for one reply. Text checks look at the parsed question, or at the…, check_reply for interviewer_v5's streamed format: the CATEGORY line, then the…, The checks on what the candidate would read, whatever the reply format. (+32 more)
 
-### Community 93 - "clock"
+### Community 93 - "Implementation: Three New Interview Roles (designer, qa, devops)"
 Cohesion: 0.17
-Nodes (7): 9. Still open, Known Issues, _make(), _make(), _make(), clock(), Fake monotonic clock for the per-turn LLM budget; tests advance it (e.g. inside…
+Nodes (11): Changes Made, Completed Steps, Deviations from Plan, Implementation: Three New Interview Roles (designer, qa, devops), Links, Open Questions, Skills Consulted During Implementation, Status (+3 more)
 
 ### Community 94 - "Langfuse Observability"
 Cohesion: 0.10
@@ -637,6 +639,10 @@ Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 ### Community 96 - "Implementation: LLM as the Interviewer (it asks the questions)"
 Cohesion: 0.14
 Nodes (13): Baseline Failures, Changes Made, Completed Steps, Current Step, Implementation: LLM as the Interviewer (it asks the questions), Known Issues, Links, Open Questions (+5 more)
+
+### Community 97 - "test_interviewer_messages.py"
+Cohesion: 0.11
+Nodes (26): build_interviewer_messages(), interviewer_history(), job_description_block(), Untrusted text, fenced as data. Tags inside it are neutralised so it can't…, Answered questions with their answers (and the model's note on each), in…, The full input for one call (the model has no memory, so the whole interview is…, Architecture & Design, Trade-offs & Rationale (+18 more)
 
 ### Community 98 - "Implementation: Langfuse Tracing"
 Cohesion: 0.15
@@ -659,16 +665,16 @@ Cohesion: 0.15
 Nodes (12): Baseline Failures, Changes Made, Implementation: Context Management for the Interview LLM Calls, Known Issues, Links, Open Questions, Skills Consulted During Implementation, Status (+4 more)
 
 ### Community 103 - "test_factory.py"
-Cohesion: 0.05
-Nodes (51): build_embedder(), build_provider(), build_transcriber(), The one place that picks the implementation; swapping vendor or model is a…, Speech-to-text for voice answers; None without a key. Never traced: audio and…, Embeddings for reference-note retrieval; None without the Google key (notes are…, _model_parameters(), ReasoningEffort (+43 more)
+Cohesion: 0.07
+Nodes (32): build_embedder(), build_transcriber(), Speech-to-text for voice answers; None without a key. Never traced: audio and…, Embeddings for reference-note retrieval; None without the Google key (notes are…, OpenAICompatibleProvider, AsyncBaseTransport, BaseTransport, Random (+24 more)
 
 ### Community 104 - "test_get_interview.py"
 Cohesion: 0.15
 Nodes (5): fixture, parametrize, An owner with one started 3-question interview; returns (owner, POST response…, started(), test_interview_routes_document_error_responses()
 
-### Community 105 - "Implementation Plan: UUID primary keys"
-Cohesion: 0.18
-Nodes (10): Affected Files & Patterns, Architecture & Design, Blockers & Resolutions, Implementation Plan: UUID primary keys, Overview, Project Rules Applied, Ready to Implement, Requirements (no spec; derived) -> Implementation (+2 more)
+### Community 105 - "StreamedTurn"
+Cohesion: 0.15
+Nodes (11): parse_sse(), NamedTuple, Event names with each run of question.delta shown once: the shape of the…, The streamed question as the client shows it: deltas appended, a reset clearing…, Split a text/event-stream body into (event, data) pairs; returns them and the…, POST an answer to the streaming endpoint and read the whole stream (or the JSON…, stream_answer(), _stream() (+3 more)
 
 ### Community 106 - "Implementation Plan: LLM as the Interviewer (it asks the questions)"
 Cohesion: 0.18
@@ -679,44 +685,44 @@ Cohesion: 0.12
 Nodes (13): Critical Rules, Langfuse Dataset Construction, Primary Guide, Workflow, 1. Determine Online or Offline, 2. Establish the Metric Set, 3. Implement and Verify, Setting up evals (+5 more)
 
 ### Community 108 - "interviews_evals.py"
-Cohesion: 0.06
-Nodes (74): anyio_from_thread, _action_and_gap(), _add_usage(), _case_inputs(), CaseResult, Check, check_decision(), check_reply() (+66 more)
+Cohesion: 0.07
+Nodes (62): anyio_from_thread, Run `task` once per item as one Langfuse experiment run (a dataset run the UI…, _action_and_gap(), _add_usage(), _case_inputs(), CaseResult, dataset_items(), dataset_name() (+54 more)
 
-### Community 109 - "FeedbackGenerator"
-Cohesion: 0.13
-Nodes (17): ScoreResult, _Attempts, CallUsage, FeedbackGenerator, log_feedback_summary(), tokens(), NamedTuple, T (+9 more)
+### Community 109 - "interviews_feedback_service.py"
+Cohesion: 0.08
+Nodes (48): FeedbackFailedError, FeedbackInProgressError, FeedbackNotFoundError, FeedbackUnavailableError, InterviewNotCompletedError, The LLM could not produce valid scores in time: nothing partial is returned;…, FeedbackScoreInputs, FeedbackWriteInputs (+40 more)
 
-### Community 110 - "main"
-Cohesion: 0.16
-Nodes (18): html_target(), main(), Path, Session, UUID, A path ending in .html is the file; anything else is a folder, and the file is…, The rotated log first, so the lines stay in time order., read_log_lines() (+10 more)
+### Community 110 - "interview_report.py"
+Cohesion: 0.15
+Nodes (19): html_target(), main(), Path, Session, UUID, Print the cost, effectiveness and efficiency of the interviewer. Numbers and…, A path ending in .html is the file; anything else is a folder, and the file is…, The rotated log first, so the lines stay in time order. (+11 more)
 
 ### Community 111 - "Implementation: Eval runs in Langfuse (scores + datasets)"
 Cohesion: 0.17
 Nodes (11): Baseline Failures, Deviations from Plan, Implementation: Eval runs in Langfuse (scores + datasets), Known Issues, Links, Open Questions, Skills Consulted During Implementation, Status (+3 more)
 
 ### Community 112 - "Feature: Langfuse Tracing"
-Cohesion: 0.13
-Nodes (14): Acceptance Criteria, Blockers, Constraints, Edge Cases, Feature: Langfuse Tracing, Functional, Goal, Non-Functional (+6 more)
+Cohesion: 0.14
+Nodes (13): Acceptance Criteria, Blockers, Edge Cases, Feature: Langfuse Tracing, Functional, Goal, Non-Functional, Out of Scope (+5 more)
 
 ### Community 113 - "Langfuse"
 Cohesion: 0.17
 Nodes (12): 1. Langfuse API via CLI, 2. Langfuse Documentation, 2a. Documentation Index (llms.txt), 2b. Fetch Individual Pages as Markdown, 2c. Search Documentation, Core Principles, Credentials, Detailed CLI Reference (+4 more)
 
-### Community 114 - "InterviewType"
-Cohesion: 0.08
-Nodes (66): _check_question(), HeaderSplit, InterviewerReply, InvalidReplyError, load_object(), _normalized(), parse_interviewer_reply(), parse_streamed_reply() (+58 more)
+### Community 114 - "QuestionCategory"
+Cohesion: 0.06
+Nodes (62): InvalidReplyError, load_object(), Exception, Reading a model's JSON reply: one optional ```json fence around one JSON…, The reply as a JSON object: one optional fence around it, nothing else before…, _check_question(), HeaderSplit, InterviewerReply (+54 more)
 
 ### Community 115 - "Implementation: Langfuse experiments for the interviews evals"
-Cohesion: 0.15
-Nodes (12): 13. Phase 2 real runs (yours), Changes Made, Current Step, Implementation: Langfuse experiments for the interviews evals, Known Issues, Links, Open Questions, Skills Consulted During Implementation (+4 more)
+Cohesion: 0.14
+Nodes (13): 13. Phase 2 real runs (yours), Changes Made, Current Step, Implementation: Langfuse experiments for the interviews evals, Known Issues, Links, Open Questions, Skills Consulted During Implementation (+5 more)
 
-### Community 116 - "audio_container"
-Cohesion: 0.35
-Nodes (11): AudioContainer, Recording containers a voice answer may arrive in (what browsers' MediaRecorder…, audio_container(), _has_signature(), The container of an uploaded recording, or None when its declared type isn't…, parametrize, test_a_head_too_short_to_hold_the_signature_is_refused(), test_a_signature_that_does_not_match_the_declared_type_is_refused() (+3 more)
+### Community 116 - "pytest"
+Cohesion: 0.09
+Nodes (23): AudioContainer, Recording containers a voice answer may arrive in (what browsers' MediaRecorder…, audio_container(), _has_signature(), The container of an uploaded recording, or None when its declared type isn't…, pytest, parametrize, test_each_role_list_includes_the_shared_terms_once() (+15 more)
 
 ### Community 117 - "Implementation Plan: Split interviews_dependencies.py by responsibility"
-Cohesion: 0.18
-Nodes (10): Architecture & Design, Blockers & Resolutions, Goals (standing in for the spec), Implementation Plan: Split interviews_dependencies.py by responsibility, Overview, Project Rules Applied, Ready to Implement, Skills Consulted (+2 more)
+Cohesion: 0.20
+Nodes (9): Architecture & Design, Goals (standing in for the spec), Implementation Plan: Split interviews_dependencies.py by responsibility, Overview, Project Rules Applied, Ready to Implement, Skills Consulted, Spec Requirements -> Implementation (+1 more)
 
 ### Community 118 - "Langfuse Implementation Notes"
 Cohesion: 0.18
@@ -730,29 +736,29 @@ Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 Cohesion: 0.13
 Nodes (14): Assumptions to verify (external system behaviour), Blockers, Constraints, Edge Cases, Feature: Langfuse experiments for the interviews evals, Functional, Goal, Non-Functional (+6 more)
 
-### Community 121 - "Feature: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1)"
-Cohesion: 0.15
-Nodes (12): Blockers, Constraints, Edge Cases, Feature: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1), Functional, Goal, Non-Functional, Out of Scope (+4 more)
+### Community 121 - "types.py"
+Cohesion: 0.18
+Nodes (8): downgrade(), Downgrade schema. The `vector` extension stays: other database objects may use…, portable_vector(), Column types shared by every module., A fixed-size vector column: pgvector's `vector(size)` on Postgres, a JSON list…, pgvector_sqlalchemy, sqlalchemy_types, TypeEngine
 
-### Community 122 - "Implementation: Three New Interview Roles (designer, qa, devops)"
-Cohesion: 0.17
-Nodes (11): Changes Made, Completed Steps, Deviations from Plan, Implementation: Three New Interview Roles (designer, qa, devops), Links, Open Questions, Skills Consulted During Implementation, Status (+3 more)
+### Community 122 - "LLMProvider"
+Cohesion: 0.08
+Nodes (20): build_provider(), The one place that picks the implementation; swapping vendor or model is a…, LLMProvider, Protocol, Generation, _model_parameters(), ReasoningEffort, The stream was closed before it finished (client left, or the turn's deadline… (+12 more)
 
-### Community 123 - "Feature: SSE Streaming of the Interview Turn (Slice 4)"
-Cohesion: 0.11
-Nodes (16): Scheme, credentials, port and every resolved address. Returns the address to…, One hop: a page, or the redirect's Location to check next., Client, Acceptance Criteria, Blockers, Constraints, Edge Cases, Feature: SSE Streaming of the Interview Turn (Slice 4) (+8 more)
+### Community 123 - "profile_resume_files.py"
+Cohesion: 0.14
+Nodes (21): _content(), _escape(), _fill(), Image, make_pdf(), plain_zip(), Synthetic résumé files written in code: the tests and the profile eval build…, A PDF with one page per list. `encrypt` adds a standard security handler whose… (+13 more)
 
 ### Community 124 - "Implementation: Knowledge-Base RAG for the Question Writer (Slice 8a)"
-Cohesion: 0.15
-Nodes (12): 11. Corpus review (your gate), then 12. Real runs, Baseline Failures, Changes Made, Current Step, Implementation: Knowledge-Base RAG for the Question Writer (Slice 8a), Known Issues, Links, Open Questions (+4 more)
+Cohesion: 0.12
+Nodes (14): The notes stored for this interview at start, rank order; none for interviews…, 11. Corpus review (your gate), then 12. Real runs, Baseline Failures, Changes Made, Current Step, Implementation: Knowledge-Base RAG for the Question Writer (Slice 8a), Known Issues, Links (+6 more)
 
 ### Community 125 - "Feature: Résumé upload and candidate profile (Slice 8c)"
-Cohesion: 0.13
-Nodes (14): Acceptance Criteria, Blockers, Constraints, Edge Cases, Feature: Résumé upload and candidate profile (Slice 8c), Functional, Goal, Non-Functional (+6 more)
+Cohesion: 0.12
+Nodes (15): Acceptance Criteria, Blockers, Constraints, Decisions, Edge Cases, Feature: Résumé upload and candidate profile (Slice 8c), Functional, Goal (+7 more)
 
 ### Community 126 - "How to evaluate an AI feature: from the command to the fix"
-Cohesion: 0.13
-Nodes (14): 10. Adding an eval for a new AI feature, 1. Know what each task measures, 2. Before you run, 3. Run, 4. Read the output, 5. Triage: what kind of failure is it?, 6. Diagnose in Langfuse, 7. Fix: the smallest change in the right place (+6 more)
+Cohesion: 0.14
+Nodes (13): 10. Adding an eval for a new AI feature, 1. Know what each task measures, 2. Before you run, 3. Run, 4. Read the output, 6. Diagnose in Langfuse, 7. Fix: the smallest change in the right place, 8. Re-run to prove it, then document it (+5 more)
 
 ### Community 127 - "test_context_controller.py"
 Cohesion: 0.32
@@ -768,7 +774,7 @@ Nodes (7): Choose the execution mode, Langfuse v4 project migration, Migrate eva
 
 ### Community 130 - "tests/conftest.py"
 Cohesion: 0.06
-Nodes (43): RequestIdFilter, health_check(), CurrentUserDep, Baseline Failures, Completed Steps, Deviations from Plan, Implementation: Error Handling, Known Issues (+35 more)
+Nodes (39): RequestIdFilter, Baseline Failures, Completed Steps, Deviations from Plan, Implementation: Error Handling, Known Issues, Links, Open Questions (+31 more)
 
 ### Community 131 - "Implementation: Interview History List (backend)"
 Cohesion: 0.14
@@ -778,17 +784,17 @@ Nodes (13): Baseline Failures, Completed Steps, Deviations from Plan, Implementa
 Cohesion: 0.29
 Nodes (6): 1. Prepare the calibration, 2. Run the calibration, 3. Review the results, 4. Iterate until the judge is approved, 5. Deploy the approved judge, Judge Calibration
 
-### Community 133 - "Feature: Interview History List (backend)"
-Cohesion: 0.14
-Nodes (13): Acceptance Criteria, Blockers, Constraints, Edge Cases, Feature: Interview History List (backend), Functional, Goal, Non-Functional (+5 more)
+### Community 133 - "Any"
+Cohesion: 0.13
+Nodes (23): _docx_lines(), paragraph(), table(), _docx_run_visible(), _effective(), _find_columns(), _hex_lightness(), _in_reading_order() (+15 more)
 
 ### Community 134 - "build_usage_report"
-Cohesion: 0.35
-Nodes (11): build_usage_report(), Stored LLM usage per interview and question position: numbers and ids only,…, q(), test_an_empty_database_prints_an_empty_report(), test_follow_ups_are_counted_and_their_tokens_shown_by_question_kind(), test_interviews_are_reported_separately(), test_missing_usage_is_a_dash_and_left_out_of_the_sums(), test_no_percentiles_without_llm_turns() (+3 more)
+Cohesion: 0.19
+Nodes (16): build_usage_report(), Stored LLM usage per interview and question position: numbers and ids only,…, main(), Session, Print stored LLM usage per interview: tokens per question position and per…, q(), test_an_empty_database_prints_an_empty_report(), test_follow_ups_are_counted_and_their_tokens_shown_by_question_kind() (+8 more)
 
 ### Community 135 - "The fundamentals"
-Cohesion: 0.05
-Nodes (36): 10. Evaluation (the most important one), 11. Rubrics, scoring and LLM-as-judge, 12. Embeddings and retrieval (RAG), 13. Tool use and agents, 1. How an LLM call actually works, 2. Context management, 3. Prompt engineering as engineering, 4. Structured output and validation (+28 more)
+Cohesion: 0.08
+Nodes (25): 10. Evaluation (the most important one), 11. Rubrics, scoring and LLM-as-judge, 12. Embeddings and retrieval (RAG), 13. Tool use and agents, 1. How an LLM call actually works, 2. Context management, 3. Prompt engineering as engineering, 4. Structured output and validation (+17 more)
 
 ### Community 136 - "Langfuse CI/CD"
 Cohesion: 0.40
@@ -806,21 +812,21 @@ Nodes (10): Affected Files & Patterns, Architecture & Design, Blockers & Resolut
 Cohesion: 0.18
 Nodes (10): Annotation queues, Annotation target: OBSERVATION versus TRACE, Common gotchas, Credentials, Error Analysis, Langfuse Implementation Notes, Primary Guide, Prompt fixes (+2 more)
 
-### Community 140 - "re"
-Cohesion: 0.25
-Nodes (4): re, parametrize, test_request_id_header_sent_exactly_once(), test_unsafe_client_request_id_is_replaced()
+### Community 140 - "ConsoleFormatter"
+Cohesion: 0.06
+Nodes (40): 1. Inventory every prompt (before writing any code), 2. Convert templating and decide structure, 3. Present the plan, then create and refactor, 4. Verify, Langfuse Prompt Migration, Prerequisites, ConsoleFormatter, `llm_call a=1 b=2` -> ("llm_call", [("a", "1"), ("b", "2")]). Any other message… (+32 more)
 
 ### Community 142 - "test_knowledge_ingest.py"
-Cohesion: 0.22
-Nodes (22): KnowledgeChunkScope, One (role, level) a chunk applies to. Rows instead of array columns, so the…, active(), chunks(), corpus(), FailingOn, interview(), ingest_corpus: idempotent ingestion of the reference notes (knowledge-base-rag… (+14 more)
+Cohesion: 0.21
+Nodes (23): IngestError, Exception, Ingestion stopped; the message names the chunk (or the setting) and the reason,…, active(), chunks(), corpus(), FailingOn, interview() (+15 more)
 
-### Community 143 - "test_context.py"
-Cohesion: 0.18
-Nodes (14): Inputs, manager(), NamedTuple, parametrize, System prompt, then every turn still kept, then the latest one; oldest turns go…, Stub, test_a_named_strategy_overrides_the_default(), test_a_strategy_without_a_limit_is_never_trimmed() (+6 more)
+### Community 143 - "ChatMessage"
+Cohesion: 0.11
+Nodes (28): BuiltContext, ContextReport, ContextTooLargeError, estimate_tokens(), _log(), Exception, NamedTuple, Context management: the one place that decides what each LLM call sends. The… (+20 more)
 
-### Community 144 - "PageParams"
-Cohesion: 0.07
-Nodes (39): Page, page_params(), PageParams, BaseModel, NamedTuple, Query, Offset pagination shared by every list endpoint, so clients see one query…, answered_main_questions() (+31 more)
+### Community 144 - "follow_up"
+Cohesion: 0.16
+Nodes (16): Slice 3: Structured follow-up decisions, 1. Why it exists, 2. What it is, 3. When to use it, 4. How it works, 5. What can go wrong, 6. Try it yourself, 7. What surprised me (+8 more)
 
 ### Community 145 - "Langfuse v4 project migration"
 Cohesion: 0.25
@@ -831,8 +837,8 @@ Cohesion: 0.29
 Nodes (6): 1. Prepare the calibration, 2. Run the calibration, 3. Review the results, 4. Iterate until the judge is approved, 5. Deploy the approved judge, Judge Calibration
 
 ### Community 147 - "test_turn_budget.py"
-Cohesion: 0.20
-Nodes (15): Testing Strategy, Testing Strategy, Baseline Failures, budget(), llm_lines(), fixture, One deadline per answer turn, shared by the decide and the write call (AC13,…, result() (+7 more)
+Cohesion: 0.18
+Nodes (16): Testing Strategy, Baseline Failures, Testing Strategy, Baseline Failures, budget(), llm_lines(), fixture, One deadline per answer turn, shared by the decide and the write call (AC13,… (+8 more)
 
 ### Community 148 - "Langfuse CI/CD"
 Cohesion: 0.40
@@ -842,101 +848,101 @@ Nodes (4): Checklist, Common Issues, GitHub specific checklist, Langfuse CI/CD
 Cohesion: 0.40
 Nodes (4): Adjusting an existing prompt, Model-specific tuning, Prompt Engineering, Universal principles
 
-### Community 150 - "Learn: Splitting the interviews dependency wiring"
-Cohesion: 0.20
-Nodes (9): 1. Why it exists, 2. What it is, 3. When to use it, 5. What can go wrong, 6. Try it yourself, 7. What surprised me, 8. Check your understanding, 9. Still open (+1 more)
+### Community 150 - "test_follow_ups.py"
+Cohesion: 0.28
+Nodes (15): answers(), follow_up_json(), Follow-up questions through the answer endpoint: the decide call suggests, the…, Answer whatever is asked until the interview completes; returns every answer…, rows(), run_to_end(), summaries(), test_a_failed_follow_up_write_falls_back_to_the_next_main_bank_question() (+7 more)
 
-### Community 151 - "interviews_feedback_dependencies.py"
-Cohesion: 0.10
-Nodes (50): get_db(), Session, get_answer_controller(), get_answer_service(), Depends, Session, get_feedback_controller(), get_feedback_limiter() (+42 more)
+### Community 151 - "get_llm_provider"
+Cohesion: 0.08
+Nodes (47): get_llm_provider(), get_tracer(), Request, Built once at startup (app lifespan); None when no key is configured or the…, Built once at startup (app lifespan); a disabled tracer when the lifespan…, get_answer_controller(), get_answer_service(), Depends (+39 more)
 
-### Community 152 - "run_ranking"
-Cohesion: 0.19
-Nodes (20): Read your filled-in sheet, print how often each arm ranked first, then post…, run_ranking(), Acceptance Criteria, Edge Cases, Test Results, arm_of(), fill(), generated() (+12 more)
+### Community 152 - "LLMBadResponseError"
+Cohesion: 0.16
+Nodes (8): GoogleEmbedder, Any, BaseTransport, Random, Response, LLMBadResponseError, A 200 whose body is unusable (not JSON, no choices, blank text). Not transient,…, 1. Where 8a stands
 
 ### Community 154 - "Implementation: Job URL (Slice 8b)"
-Cohesion: 0.15
-Nodes (12): Changes Made, Deviations from Plan, Implementation: Job URL (Slice 8b), Known Issues, Links, Open Questions, Skills Consulted During Implementation, Status (+4 more)
+Cohesion: 0.17
+Nodes (11): Changes Made, Deviations from Plan, Implementation: Job URL (Slice 8b), Known Issues, Links, Skills Consulted During Implementation, Status, Test Cases (+3 more)
 
 ### Community 155 - "test_start_reference_notes.py"
-Cohesion: 0.14
-Nodes (25): embedder(), has_notes(), fixture, UUID, Reference notes at interview start: retrieved, stored with the interview,…, retrieval_lines(), session_of(), started() (+17 more)
+Cohesion: 0.13
+Nodes (28): embedding_text(), What a chunk is embedded as: its heading, then its text. The heading names the…, corpus(), embedder(), has_notes(), fixture, UUID, Reference notes at interview start: retrieved, stored with the interview,… (+20 more)
 
-### Community 156 - "Implementation: Layered Modules (route -> controller -> service -> repository)"
-Cohesion: 0.15
-Nodes (12): Baseline Failures, Changes Made, Deviations from Plan, Implementation: Layered Modules (route -> controller -> service -> repository), Links, Open Questions, Skills Consulted During Implementation, Status (+4 more)
+### Community 156 - "test_profile_evals.py"
+Cohesion: 0.18
+Nodes (13): build_file(), EvalCase, load_cases(), BaseModel, Path, The case as the file a candidate would upload. Hidden lines are white (PDF) or…, run_case(), LabelledModel (+5 more)
 
 ### Community 157 - "test_knowledge_ingest_cli.py"
-Cohesion: 0.42
-Nodes (9): ingest(), Path, The ingest command: python -m…, test_a_failure_partway_names_the_chunk_and_exits_1(), test_an_invalid_note_names_the_file_writes_nothing_and_exits_1(), test_it_prints_the_counts_and_exits_0(), test_warnings_are_printed_without_note_text(), test_without_the_google_key_it_says_what_to_set_and_exits_1() (+1 more)
+Cohesion: 0.27
+Nodes (13): main(), _parser(), ArgumentParser, Session, ingest(), Path, The ingest command: python -m…, test_a_failure_partway_names_the_chunk_and_exits_1() (+5 more)
 
 ### Community 158 - "Implementation: Interview Feedback and Scoring (Slice 6)"
 Cohesion: 0.12
 Nodes (15): 9. Review gate (user), Baseline Failures, Changes Made, Completed Steps, Current Step, Implementation: Interview Feedback and Scoring (Slice 6), Known Issues, Links (+7 more)
 
-### Community 159 - "test_context_prompts.py"
-Cohesion: 0.10
-Nodes (30): A running note is optional model output about the latest answer; it is sent…, The job-description summary replaces the original on every later call, so it…, validate_note(), validate_summary(), load_prompt(), Per-interview constants only, so the text is identical on every call of an…, Per-interview constants only, like v2: the decide call's system prompt never…, render_decision_prompt() (+22 more)
+### Community 159 - "scrub_contacts"
+Cohesion: 0.24
+Nodes (13): _phone_or_keep(), The text with email addresses and phone numbers replaced by placeholders;…, scrub_contacts(), Match, parametrize, scrub_contacts: email addresses and phone numbers removed before the résumé…, test_a_plain_email_is_removed(), test_an_email_with_plus_dots_and_subdomains_is_removed() (+5 more)
 
 ### Community 160 - "interviews/conftest.py"
 Cohesion: 0.06
-Nodes (40): BankQuestion, One entry of the hand-written question bank file., Affected Files & Patterns, Step 2: Event contract, answer(), _answer(), anyio_backend(), as_v5_text() (+32 more)
+Nodes (54): Decision, parse_decision_reply(), The decide call suggests; the code still applies the follow-up cap and the time…, _RawDecision, apply_limits(), plan_write(), The code's say over the model's: returns the action and why it overrode the…, After the decision: the code's limits pick the action, and whether a write call… (+46 more)
 
 ### Community 161 - "Tracer"
 Cohesion: 0.05
-Nodes (55): AbstractContextManager, build_tracer(), Generation, Any, Langfuse tracing behind the LLMProvider contract: nothing outside `core/ai/`…, The stream was closed before it finished (client left, or the turn's deadline…, One step of a trace as Langfuse sees it; `finish` sets its outcome. Safe when…, One trace for one request: everything started inside it (the generations) nests… (+47 more)
+Nodes (47): AbstractContextManager, Any, One step of a trace as Langfuse sees it; `finish` sets its outcome. Safe when…, One trace for one request: everything started inside it (the generations) nests…, Set the output of the trace being built (call it inside `trace()`): what a…, Attach a score to a trace (a bool becomes a Langfuse BOOLEAN). A stable…, Create the dataset if needed and upsert its items (each carries its own `id`,…, A named step inside the current trace (a Langfuse `chain`): the generations and… (+39 more)
 
 ### Community 162 - "test_answer_interview.py"
 Cohesion: 0.31
 Nodes (5): candidate_rows(), UUID, session_uuid(), test_answering_a_question_saves_it_and_moves_to_the_next(), test_full_interview_without_llm_completes()
 
-### Community 163 - "interviews_answer_service.py"
-Cohesion: 0.09
-Nodes (31): LLMProvider, Protocol, QuestionSource, Who wrote a stored question: the LLM, or the hand-written bank (fallback and…, Random, One answer turn: the checks and reads, the LLM interviewer (or the bank), and…, HistoryPage, InterviewsService (+23 more)
+### Community 163 - "Checks"
+Cohesion: 0.40
+Nodes (5): Checks, bad_parent(), _consistency(), Each check with the problems it found (none = passed)., Does what the log says happened match what was stored? These guard the numbers…
 
-### Community 164 - "experiments"
-Cohesion: 0.50
-Nodes (4): case(), experiments(), fixture, A fake Langfuse client behind a Tracer, and a fixed git state so metadata is…
+### Community 164 - "Feature: Follow-up Questions (decide / write split)"
+Cohesion: 0.14
+Nodes (13): Blockers, Constraints, Edge Cases, Feature: Follow-up Questions (decide / write split), Functional, Goal, Non-Functional, Out of Scope (+5 more)
 
 ### Community 165 - "ErrorResponse"
-Cohesion: 0.11
-Nodes (22): ErrorResponse, Affected Files & Patterns, Blockers & Resolutions, Implementation Notes (added during /implement), Implementation Plan: Error Handling, Overview, Project Rules Applied, Ready to Implement (+14 more)
+Cohesion: 0.04
+Nodes (57): ErrorResponse, Affected Files & Patterns, Blockers & Resolutions, Implementation Notes (added during /implement), Implementation Plan: Error Handling, Overview, Project Rules Applied, Ready to Implement (+49 more)
 
 ### Community 166 - "Implementation Plan: Three New Interview Roles (designer, qa, devops)"
-Cohesion: 0.17
-Nodes (11): Architecture & Design, Blockers & Resolutions, Goals and edge cases (stand-in for the spec), Implementation Plan: Three New Interview Roles (designer, qa, devops), Implementation Steps, Overview, Project Rules Applied, Ready to Implement (+3 more)
+Cohesion: 0.18
+Nodes (10): Architecture & Design, Blockers & Resolutions, Goals and edge cases (stand-in for the spec), Implementation Plan: Three New Interview Roles (designer, qa, devops), Overview, Project Rules Applied, Ready to Implement, Skills Consulted (+2 more)
 
-### Community 167 - "require_permissions"
-Cohesion: 0.10
-Nodes (27): ForbiddenError, get_current_user(), Depends, Route guard: the caller's DB role must be one of `roles`. Use for coarse gates…, Route guard: the caller's DB role must grant every permission in `perms`., require_permissions(), check(), require_roles() (+19 more)
+### Community 167 - "Implementation Plan: Role-Based Access Control (single JWT)"
+Cohesion: 0.13
+Nodes (19): ForbiddenError, get_current_user(), Route guard: the caller's DB role must be one of `roles`. Use for coarse gates…, check(), require_roles(), check(), bearer_scheme, Affected Files & Patterns (+11 more)
 
 ### Community 168 - "Implementation Plan: Knowledge-Base RAG for the Question Writer (Slice 8a)"
-Cohesion: 0.18
-Nodes (10): Affected Files & Patterns, Blockers & Resolutions, Implementation Plan: Knowledge-Base RAG for the Question Writer (Slice 8a), Overview, Project Rules Applied, Ready to Implement, Skills Consulted, Spec Requirements -> Implementation (+2 more)
+Cohesion: 0.20
+Nodes (9): Affected Files & Patterns, Blockers & Resolutions, Implementation Plan: Knowledge-Base RAG for the Question Writer (Slice 8a), Overview, Project Rules Applied, Skills Consulted, Spec Requirements -> Implementation, Testing Strategy (+1 more)
 
-### Community 169 - "interviews_utils.py"
-Cohesion: 0.11
-Nodes (30): NotEnoughQuestionsError, MessageKind, MessageRole, StrEnum, Transcript item kinds: a question comes from interview_questions, the other two…, One line of the chat as the user saw it. Usage metadata (model, tokens) is…, TranscriptItemOut, build_transcript() (+22 more)
+### Community 169 - "test_stream_answer.py"
+Cohesion: 0.25
+Nodes (13): 5. What can go wrong, fixture, AnswerController.stream_answer driven directly, for what a test client can't…, A started interview and a controller wired like the app's: returns (controller,…, saved_answers(), summaries(), test_closing_the_stream_mid_turn_saves_nothing(), test_leaving_while_the_decide_call_runs_saves_nothing() (+5 more)
 
 ### Community 170 - "test_select_questions.py"
-Cohesion: 0.22
-Nodes (19): Pick `count` distinct questions for the setup, in interview order. The single…, select_questions(), 4. How it works, _bank(), parametrize, _q(), _select(), test_general_question_is_eligible_for_every_role() (+11 more)
+Cohesion: 0.06
+Nodes (51): NotEnoughQuestionsError, load_bank(), Read and validate a question bank file; a bad file fails loudly instead of at…, Pick `count` distinct questions for the setup, in interview order. The single…, select_questions(), 1. Why it exists, 2. What it is, 3. When to use it (+43 more)
 
-### Community 171 - "interviews_feedback.py"
-Cohesion: 0.11
-Nodes (30): _check_lengths(), Evidence, _has_markup(), _normalized(), parse_write_reply(), BaseModel, NamedTuple, _question_score() (+22 more)
+### Community 171 - "LLMServerError"
+Cohesion: 0.23
+Nodes (11): LLMServerError, 5xx or a dropped connection: the provider's side failed., test_a_provider_error_hints_that_it_is_not_a_quality_problem(), down(), test_a_provider_error_is_a_failed_errored_case_and_the_run_goes_on(), down(), test_a_provider_error_scores_the_case_failed_and_errored_with_the_class(), down() (+3 more)
 
 ### Community 172 - "feedback_score_v2.md"
 Cohesion: 0.29
 Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 
 ### Community 173 - "test_llm_settings_default_to_off_with_documented_limits"
-Cohesion: 0.15
-Nodes (16): Baseline Failures, 1. Where 8a stands, 2. Open work on 8a (yours, in this order), 3. Commands, 4. Environment gotchas, 5. Test baseline to compare against, 7. Reference material, Handoff: Slice 8a (Knowledge-Base RAG) -> Slice 8b (Job URL) (+8 more)
+Cohesion: 0.17
+Nodes (15): Baseline Failures, 2. Open work on 8a (yours, in this order), 3. Commands, 4. Environment gotchas, 5. Test baseline to compare against, 7. Reference material, Handoff: Slice 8a (Knowledge-Base RAG) -> Slice 8b (Job URL), Testing Strategy (+7 more)
 
-### Community 174 - "OpenAICompatibleProvider"
-Cohesion: 0.13
-Nodes (14): _int_or_none(), OpenAICompatibleProvider, Any, AsyncBaseTransport, BaseTransport, Random, ReasoningEffort, Response (+6 more)
+### Community 174 - ".stream"
+Cohesion: 0.18
+Nodes (9): _int_or_none(), Any, ReasoningEffort, Response, Same request with `stream: true`: chunks as they arrive, then the final…, One streamed request: its text chunks, then an LLMResult (attempts and latency…, The token counts an OpenAI-compatible usage object reports; None for any it…, _usage() (+1 more)
 
 ### Community 175 - "feedback_score_v1.md"
 Cohesion: 0.29
@@ -946,49 +952,49 @@ Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 Cohesion: 0.29
 Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 
-### Community 177 - "Feature: Follow-up Questions (decide / write split)"
-Cohesion: 0.14
-Nodes (13): Blockers, Constraints, Edge Cases, Feature: Follow-up Questions (decide / write split), Functional, Goal, Non-Functional, Out of Scope (+5 more)
+### Community 177 - "test_reply_contract.py"
+Cohesion: 0.31
+Nodes (17): parse(), parametrize, reply(), test_a_bad_note_is_dropped_but_the_question_is_kept(), test_a_field_other_than_question_category_and_note_is_still_rejected(), test_a_question_already_asked_is_rejected_ignoring_case_and_spacing(), test_a_single_code_fence_is_accepted(), test_a_valid_note_is_kept_trimmed() (+9 more)
 
-### Community 178 - "Feature: Start an Interview (backend)"
+### Community 178 - "clock"
 Cohesion: 0.15
-Nodes (12): Blockers, Constraints, Edge Cases, Feature: Start an Interview (backend), Functional, Goal, Non-Functional, Out of Scope (+4 more)
+Nodes (7): Known Issues, _make(), _make(), _make(), _make(), clock(), Fake monotonic clock for the per-turn LLM budget; tests advance it (e.g. inside…
 
-### Community 179 - ".record_turn"
-Cohesion: 0.09
-Nodes (23): ActionKnown, The turn's final action, sent only once nothing can change it (a follow-up only…, Save one whole turn in one commit: advance the session, the answer, the…, Architecture & Design, 1. Why it exists, 2. What it is, 3. When to use it, 4. How it works (+15 more)
+### Community 179 - "Implementation Steps"
+Cohesion: 0.15
+Nodes (12): Affected Files & Patterns, Implementation Steps, Phase A: plumbing and progress events, Phase B: streaming the question text, Step 11: `FakeProvider.stream`, Step 14: The event loop stays free, Step 15: Evals, Step 16: Measure, document, finish (+4 more)
 
 ### Community 180 - "JobRole"
-Cohesion: 0.07
-Nodes (47): JobRole, Level, EvalSetup, FeedbackEvalSetup, One interview's main questions through the streamed writer's text format (the…, simulate_main_questions(), load_bank(), load_rubric() (+39 more)
+Cohesion: 0.06
+Nodes (77): InterviewType, JobRole, Level, BankQuestion, One entry of the hand-written question bank file., The feedback rubric file: ground truth for every score, versioned like a prompt., Rubric, SessionOut (+69 more)
 
-### Community 181 - "middleware.py"
-Cohesion: 0.17
-Nodes (8): Assigns each request an id, echoes it as X-Request-ID, and logs one access…, RequestContextMiddleware, ASGIApp, Architecture & Design, Receive, Scope, Send, starlette_types
+### Community 181 - "main.py"
+Cohesion: 0.14
+Nodes (11): setup_logging(), Assigns each request an id, echoes it as X-Request-ID, and logs one access…, RequestContextMiddleware, health_check(), lifespan(), FastAPI, ASGIApp, Architecture & Design (+3 more)
 
 ### Community 182 - "Implementation Plan: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1)"
 Cohesion: 0.18
 Nodes (10): Architecture & Design, Blockers & Resolutions, Implementation Plan: Answer a Question and Get the Interviewer's Reaction (LLM Slice 1), Overview, Project Rules Applied, Ready to Implement, Skills Consulted, Spec Requirements -> Implementation (+2 more)
 
-### Community 183 - "Feature: Layered Modules (route -> controller -> service -> repository)"
-Cohesion: 0.20
-Nodes (9): Blockers, Feature: Layered Modules (route -> controller -> service -> repository), Goal, Non-Functional, Out of Scope, Problem, Requirements, User Flow (+1 more)
+### Community 183 - "StreamEventOut"
+Cohesion: 0.10
+Nodes (25): The SSE event names of a streamed turn: the contract with the client. `done`…, StreamEvent, _error_event(), _event(), BaseModel, NamedTuple, One event of a streamed turn as the controller yields it; the route encodes it…, StreamEventOut (+17 more)
 
-### Community 184 - "Implementation Plan: Role-Based Access Control (single JWT)"
-Cohesion: 0.17
-Nodes (10): Create `email` as an admin, or promote it if it exists. Safe to run repeatedly., Affected Files & Patterns, Blockers & Resolutions, Implementation Deviations (recorded during /implement), Implementation Plan: Role-Based Access Control (single JWT), Overview, Project Rules Applied, Ready to Implement (+2 more)
+### Community 184 - "Implementation Plan: UUID primary keys"
+Cohesion: 0.18
+Nodes (10): Affected Files & Patterns, Architecture & Design, Blockers & Resolutions, Implementation Plan: UUID primary keys, Overview, Project Rules Applied, Ready to Implement, Requirements (no spec; derived) -> Implementation (+2 more)
 
 ### Community 185 - "Learn: The LLM as the interviewer (Slice 2): prompts, structured output, injection"
 Cohesion: 0.20
 Nodes (9): 1. Why it exists, 2. What it is, 3. When to use it, 4. How it works, 6. Try it yourself, 7. What surprised me, 8. Check your understanding, 9. Go deeper / Still open (+1 more)
 
-### Community 186 - "Feature: Interview Feedback and Scoring (Slice 6)"
-Cohesion: 0.17
-Nodes (11): Blockers, Constraints, Feature: Interview Feedback and Scoring (Slice 6), Functional, Goal, Non-Functional, Out of Scope, Problem (+3 more)
+### Community 186 - "Learn: Splitting the interviews dependency wiring"
+Cohesion: 0.18
+Nodes (10): 1. Why it exists, 2. What it is, 3. When to use it, 5. What can go wrong, 6. Try it yourself, 7. What surprised me, 8. Check your understanding, 9. Still open (+2 more)
 
 ### Community 187 - "Implementation Plan: Interview Feedback and Scoring (Slice 6)"
-Cohesion: 0.20
-Nodes (9): Blockers & Resolutions, Implementation Plan: Interview Feedback and Scoring (Slice 6), Overview, Project Rules Applied, Ready to Implement, Skills Consulted, Spec Requirements -> Implementation, Testing Strategy (+1 more)
+Cohesion: 0.12
+Nodes (15): Any, Protocol, How many oldest entries may be dropped; everything else is required., Strategy, Affected Files & Patterns, Architecture & Design, Blockers & Resolutions, Implementation Plan: Interview Feedback and Scoring (Slice 6) (+7 more)
 
 ### Community 188 - "Platform and DevOps practice"
 Cohesion: 0.25
@@ -1002,7 +1008,11 @@ Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 Cohesion: 0.29
 Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 
-### Community 191 - "Implementation Plan: Layered Modules (route -> controller -> service -> repository)"
+### Community 191 - "Implementation: Layered Modules (route -> controller -> service -> repository)"
+Cohesion: 0.17
+Nodes (11): Baseline Failures, Changes Made, Implementation: Layered Modules (route -> controller -> service -> repository), Links, Open Questions, Skills Consulted During Implementation, Status, Test Cases (+3 more)
+
+### Community 193 - "Implementation Plan: Layered Modules (route -> controller -> service -> repository)"
 Cohesion: 0.20
 Nodes (9): Deviations from the spec (approved by the user; spec.md updated to match), Implementation Plan: Layered Modules (route -> controller -> service -> repository), Overview, Project Rules Applied, Ready to Implement, Skills Consulted, Spec Requirements -> Implementation, Testing Strategy (+1 more)
 
@@ -1011,12 +1021,12 @@ Cohesion: 0.31
 Nodes (7): parametrize, stored_session(), test_a_long_job_description_is_summarised_once_and_used_in_every_call(), test_a_short_or_missing_job_description_makes_no_extra_call(), test_an_unusable_summary_keeps_the_original_and_the_interview_starts(), test_summary_usage_is_logged_with_its_own_prompt_version(), test_without_an_llm_no_summary_is_made()
 
 ### Community 211 - "test_retrieval_eval.py"
-Cohesion: 0.19
-Nodes (21): embedder(), labelled(), lf(), fixture, quiet(), `run_retrieval` as a Langfuse experiment run (langfuse-experiments Step 5;…, 15 cases with the kinds the label rules require: most expect API design first;…, run() (+13 more)
+Cohesion: 0.13
+Nodes (26): contextvars, A Langfuse client stand-in for experiment runs: datasets, `run_experiment` and…, corpus(), embedder(), labelled(), lf(), fixture, quiet() (+18 more)
 
-### Community 220 - "pytest"
-Cohesion: 0.09
-Nodes (12): pytest, parametrize, test_auth_routes_document_error_responses(), test_me_returns_profile_with_resolved_permissions(), parametrize, test_each_role_list_includes_the_shared_terms_once(), test_each_role_list_stays_well_under_deepgrams_keyterm_limit(), test_every_role_has_keyterms() (+4 more)
+### Community 220 - "Role"
+Cohesion: 0.08
+Nodes (26): permissions_for(), StrEnum, The only reader of ROLE_PERMISSIONS, so a DB-backed lookup can replace it later., Role, main(), Session, test_admin_holds_every_user_permission(), test_every_role_has_a_permission_entry() (+18 more)
 
 ### Community 221 - "Backend design and operations"
 Cohesion: 0.33
@@ -1070,9 +1080,9 @@ Nodes (4): Mobile architecture and releases, Offline-first and sync, Performance
 Cohesion: 0.40
 Nodes (4): App lifecycle, Layouts across screen sizes, Mobile fundamentals, Networking on unreliable connections
 
-### Community 234 - "FeedbackEvalCase"
-Cohesion: 0.22
-Nodes (10): feedback_dataset_items(), FeedbackEvalCase, load_feedback_cases(), Any, Path, The cases as dataset items: the interview as input, the bands as the expected…, parametrize, test_a_badly_labelled_case_is_rejected() (+2 more)
+### Community 234 - "summary"
+Cohesion: 0.25
+Nodes (6): Constraints, Input, Output, Role, Task, summary()
 
 ### Community 235 - "Communication and priorities"
 Cohesion: 0.50
@@ -1086,9 +1096,9 @@ Nodes (3): Code review, Engineering habits, Testing strategy
 Cohesion: 0.50
 Nodes (3): Ambiguous problems, Senior judgement, Technical direction
 
-### Community 238 - "Learn: Knowledge-base RAG for the question writer (Slice 8a)"
-Cohesion: 0.22
-Nodes (8): 1. Why it exists, 2. What it is, 3. When to use it, 6. Try it yourself, 7. What surprised me, 8. Check your understanding, 9. Go deeper / Still open, Learn: Knowledge-base RAG for the question writer (Slice 8a)
+### Community 238 - ".stream"
+Cohesion: 0.36
+Nodes (3): ReasoningEffort, A text reply is streamed word by word; a FakeStream as scripted. An LLMError…, Reply
 
 ### Community 239 - "Design fundamentals"
 Cohesion: 0.29
@@ -1110,9 +1120,9 @@ Nodes (6): Quality assurance basics, Raising edge cases before code exists, Regr
 Cohesion: 0.33
 Nodes (5): Check a note before ingesting (reads the file only; no database, no API call), Rules the ingest CLI enforces (a broken rule refuses the whole file), What makes a section good, Where real material comes from, Writing a knowledge-base note (guide)
 
-### Community 244 - "Implementation Plan: Follow-up Questions (decide / write split)"
-Cohesion: 0.20
-Nodes (9): Blockers & Resolutions, Implementation Plan: Follow-up Questions (decide / write split), Overview, Project Rules Applied, Ready to Implement, Skills Consulted, Spec Requirements -> Implementation, Testing Strategy (+1 more)
+### Community 244 - "check_layers"
+Cohesion: 0.25
+Nodes (8): Blockers & Resolutions, Known Issues, check_layers(), _imports(), Every layer-rule violation in `files` (repo-relative path -> source), as…, (absolute module, imported names) per import statement; relative imports…, test_clean_layer_imports_have_no_violations(), _violation()
 
 ### Community 245 - "Template (copy to app/modules/interviews/data/knowledge/<topic>.md, then replace everything below the header; roles: see note-guide.md)"
 Cohesion: 0.50
@@ -1134,21 +1144,13 @@ Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 Cohesion: 0.29
 Nodes (6): Capabilities, Constraints, Input, Output, Role, Task
 
-### Community 250 - "Learn: Layered architecture (route -> controller -> service -> repository)"
-Cohesion: 0.29
-Nodes (6): 1. Why it exists, 2. What it is, 3. When to use it, 7. What surprised me, 9. Go deeper / Still open, Learn: Layered architecture (route -> controller -> service -> repository)
-
-### Community 251 - "TranscriptionResult"
-Cohesion: 0.15
-Nodes (10): FakeTranscriber, Scripted transcripts (text, a full result, or an error), one per call; records…, BaseModel, What the vendor heard. `text` may be blank (silence); the caller decides what…, `audio` is a whole recording in a container the vendor detects itself (WebM,…, TranscriptionResult, The speech-to-text seam of a test: a scripted transcriber and a fresh per-test…, No transcriber configured (DEEPGRAM_API_KEY blank). (+2 more)
-
-### Community 252 - "Feature: Role-Based Access Control (single JWT)"
-Cohesion: 0.20
-Nodes (9): Blockers, Constraints, Edge Cases, Feature: Role-Based Access Control (single JWT), Goal, Out of Scope, Problem, User Flow (+1 more)
+### Community 252 - "Learn: Knowledge-base RAG for the question writer (Slice 8a)"
+Cohesion: 0.22
+Nodes (8): 1. Why it exists, 2. What it is, 3. When to use it, 6. Try it yourself, 7. What surprised me, 8. Check your understanding, 9. Go deeper / Still open, Learn: Knowledge-base RAG for the question writer (Slice 8a)
 
 ### Community 253 - "Implementation Plan: Résumé upload and candidate profile (Slice 8c)"
-Cohesion: 0.20
-Nodes (9): Affected Files & Patterns, Architecture & Design, Blockers & Resolutions, Implementation Plan: Résumé upload and candidate profile (Slice 8c), Project Rules Applied, Ready to Implement, Skills Consulted, Spec Requirements -> Implementation (+1 more)
+Cohesion: 0.17
+Nodes (11): Affected Files & Patterns, Blockers & Resolutions, Deviations found during implementation (2026-11-14), Implementation Plan: Résumé upload and candidate profile (Slice 8c), Overview, Project Rules Applied, Ready to Implement, Skills Consulted (+3 more)
 
 ### Community 255 - "Langfuse"
 Cohesion: 0.29
@@ -1159,64 +1161,52 @@ Cohesion: 0.29
 Nodes (3): fixture, RecordingClient, traces()
 
 ### Community 257 - "test_generation_eval.py"
-Cohesion: 0.19
-Nodes (17): lf(), fixture, quiet(), `run_generation` as Langfuse experiment runs (langfuse-experiments Step 11;…, The console with each arm row's start_ms (wall-clock time) dropped, and without…, A fake LLM: a new, valid main question per call; it can fail every call that…, run(), table_without_timings() (+9 more)
+Cohesion: 0.17
+Nodes (31): 5. What can go wrong, arm_of(), fill(), generated(), lf(), posted(), fixture, parametrize (+23 more)
 
 ### Community 258 - "2. Langfuse Documentation"
 Cohesion: 0.40
 Nodes (5): 2. Langfuse Documentation, 2a. Documentation Index (llms.txt), 2b. Fetch Individual Pages as Markdown, 2c. Search Documentation, Documentation Workflow
 
-### Community 259 - "Web"
-Cohesion: 0.20
-Nodes (5): fixture, Request, Response, The outside world of a test: which names resolve where, what each host serves,…, Web
-
-### Community 260 - "parse_log"
-Cohesion: 0.31
-Nodes (9): parse_log(), Lines that aren't a log record (the continuation lines of a traceback) are…, lines_of(), Collapse the table padding so assertions don't depend on column widths., rollup(), rollup_analysis(), squash(), test_calls_logged_before_the_task_name_existed_fold_into_other_so_the_rows_add_up() (+1 more)
-
-### Community 261 - "test_login.py"
-Cohesion: 0.25
-Nodes (4): _login_error(), test_registered_user_is_a_plain_active_user(), test_unknown_email_wrong_password_and_inactive_user_fail_identically(), test_valid_login_returns_bearer_token_for_the_user()
-
-### Community 262 - "Learn: Langfuse experiments for the interviews evals"
+### Community 259 - "Learn: Langfuse experiments for the interviews evals"
 Cohesion: 0.25
 Nodes (7): 1. Why it exists, 2. What it is, 3. When to use it, 7. What surprised me, 8. Check your understanding, 9. Go deeper / Still open, Learn: Langfuse experiments for the interviews evals
 
-### Community 263 - "lf"
-Cohesion: 0.67
-Nodes (3): lf(), fixture, A fake Langfuse client and a fixed git state (feedback runs as a Langfuse…
+### Community 260 - "Learn: Layered architecture (route -> controller -> service -> repository)"
+Cohesion: 0.25
+Nodes (7): 1. Why it exists, 2. What it is, 3. When to use it, 6. Try it yourself, 7. What surprised me, 9. Go deeper / Still open, Learn: Layered architecture (route -> controller -> service -> repository)
 
-### Community 264 - "ContextManager"
+### Community 262 - "test_tracing.py"
 Cohesion: 0.10
-Nodes (36): BuiltContext, ContextManager, ContextReport, estimate_tokens(), _log(), Any, NamedTuple, Protocol (+28 more)
+Nodes (10): client(), propagated(), fixture, Langfuse tracing: the Tracer (on/off, fail-open) and the TracingProvider…, _settings(), test_both_keys_build_an_enabled_tracer(), test_close_on_a_disabled_tracer_does_nothing(), test_no_keys_builds_a_disabled_tracer_without_warning() (+2 more)
 
-### Community 265 - "compute_overall"
-Cohesion: 0.47
-Nodes (6): compute_overall(), The mean of every criterion score of every main question, rounded half up to…, 6. Try it yourself, score(), test_the_overall_is_the_mean_of_every_criterion_score(), test_the_overall_rounds_half_up_to_one_decimal()
+### Community 264 - "_Usage"
+Cohesion: 0.67
+Nodes (3): The four usage fields of FeedbackCaseResult, so `**_usage(...)` is checked…, _Usage, TypedDict
 
 ### Community 268 - "FakeLangfuse"
 Cohesion: 0.09
 Nodes (15): experiment(), parametrize, quiet(), Runs `tracer.run_experiment` with a task that echoes the item id, and records…, test_a_case_removed_from_the_file_is_not_run_although_its_item_stays_in_langfuse(), test_a_langfuse_failure_returns_none_never_raises_and_logs_the_class_only(), test_an_edited_case_updates_its_item_and_the_run_sees_the_new_input(), test_an_experiment_is_a_no_op_returning_none_when_tracing_is_off() (+7 more)
 
 ## Knowledge Gaps
-- **832 isolated node(s):** `cuewise-be`, `Core Principles`, `Use case specific references`, `Credentials`, `Detailed CLI Reference` (+827 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1958 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **40 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **846 isolated node(s):** `cuewise-be`, `Core Principles`, `Use case specific references`, `Credentials`, `Detailed CLI Reference` (+841 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2082 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **60 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Tracer` connect `Tracer` to `traces`, `LLMServerError`, `test_generation_eval.py`, `interviews_rag_evals.py`, `FakeLangfuse`, `test_feedback_evals.py`, `test_tracing_lifespan.py`, `interviews_feedback_dependencies.py`, `run_ranking`, `LLMResult`, `test_feedback_endpoint.py`, `KnowledgeRepository`, `interviews_answer_service.py`, `Completed Steps`, `experiments`, `AnswerService`, `test_evals.py`, `FakeClient`, `test_tracing_routes.py`, `interviews_feedback_service.py`, `interviews_feedback_evals.py`, `test_tracing.py`, `run_feedback_case`, `test_retrieval_eval.py`, `interviews_context.py`, `traced`, `test_factory.py`, `interviews_evals.py`, `FeedbackGenerator`, `Implementation: Eval runs in Langfuse (scores + datasets)`, `Feature: Langfuse experiments for the interviews evals`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
-- **Why does `User` connect `User` to `AuthController`, `test_knowledge_postgres.py`, `decode_token`, `tests/conftest.py`, `auth_dependencies.py`, `Role`, `PageParams`, `interviews_feedback_dependencies.py`, `interviews_answer_service.py`, `require_permissions`, `interviews_job_url_service.py`, `AnswerService`, `interviews_model.py`, `test_create_interview.py`, `InterviewQuestion`, `interviews_feedback_service.py`, `interviews_transcription_dependencies.py`, `errors.py`, `Implementation: Langfuse Tracing`, `Implementation Plan: UUID primary keys`?**
-  _High betweenness centrality (0.042) - this node is a cross-community bridge._
-- **Why does `LLMResult` connect `LLMResult` to `LLMServerError`, `test_generation_eval.py`, `.stream`, `test_feedback_evals.py`, `test_turn_budget.py`, `test_context_prompts.py`, `Tracer`, `interviews_answer_service.py`, `interviews_utils.py`, `OpenAICompatibleProvider`, `test_evals.py`, `Interviewer`, `test_start_llm.py`, `test_openai_compatible_stream.py`, `interviews_feedback_service.py`, `test_answer_llm.py`, `interviews_feedback_evals.py`, `test_tracing.py`, `Implementation Steps`, `test_job_description_summary.py`, `fake.py`, `interviews_context.py`, `traced`, `test_factory.py`, `interviews_evals.py`, `FeedbackGenerator`, `Feature: Langfuse Tracing`?**
+- **Why does `Tracer` connect `Tracer` to `traces`, `test_generation_eval.py`, `Completed Steps`, `test_tracing.py`, `interviews_rag_evals.py`, `FakeLangfuse`, `ChatMessage`, `test_feedback_evals.py`, `test_tracing_lifespan.py`, `get_llm_provider`, `interviews_constants.py`, `test_feedback_endpoint.py`, `test_profile_evals.py`, `interviews_answer_service.py`, `test_evals.py`, `FakeClient`, `test_tracing_routes.py`, `test_profile_routes.py`, `interviews_feedback_evals.py`, `traced`, `provider.py`, `test_retrieval_eval.py`, `interviews_service.py`, `EvalCase`, `test_factory.py`, `interviews_evals.py`, `interviews_feedback_service.py`, `Implementation: Eval runs in Langfuse (scores + datasets)`, `Feature: Langfuse experiments for the interviews evals`, `LLMProvider`, `ProfileLLM`?**
+  _High betweenness centrality (0.054) - this node is a cross-community bridge._
+- **Why does `User` connect `User` to `Completed Steps`, `config.py`, `tests/conftest.py`, `auth_service.py`, `interviews_route.py`, `get_llm_provider`, `Implementation Plan: Role-Based Access Control (single JWT)`, `interviews_job_url_service.py`, `interviews_answer_service.py`, `interviews_model.py`, `JobRole`, `test_create_interview.py`, `Implementation Plan: UUID primary keys`, `InterviewsRepository`, `profile_service.py`, `PageParams`, `InterviewQuestion`, `errors.py`, `profile_dependencies.py`, `provider.py`, `interviews_service.py`, `Role`, `Implementation: Langfuse Tracing`, `interviews_feedback_service.py`?**
   _High betweenness centrality (0.029) - this node is a cross-community bridge._
-- **Are the 39 inferred relationships involving `Tracer` (e.g. with `build_provider()` and `ChatMessage`) actually correct?**
-  _`Tracer` has 39 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 47 inferred relationships involving `User` (e.g. with `AuthController` and `get_current_user()`) actually correct?**
-  _`User` has 47 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 28 inferred relationships involving `FakeProvider` (e.g. with `ChatMessage` and `LLMError`) actually correct?**
-  _`FakeProvider` has 28 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `InterviewQuestion` connect `InterviewQuestion` to `interviews_schema.py`, `test_interview_report.py`, `build_usage_report`, `test_list_interviews.py`, `.record_turn`, `test_turn_budget.py`, `test_follow_ups.py`, `test_feedback_endpoint.py`, `test_answer_stream.py`, `test_transcript.py`, `interviews/conftest.py`, `Checks`, `interviews_context.py`, `interviews_answer_service.py`, `test_feedback_contract.py`, `interviews_model.py`, `LLMResult`, `JobRole`, `test_create_interview.py`, `test_start_llm.py`, `interviews_report.py`, `InterviewsRepository`, `test_answer_llm.py`, `provider.py`, `interviews_service.py`, `test_interviewer_messages.py`, `test_context_controller.py`?**
+  _High betweenness centrality (0.024) - this node is a cross-community bridge._
+- **Are the 49 inferred relationships involving `User` (e.g. with `AuthController` and `get_current_user()`) actually correct?**
+  _`User` has 49 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 40 inferred relationships involving `Tracer` (e.g. with `build_provider()` and `ChatMessage`) actually correct?**
+  _`Tracer` has 40 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 29 inferred relationships involving `FakeProvider` (e.g. with `ChatMessage` and `LLMError`) actually correct?**
+  _`FakeProvider` has 29 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 64 inferred relationships involving `JobRole` (e.g. with `FeedbackScoreInputs` and `FeedbackWriteInputs`) actually correct?**
   _`JobRole` has 64 INFERRED edges - model-reasoned connections that need verification._

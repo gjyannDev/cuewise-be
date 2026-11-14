@@ -1,8 +1,9 @@
 # How to evaluate an AI feature: from the command to the fix
 
 A practical guide for every Cuewise eval: the interviewer's question writing (`write`), the streamed turn (`stream`),
-the follow-up decision (`decide`), the end-of-interview feedback (`feedback`) and the knowledge-base retrieval
-(`retrieval`). Use it again for any AI feature you add later (section 10). Every task records each run as a Langfuse
+the follow-up decision (`decide`), the end-of-interview feedback (`feedback`), the knowledge-base retrieval
+(`retrieval`) and the résumé profile (`profile`, its own runner). Use it again for any AI feature you add later
+(section 10). Every task records each run as a Langfuse
 *experiment run* you compare in the Langfuse UI (section 6a).
 
 An eval run is only useful if each failure leads to a decision. The loop is the same for every task:
@@ -28,8 +29,14 @@ right *range*.
 | `decide` | Follow up or move on, and which gap | the 15 labelled cases in `eval_cases.json` | **Labels** (`expect`): `decision`, `gap`, `valid_reply`, `injection_ignored` | accuracy, **over-probing**, **under-probing**, per-gap |
 | `feedback` | Rubric scores, verified quotes, written feedback | `data/feedback_eval_cases.json` (10) | **Bands** (`expect_overall`, `expect_criteria`), plus `quotes_verified`, `write_valid`, `insufficient`, and `level_gap` for a case paired with an earlier one at a lower level (`lower_than`) | overall in band, valid replies, quotes rejected, template texts, **spread** |
 | `retrieval` | Whether the right reference note comes back for a job description | `data/retrieval_eval_cases.json` (21) | **Rank** of the labelled note, against a filter-only baseline | recall@5, MRR (vector vs filter), threshold sweep |
+| `profile` (own runner, see below) | Résumé → candidate profile, through the real upload pipeline (read, scrub, extract, parse, ground) | `app/modules/profile/data/profile_eval_cases.json` (5 synthetic résumés, built into real PDF and DOCX files) | **Labels** (`expect`): the skills and role titles the résumé states, plus `forbidden` strings a hidden injection tries to add | skills precision, skills recall, title recall, role count, **injection ignored** |
 
 The knowledge-base `generation` and `ranking` tasks are explained in `docs/features/knowledge-base-rag/`.
+
+**Why `profile` has its own command.** Each eval lives in the module it tests. `--task` switches between the
+interviews module's own steps; the résumé profile is its own module (`app/modules/profile/`), so its runner is
+`app/modules/profile/tooling/profile_evals.py`. It shares the same Langfuse experiment helpers, flags and rules, so
+its runs look and compare like every other task. See `docs/features/resume-upload/learnings.md`.
 
 Rules can't judge quality. `write` and `stream` print a `review:` line for long-history cases: read those replies
 yourself, because no check can tell whether a question is *good*.
@@ -52,9 +59,10 @@ yourself, because no check can tell whether a question is *good*.
 | `write`, `stream` | 1, plus 1 to summarize a job description longer than `SUMMARY_THRESHOLD` (with `--summary on`) | about 19-25 |
 | `decide` | 1 | about 15 |
 | `feedback` | 2 (score + write), plus 1 per retry. The near-empty case is decided by code, with no call | about 18-22 |
+| `profile` | 1, plus 1 per retry | about 5-10 |
 
-`--repeat N` multiplies everything by N. On the free tier, keep `N` at 2 or 3 until the runner can pause between calls
-(section 9).
+`--repeat N` multiplies everything by N. On the free tier, keep `N` at 2 or 3, and add `--pause-seconds 2.5` to space
+the calls out (every task supports it).
 
 ---
 
@@ -62,19 +70,20 @@ yourself, because no check can tell whether a question is *good*.
 
 ```bash
 uv run python -m app.modules.interviews.tooling.interviews_evals --task <write|decide|stream|feedback> --model gemini-3.5-flash-lite [--repeat N]
+uv run python -m app.modules.profile.tooling.profile_evals --model gemini-3.5-flash-lite [--repeat N]   # the résumé profile
 ```
 
 | Flag | What it does | Applies to |
 |---|---|---|
-| `--task` | Which task. Default `write` | all |
+| `--task` | Which task. Default `write` | interviews runner |
 | `--model` | Overrides the primary provider's model for this run. Keep it the same when you compare runs | all |
 | `--repeat N` | Runs every case N times and reports the pass rate's mean, min and max. `feedback` also reports the score **spread** | all |
-| `--reasoning-effort` | Reasoning effort for models that support it | all |
+| `--reasoning-effort` | Reasoning effort for models that support it | interviews runner |
 | `--prompt <version>` | Swaps the **interviewer** prompt for the chosen strategy | **`write` only** |
 | `--strategy` | `window_ledger` or `full_history` | `write` only |
 | `--notes on/off`, `--summary on/off` | Ablations: the running note, and the job description summary | `write`, `stream` |
-| `--note "<why>"` | Why you are running this and what you expect. Saved as the Langfuse run's description, so the reason travels with the numbers (cut to 300 characters) | `decide`, `retrieval` |
-| `--pause-seconds` | Wait between calls (free-tier limits) | `retrieval`, `generation` |
+| `--note "<why>"` | Why you are running this and what you expect. Saved as the Langfuse run's description, so the reason travels with the numbers (cut to 300 characters) | all |
+| `--pause-seconds` | Wait between cases, and between repeats (free-tier limits). Default 2.5 for `retrieval` and `generation`, 0 for the others | all |
 
 **Trying a new prompt for another task.** `--prompt` doesn't reach `decide`, `stream` or `feedback` yet. Point the
 task's constant in `app/modules/interviews/constants/interviews_constants.py` at the new file for the run, then point it back:
@@ -89,7 +98,8 @@ With Langfuse keys set, each repeat is one **experiment run** (section 6a) and t
 `Langfuse runs: <run name> (<link>); ...`; without keys, or when Langfuse fails, it says why nothing was recorded. The
 console output is otherwise the same with and without keys. The cases are synced into the datasets
 `interviews-eval/write` (shared with `stream`), `interviews-eval/decide`, `interviews-eval/feedback`,
-`interviews-eval/retrieval` and `interviews-eval/generation` before each run.
+`interviews-eval/retrieval` and `interviews-eval/generation` before each run; the profile cases into
+`profile-eval/extract`.
 
 ---
 
@@ -106,6 +116,7 @@ PASS|FAIL  <case id>   <failed checks with their detail, or the error>
 | `write`, `stream` | `tokens=in/out cached reasoning latency_ms finish` (`stream` adds `first_token_ms`), then `reply='...'` and, for long cases, `review:` | No: hints are in the case's output in Langfuse |
 | `decide` | The same, with the reply | No: the case's output in Langfuse (over- or under-probing, injection) |
 | `feedback` | `overall insufficient text quotes_rejected tokens latency_ms`, then a `hint:` line per failure | Yes |
+| `profile` | `precision recall roles titles injection_ignored hidden_chars ungrounded` | No: the profile it produced is the case's output in Langfuse |
 
 **The summary.**
 
@@ -118,6 +129,9 @@ PASS|FAIL  <case id>   <failed checks with their detail, or the error>
 | `avg first token` | `stream` | Lower than `write`'s full latency | The streamed format adds delay before the question |
 | `valid replies`, `quotes rejected`, `template texts` | `feedback` | total, 0, 0 | The contract breaks, or a provider error forced the template |
 | `overall in band`, `criterion spread` | `feedback` | all in band, spread at most 1 | The judgement is off, or it isn't repeatable |
+| `valid`, `skills_precision`, `skills_recall` | `profile` | 5, high, high | Precision low: the model adds skills the label lacks (check `ungrounded` too). Recall low: it misses stated skills, or the reader lost them (a column or hidden-text rule) |
+| `title_recall`, `role_count_match` | `profile` | 1.0 | A title rewritten ("Sr. Engineer" for "Senior Backend Engineer") or a role merged or dropped |
+| `injection_ignored` | `profile` | 1.0 | The hidden instruction reached the profile: check the reader dropped it (`hidden_chars` > 0), then the prompt |
 | tokens, cached, latency | all | Steady between runs | A change that doubles them needs a reason |
 
 ---
@@ -393,9 +407,11 @@ Build the eval together with the feature, so prompt and model changes can be com
 3. **Write the checks as code**, with stable names and a `detail` that says what was wrong. Unit-test them with a fake
    provider, so `uv run pytest` never makes a real call.
 4. **Add a hint per check** that says where to look first.
-5. **Wire it into the runner** under its own `--task` as an experiment run (`run_cases` in
-   `tooling/interviews_eval_runs.py`): scores per check, run scores from the console's summary, and the
-   cases mirrored into a dataset `interviews-eval/<task>`.
+5. **Wire it into a runner** as an experiment run (`run_cases` in `tooling/interviews_eval_runs.py`): scores per
+   check, run scores from the console's summary, and the cases mirrored into a dataset. A step of the interviews module
+   becomes a new `--task` (dataset `interviews-eval/<task>`). A new module gets its own runner in its own
+   `tooling/` folder that reuses the same helpers and flags (dataset `<module>-eval/<task>`), as
+   `app/modules/profile/tooling/profile_evals.py` does: the eval stays with the code it tests.
 6. **Run it once and record the baseline** as row 1 of the feature's eval log, before you change any prompt.
 
 ---

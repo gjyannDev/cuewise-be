@@ -111,6 +111,17 @@ Add a new `profile` module: upload a PDF or DOCX, read it safely in memory, scru
 - Open questions: none.
 - Known baseline failures: `tests/core/test_config.py::test_llm_settings_default_to_off_with_documented_limits`, plus the timing-flaky `test_turn_budget.py` test. (The `follow_up_decision_v2` contract test was removed on 2026-11-14: v2 lost its experiment and its file was never committed.)
 
+## Deviations found during implementation (2026-11-14)
+- **External hyperlinks in DOCX are allowed**; every other external relationship is refused (Step 1: résumés nearly always link LinkedIn or GitHub, and nothing here follows links).
+- **The reader lives in `profile_resume_utils.py`**, not `profile_utils.py` (size; follows `interviews_job_url_utils.py`). The test file generator is `tests/resume_files.py` (no `tests/helpers` package exists).
+- **Column rule:** each side needs at least 3 lines, not a share of the words (a skills sidebar holds about a tenth of the words).
+- **Profile JSON is plain `JSON`**, like `interview_feedback.result`, not a JSONB variant: it is read and replaced whole, never queried.
+- **The migration was written by hand** (autogenerate connects to the database); checked offline with `--sql`.
+- **The PDF/DOCX builders live in `app/modules/profile/tooling/profile_resume_files.py`** (the eval builds real files too); `tests/resume_files.py` re-exports them.
+- **The eval runner imports `interviews_eval_runs`** (dev tooling, not app code); lifting those helpers to core is a later refactor.
+- **Caps tightened** (skill 30, title 60, organization 60, period 20, summary 220, project name 60, description 220, technology 30) so the worst case stays under 4,000 characters of JSON (AC13); the first caps added up to about 4,600.
+- **Extraction temperature 0** for repeatable extraction and comparable eval runs.
+
 ## Blockers & Resolutions
 - Tracing would leak résumé text -> `redact` label (Step 3), tested.
 - Cross-feature imports -> lift to core (Step 2, user-confirmed).
