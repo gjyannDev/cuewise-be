@@ -38,6 +38,12 @@ class NotEnoughQuestionsError(ConflictError):
     code = "NOT_ENOUGH_QUESTIONS"
 
 
+class ProfileRequiredError(ConflictError):
+    """An interview asked to use the candidate's profile, and there is none to use (resume-aware-interview)."""
+
+    code = "PROFILE_REQUIRED"
+
+
 class SessionNotInProgressError(ConflictError):
     code = "SESSION_NOT_IN_PROGRESS"
 

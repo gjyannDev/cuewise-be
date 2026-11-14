@@ -167,7 +167,7 @@ _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 # Matches an opening or closing tag the app uses to fence data, in any case, so untrusted text can't close its own
 # block or fake the app's status block.
 APP_TAG = re.compile(
-    r"<\s*/?\s*(job_description|interview_status|question_thread|answer|feedback_scores|reference_notes)\s*>",
+    r"<\s*/?\s*(job_description|interview_status|question_thread|answer|feedback_scores|reference_notes|candidate_profile)\s*>",
     re.IGNORECASE,
 )
 
@@ -412,16 +412,19 @@ def build_interviewer_messages(
     job_description: str | None,
     turns: Sequence[QuestionTurn],
     reference_notes: Sequence[ReferenceNote] = (),
+    profile_block: str | None = None,
 ) -> list[ChatMessage]:
     """The full input for one call (the model has no memory, so the whole interview is resent every time).
 
     The job description opens the conversation as user data (with the interview's reference notes right after it,
-    when it has any); earlier questions are replayed as the same JSON the model must answer with, which keeps it in
-    format. Roles alternate system, user, assistant, user, ...
+    when it has any, then the candidate profile block, when the write uses it); earlier questions are replayed as the
+    same JSON the model must answer with, which keeps it in format. Roles alternate system, user, assistant, user, ...
     """
     data = job_description_block(job_description)
     if reference_notes:
         data = f"{data}\n\n{reference_notes_block(reference_notes)}"
+    if profile_block:
+        data = f"{data}\n\n{profile_block}"
     messages = [
         ChatMessage(role="system", content=system_prompt),
         ChatMessage(role="user", content=f"{data}\n\nPlease ask the first question."),

@@ -10,6 +10,8 @@ from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.config import settings
 from app.db.session import get_db
+from app.modules.profile.dependencies.profile_dependencies import get_profile_service
+from app.modules.profile.services.profile_service import ProfileService
 
 from ..controllers.interviews_answer_controller import AnswerController
 from ..dependencies.interviews_shared_dependencies import (
@@ -31,6 +33,7 @@ def get_answer_service(
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     context: Annotated[ContextManager, Depends(get_context_manager)],
     tracer: Annotated[Tracer, Depends(get_tracer)],
+    profiles: Annotated[ProfileService, Depends(get_profile_service)],
 ) -> AnswerService:
     return AnswerService(
         InterviewsRepository(db),
@@ -42,6 +45,7 @@ def get_answer_service(
         clock=clock,
         context=context,
         tracer=tracer,
+        profiles=profiles,
     )
 
 

@@ -6,7 +6,7 @@ import uuid
 from app.core.ai.context import ContextManager, ContextTooLargeError
 from app.core.ai.provider import LLMError, LLMProvider, LLMResult
 
-from ..ai.interviews_context import InterviewerInputs
+from ..ai.interviews_context import InterviewerInputs, write_trace_labels
 from ..ai.interviews_reply import InvalidReplyError, parse_interviewer_reply
 from ..ai.interviews_turn_limits import Deadline
 from ..ai.interviews_turn_log import llm_logger, log_llm_call, log_llm_error, log_result
@@ -59,7 +59,7 @@ def write(
                 built.messages,
                 max_tokens=max_tokens,
                 budget_seconds=remaining,
-                trace_labels={"task": INTERVIEWER_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
+                trace_labels=write_trace_labels(INTERVIEWER_TASK, built, budget_left_ms),
             )
         except LLMError as exc:
             log_llm_error(session_id, exc, INTERVIEWER_TASK, version, budget_left_ms)

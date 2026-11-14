@@ -11,6 +11,7 @@ from typing import NamedTuple
 from app.core.ai.provider import LLMResult
 from app.core.errors import NotFoundError
 from app.modules.auth.models.auth_model import User
+from app.modules.profile.schemas.profile_schema import CandidateProfile
 
 from ..ai.interviews_context import InterviewerInputs
 from ..ai.interviews_turn_log import sum_known
@@ -43,6 +44,8 @@ class InterviewSetup(NamedTuple):
     job_description_summary: str | None = None
     # Picked once at start and stored with the interview; empty for interviews without notes (and older ones).
     reference_notes: tuple[ReferenceNote, ...] = ()
+    # The owner's profile, read live for this request when the interview opted in; never stored on the interview.
+    profile: CandidateProfile | None = None
 
 
 class Thread(NamedTuple):
@@ -70,6 +73,7 @@ def interviewer_inputs(setup: InterviewSetup, turns: Sequence[QuestionTurn]) -> 
         turns=turns,
         summary_used=setup.job_description_summary is not None,
         reference_notes=setup.reference_notes,
+        candidate_profile=setup.profile,
     )
 
 

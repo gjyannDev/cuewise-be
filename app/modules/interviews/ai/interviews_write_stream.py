@@ -14,7 +14,7 @@ from app.core.ai.provider import (
     LLMTimeoutError,
 )
 
-from ..ai.interviews_context import InterviewerInputs
+from ..ai.interviews_context import InterviewerInputs, write_trace_labels
 from ..ai.interviews_reply import InvalidReplyError, parse_streamed_reply, split_header
 from ..ai.interviews_turn_limits import Deadline
 from ..ai.interviews_turn_log import log_llm_call, log_llm_error, log_result
@@ -62,7 +62,7 @@ async def stream_write(
         attempt_start = clock()
         finished: Draft | None = None
         try:
-            labels = {"task": INTERVIEWER_STREAM_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms}
+            labels = write_trace_labels(INTERVIEWER_STREAM_TASK, built, budget_left_ms)
             draft = stream_draft(
                 llm, built.messages, remaining, deadline, follow_up_category, labels, max_tokens=max_tokens
             )

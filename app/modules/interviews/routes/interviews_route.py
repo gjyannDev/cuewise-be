@@ -77,7 +77,14 @@ Errors before the stream opens (401, 403, 404, 409, 422) are plain JSON, like PO
 
 
 @router.post(
-    "", status_code=status.HTTP_201_CREATED, responses={409: {"model": ErrorResponse}}
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": "NOT_ENOUGH_QUESTIONS, or PROFILE_REQUIRED: use_profile is set and no résumé is stored.",
+        }
+    },
 )
 def start_interview(
     data: InterviewCreateIn,

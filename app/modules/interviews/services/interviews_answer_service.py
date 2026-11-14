@@ -20,6 +20,7 @@ from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.errors import QuestionNotCurrentError, SessionNotInProgressError
 from app.modules.auth.models.auth_model import User
+from app.modules.profile.services.profile_service import ProfileService
 
 from ..ai.interviews_context import CONTEXT_MANAGER, InterviewerInputs
 from ..ai.interviews_turn import Interviewer
@@ -135,10 +136,13 @@ class AnswerService:
         clock: Callable[[], float] = time.monotonic,
         context: ContextManager = CONTEXT_MANAGER,
         tracer: Tracer | None = None,
+        profiles: ProfileService | None = None,
     ):
         self.repo = repo
         self.bank = bank
         self.rng = rng
+        # The candidate profiles (8c), read live each turn of an interview that opted in. None = no profile exists.
+        self.profiles = profiles
         # Langfuse traces (one per request that can call the LLM); a disabled tracer costs nothing.
         self.tracer = tracer or Tracer(None)
         # Decide, limits, write: one answer turn of the LLM interviewer (ai/interviews_turn.py). None = LLM off.
@@ -194,6 +198,8 @@ class AnswerService:
             session.job_description,
             session.job_description_summary,
             tuple(self.repo.reference_notes(session.id)),
+            # Live, so a DELETE or replace takes effect on the next main question (AC9). None once it is deleted.
+            self.profiles.find_for_interview(user.id) if session.use_profile and self.profiles else None,
         )
         asked = self.repo.list_questions(session.id, position)
         saved = self.repo.list_messages(session.id)

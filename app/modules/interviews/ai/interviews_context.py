@@ -8,16 +8,19 @@ is today's send-everything payload, never trimmed: the honest baseline and the f
 move on. Both it and window_ledger keep the current thread whole.
 `interviewer_stream` is the streamed turn's write call: window_ledger on interviewer_v5, whose plain-text reply can be
 shown while it streams.
-Both write tasks are wrapped by `WithReferenceNotes`: an interview with reference notes gets the v6 prompts and the
-notes for its main questions; every other call is unchanged.
+Both write tasks are wrapped by `WithInterviewData`: a main question of an interview with reference notes gets the v7
+prompts and the notes; one with the candidate's profile gets the v8 prompts, the profile and any notes. Every other
+call is unchanged.
 """
 
 import json
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 
-from app.core.ai.context import ContextManager, StrategyOutput, Task
+from app.core.ai.context import BuiltContext, ContextManager, StrategyOutput, Task
 from app.core.ai.provider import ChatMessage
+from app.core.ai.tracing import REDACT_LABEL
+from app.modules.profile.schemas.profile_schema import CandidateProfile
 
 from ..ai.interviews_feedback import FeedbackThread, StoredResult
 from ..constants.interviews_constants import (
@@ -37,7 +40,10 @@ from ..constants.interviews_constants import (
     INTERVIEWER_V5_PROMPT_VERSION,
     INTERVIEWER_V7_JSON_PROMPT_VERSION,
     INTERVIEWER_V7_PROMPT_VERSION,
+    INTERVIEWER_V8_JSON_PROMPT_VERSION,
+    INTERVIEWER_V8_PROMPT_VERSION,
     MAX_FOLLOW_UPS,
+    PROFILE_TOKEN_ALLOWANCE,
     REFERENCE_NOTES_TOKEN_ALLOWANCE,
     SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
@@ -54,6 +60,7 @@ from ..constants.interviews_constants import (
     QuestionKind,
 )
 from ..utils.interviews_knowledge_utils import ReferenceNote
+from ..utils.interviews_profile_utils import candidate_profile_block
 from ..utils.interviews_utils import (
     QuestionTurn,
     build_interviewer_messages,
@@ -93,6 +100,9 @@ class InterviewerInputs(NamedTuple):
     gap: FollowUpGap | None = None
     # The interview's stored notes, rank order. Only main-question writes render them (not decide, not follow-ups).
     reference_notes: Sequence[ReferenceNote] = ()
+    # The owner's profile, read live this turn; None when the interview did not opt in or the profile is gone.
+    # Main-question writes only, like the notes.
+    candidate_profile: CandidateProfile | None = None
 
 
 class SummaryInputs(NamedTuple):
@@ -139,8 +149,10 @@ class WindowLedger:
         limit: int | None = WINDOW_INPUT_LIMIT,
         # Earlier questions are replayed in the format the prompt asks for: JSON (v2-v4), or v5's streamable text.
         text_replies: bool = False,
-        # The v6 prompts: put the interview's reference notes after the job description (WithReferenceNotes decides).
+        # The v7/v8 prompts: put the interview's reference notes after the job description (WithInterviewData decides).
         with_notes: bool = False,
+        # The v8 prompts: put the candidate profile after the job description and notes (WithInterviewData decides).
+        with_profile: bool = False,
     ):
         self.version = version
         self.template = load_prompt(version)
@@ -149,6 +161,7 @@ class WindowLedger:
         self.limit = limit
         self.text_replies = text_replies
         self.with_notes = with_notes
+        self.with_profile = with_profile
 
     def droppable(self, inputs: InterviewerInputs) -> int:
         # Everything older than the current thread: the model must see the whole thread it is writing for.
@@ -172,9 +185,12 @@ class WindowLedger:
             template=self.template,
         )
         # System prompt and the job-description message never change during an interview: a cacheable prefix. The
-        # reference notes are fixed per interview too, so they sit in that prefix.
+        # reference notes are fixed per interview too, so they sit in that prefix; so does the profile, which changes
+        # only if the candidate replaces it mid-interview.
         notes = inputs.reference_notes if self.with_notes else ()
-        messages = build_interviewer_messages(system, inputs.job_description, [], notes)
+        profile = inputs.candidate_profile if self.with_profile else None
+        profile_block = candidate_profile_block(profile) if profile is not None else None
+        messages = build_interviewer_messages(system, inputs.job_description, [], notes, profile_block)
         for i, (_, turn) in enumerate(recent, start=len(turns) - len(recent)):
             answer = neutralize_app_tags(turn.answer)
             if i != len(turns) - 1 and len(answer) > self.cap:
@@ -223,51 +239,94 @@ class WindowLedger:
         return _status_block(lines, ledger, "Earlier questions no longer shown in full:")
 
 
-class WithReferenceNotes:
-    """A main-question write of an interview with reference notes: the notes-aware prompt (v6) and a <reference_notes>
-    block after the job description. Any other write (no notes, or a follow-up) is the plain strategy, unchanged, so
-    interviews without notes send exactly what they sent before this feature.
+class WithInterviewData:
+    """A main-question write that carries the interview's own data: reference notes (v7) and/or the candidate's profile
+    (v8, with any notes too). Any other write (neither, or a follow-up) is the plain strategy, unchanged, so interviews
+    without notes or a profile send exactly what they sent before either feature.
 
-    The notes get their own token allowance on top of the plain limit. When even that is not enough, older history is
-    trimmed first (as always) and the notes go last, before the input would count as too large: notes must never be
-    the reason a question falls back to the bank.
+    The notes and the profile each get their own token allowance on top of the plain limit. When even that is not
+    enough, older history is trimmed first (as always), then the profile block (the unproven personalisation), then
+    the notes (their depth guidance is measured, 8a), before the input would count as too large: neither block must
+    ever be the reason a question falls back to the bank.
     """
 
-    def __init__(self, plain: WindowLedger, notes_version: str, *, allowance: int = REFERENCE_NOTES_TOKEN_ALLOWANCE):
+    def __init__(
+        self,
+        plain: WindowLedger,
+        notes_version: str,
+        profile_version: str,
+        *,
+        allowance: int = REFERENCE_NOTES_TOKEN_ALLOWANCE,
+        profile_allowance: int = PROFILE_TOKEN_ALLOWANCE,
+    ):
         self.plain = plain
-        self.with_notes = WindowLedger(
-            notes_version,
+        self.with_notes = self._ledger(notes_version, with_profile=False)
+        self.with_profile = self._ledger(profile_version, with_profile=True)
+        self.allowance = allowance
+        self.profile_allowance = profile_allowance
+        self.limit = plain.limit
+
+    def _ledger(self, version: str, *, with_profile: bool) -> WindowLedger:
+        plain = self.plain
+        return WindowLedger(
+            version,
             window=plain.window,
             cap=plain.cap,
             limit=plain.limit,
             text_replies=plain.text_replies,
             with_notes=True,
+            with_profile=with_profile,
         )
-        self.allowance = allowance
-        self.limit = plain.limit
 
     def limit_for(self, inputs: InterviewerInputs) -> int | None:
-        if self.limit is None or not self._uses_notes(inputs):
-            return self.limit
-        return self.limit + self.allowance
+        if self.limit is None:
+            return None
+        return (
+            self.limit
+            + self.allowance * self._uses_notes(inputs)
+            + self.profile_allowance * self._uses_profile(inputs)
+        )
 
     def droppable(self, inputs: InterviewerInputs) -> int:
-        # One more step than the plain strategy: after all older history, the notes block itself.
-        return self.plain.droppable(inputs) + int(self._uses_notes(inputs))
+        # After all older history, one step per block: the profile, then the notes.
+        return self.plain.droppable(inputs) + self._uses_profile(inputs) + self._uses_notes(inputs)
 
     def build(self, inputs: InterviewerInputs, dropped: int) -> StrategyOutput:
-        if not self._uses_notes(inputs):
+        uses_notes, uses_profile = self._uses_notes(inputs), self._uses_profile(inputs)
+        if not (uses_notes or uses_profile):
             return self.plain.build(inputs, dropped)
         history = self.plain.droppable(inputs)
-        if dropped <= history:
+        if dropped > history and uses_profile:
+            # The profile is the first block to go: past the history, the next step drops it.
+            uses_profile, dropped = False, dropped - 1
+        if dropped > history:
+            uses_notes = False
+        if uses_profile:
+            output = self.with_profile.build(inputs, dropped)
+        elif uses_notes:
             output = self.with_notes.build(inputs, dropped)
-            return output._replace(counts={**output.counts, "reference_notes": len(inputs.reference_notes)})
-        output = self.plain.build(inputs, history)
-        return output._replace(counts={**output.counts, "reference_notes": 0})
+        else:
+            output = self.plain.build(inputs, history)
+        return self._counted(output, inputs, notes=uses_notes, profile=uses_profile)
+
+    @staticmethod
+    def _counted(output: StrategyOutput, inputs: InterviewerInputs, *, notes: bool, profile: bool) -> StrategyOutput:
+        """How many notes and whether the profile went into this write (numbers only, for the log and the redact rule).
+        A key appears only when the interview has that data, so the log of an interview without it is unchanged."""
+        counts = dict(output.counts)
+        if inputs.reference_notes:
+            counts["reference_notes"] = len(inputs.reference_notes) if notes else 0
+        if inputs.candidate_profile is not None:
+            counts["profile"] = int(profile)
+        return output._replace(counts=counts)
 
     @staticmethod
     def _uses_notes(inputs: InterviewerInputs) -> bool:
         return bool(inputs.reference_notes) and inputs.mode == FollowUpAction.next_question
+
+    @staticmethod
+    def _uses_profile(inputs: InterviewerInputs) -> bool:
+        return inputs.candidate_profile is not None and inputs.mode == FollowUpAction.next_question
 
 
 class FollowUpDecision:
@@ -452,6 +511,20 @@ def _counts(full: int, ledger: int, notes: int, summary_used: bool) -> dict[str,
     }
 
 
+def write_trace_labels(task: str, built: BuiltContext, budget_left_ms: int) -> dict[str, str | int | None]:
+    """The labels of one write call. A write whose prompt carries the candidate profile is labelled `redact`: Langfuse
+    then keeps its task, prompt version, usage and latency, but not its prompt or reply text (as 8c does for the
+    extraction). Follow-ups and writes without the profile are traced in full, as before."""
+    labels: dict[str, str | int | None] = {
+        "task": task,
+        "prompt_version": built.prompt_version,
+        "budget_left_ms": budget_left_ms,
+    }
+    if built.report.counts.get("profile"):
+        labels[REDACT_LABEL] = True
+    return labels
+
+
 def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextManager:
     """`prompts` maps a strategy name to a prompt version (the eval runner's --prompt, for ablations)."""
     prompts = prompts or {}
@@ -461,9 +534,10 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
                 default=WINDOW_LEDGER,
                 strategies={
                     # The JSON writer: the first question and the JSON answer route.
-                    WINDOW_LEDGER: WithReferenceNotes(
+                    WINDOW_LEDGER: WithInterviewData(
                         WindowLedger(prompts.get(WINDOW_LEDGER, INTERVIEWER_V4_PROMPT_VERSION)),
                         INTERVIEWER_V7_JSON_PROMPT_VERSION,
+                        INTERVIEWER_V8_JSON_PROMPT_VERSION,
                     ),
                     FULL_HISTORY: FullHistory(
                         prompts.get(FULL_HISTORY, INTERVIEWER_PROMPT_VERSION)
@@ -475,8 +549,10 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
             INTERVIEWER_STREAM_TASK: Task(
                 default=WINDOW_LEDGER,
                 strategies={
-                    WINDOW_LEDGER: WithReferenceNotes(
-                        WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True), INTERVIEWER_V7_PROMPT_VERSION
+                    WINDOW_LEDGER: WithInterviewData(
+                        WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True),
+                        INTERVIEWER_V7_PROMPT_VERSION,
+                        INTERVIEWER_V8_PROMPT_VERSION,
                     )
                 },
             ),

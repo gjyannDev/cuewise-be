@@ -99,6 +99,37 @@ class ReferenceNote(NamedTuple):
     score: float | None
 
 
+def merge_note_rankings(
+    jd_ranked: Sequence[ReferenceNote], profile_ranked: Sequence[ReferenceNote], *, k: int, profile_slots: int
+) -> tuple[list[ReferenceNote], int]:
+    """The quota merge: job-description notes first, then at most `profile_slots` profile notes the job description
+    didn't already pick; slots the profile leaves unused go back to the job description. Never more than k notes, and
+    never more profile notes than the quota, even when the job-description side is short (EC17). Ranks are renumbered
+    from 1; each note keeps its own score. Also returns how many notes the profile side added (for logs and traces).
+
+    Why a quota and not one blended query: the job description stays in control by construction (not just on
+    average), every note can be traced to the side that found it, and 0 slots turns the profile half off.
+    """
+    reserved = min(profile_slots, k)
+    jd_part = list(jd_ranked[: k - reserved])
+    taken = {note.chunk_id for note in jd_part}
+    profile_part: list[ReferenceNote] = []
+    for note in profile_ranked:
+        if len(profile_part) == reserved:
+            break
+        if note.chunk_id not in taken:
+            profile_part.append(note)
+            taken.add(note.chunk_id)
+    for note in jd_ranked[k - reserved :]:
+        if len(jd_part) + len(profile_part) == k:
+            break
+        if note.chunk_id not in taken:
+            jd_part.append(note)
+            taken.add(note.chunk_id)
+    merged = [note._replace(rank=rank) for rank, note in enumerate([*jd_part, *profile_part], start=1)]
+    return merged, len(profile_part)
+
+
 def parse_note(file_name: str, text: str) -> ParsedNote:
     """One note file -> its chunks. Raises CorpusError naming the file for anything that can't be ingested."""
     _check_hidden(file_name, text)

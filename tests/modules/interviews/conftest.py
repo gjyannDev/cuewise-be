@@ -1,7 +1,9 @@
 import json
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 import pytest
+from sqlalchemy import delete
 
 from app.core.ai.fake import FakeProvider, FakeTranscriber
 from app.core.rate_limit import RateLimiter
@@ -25,6 +27,9 @@ from app.modules.interviews.dependencies.interviews_transcription_dependencies i
 )
 from app.modules.interviews.schemas.interviews_schema import BankQuestion
 from app.modules.interviews.utils.interviews_utils import load_prompt
+from app.modules.profile.constants.profile_constants import PROFILE_PROMPT_VERSION
+from app.modules.profile.models.profile_model import CandidateProfileRow
+from app.modules.profile.schemas.profile_schema import CandidateProfile
 
 
 def _bank_question(qid, category="behavioral", roles=("general",), levels=tuple(Level)):
@@ -40,6 +45,35 @@ def _bank_question(qid, category="behavioral", roles=("general",), levels=tuple(
 @pytest.fixture
 def make_bank_question():
     return _bank_question
+
+
+@pytest.fixture
+def store_profile(db):
+    """Store (or replace) a user's résumé profile as 8c would, straight into the test DB. Synthetic data only."""
+
+    def _store(user, profile: CandidateProfile) -> None:
+        db.execute(delete(CandidateProfileRow).where(CandidateProfileRow.user_id == user.id))
+        db.add(
+            CandidateProfileRow(
+                user_id=user.id,
+                profile=profile.model_dump(mode="json"),
+                prompt_version=PROFILE_PROMPT_VERSION,
+                model="fake",
+                updated_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+
+    return _store
+
+
+@pytest.fixture
+def delete_profile(db):
+    def _delete(user) -> None:
+        db.execute(delete(CandidateProfileRow).where(CandidateProfileRow.user_id == user.id))
+        db.commit()
+
+    return _delete
 
 
 @pytest.fixture

@@ -28,6 +28,8 @@ from app.modules.interviews.utils.interviews_knowledge_utils import (
     embedding_text,
     parse_note,
 )
+from app.modules.interviews.utils.interviews_profile_utils import profile_query_text
+from app.modules.profile.schemas.profile_schema import CandidateProfile, Role
 
 JOB = "We build Python REST APIs and need someone who designs them well."
 
@@ -239,3 +241,38 @@ def test_an_interview_without_notes_never_sends_a_notes_block(
     answer(user, body["session"]["id"], body["current_question"]["id"])
 
     assert not any(has_notes(call) for call in llm.fake.calls)
+
+
+# --- resume-aware-interview Step 8: the profile's half of the query ---
+
+
+def test_a_profile_start_embeds_both_queries_in_one_call_and_notes_outlive_a_profile_delete(
+    db, make_user, start_interview, answer, llm, corpus, embedder, store_profile, delete_profile
+):  # AC15, AC16, EC15
+    profile = CandidateProfile(skills=["Caching"], roles=[Role(title="Backend Engineer", summary="ZZSECRET")])
+    query = profile_query_text(profile)
+    user = make_user()
+    store_profile(user, profile)
+
+    r = start_interview(user, job_description=JOB, use_profile=True)
+
+    assert r.status_code == 201
+    [call] = embedder.calls
+    assert call.texts == (JOB, query)  # one request, the job description still in it
+    notes = [(row.chunk_id, row.rank) for row in stored(db, r)]
+    assert notes and all(row.mode == "vector" for row in stored(db, r))
+
+    delete_profile(user)
+    answer(user, r.json()["session"]["id"], r.json()["current_question"]["id"])
+
+    assert [(row.chunk_id, row.rank) for row in stored(db, r)] == notes  # picked once, at start (EC15)
+
+
+def test_without_the_flag_the_query_is_todays(db, make_user, start_interview, llm, corpus, embedder, store_profile):
+    user = make_user()
+    store_profile(user, CandidateProfile(skills=["Caching"]))
+
+    start_interview(user, job_description=JOB)
+
+    [call] = embedder.calls
+    assert call.texts == (JOB,)  # AC15, EC2

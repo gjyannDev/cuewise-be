@@ -6,8 +6,11 @@ exception class behind a refusal): never the file name, text or profile content.
 """
 
 import logging
+import uuid
 from collections.abc import Callable
 from datetime import datetime
+
+from pydantic import ValidationError
 
 from app.core.ai.provider import LLMProvider, LLMResult
 from app.core.errors import (
@@ -33,6 +36,7 @@ from ..constants.profile_constants import (
 )
 from ..models.profile_model import CandidateProfileRow
 from ..repositories.profile_repository import ProfileRepository
+from ..schemas.profile_schema import CandidateProfile
 from ..utils.profile_resume_utils import (
     ResumeText,
     ResumeTooLargeRefusal,
@@ -85,6 +89,21 @@ class ProfileService:
     def delete(self, user: User) -> None:
         self.repo.delete(user.id)
         profile_logger.info("profile_deleted user=%s", user.id)
+
+    def find_for_interview(self, user_id: uuid.UUID) -> CandidateProfile | None:
+        """The user's stored profile for an interview prompt, read live (never copied onto the interview), or None.
+
+        A stored profile that no longer validates (a later schema change) is treated as no profile, with a
+        metadata-only warning: an interview must never fail or send half-valid résumé data because of it.
+        """
+        row = self.repo.get(user_id)
+        if row is None:
+            return None
+        try:
+            return CandidateProfile.model_validate(row.profile)
+        except ValidationError:
+            profile_logger.warning("profile_unusable user=%s outcome=ignored", user_id)
+            return None
 
     def upload(self, user: User, data: bytes) -> CandidateProfileRow:
         """Store the profile read from this file, replacing the user's previous one; any failure leaves it as it was."""

@@ -12,8 +12,10 @@ from typing import NamedTuple
 from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMError, LLMProvider
 from app.core.ai.tracing import Tracer
+from app.core.errors import ProfileRequiredError
 from app.core.pagination import PageParams
 from app.modules.auth.models.auth_model import User
+from app.modules.profile.services.profile_service import ProfileService
 
 from ..ai.interviews_context import CONTEXT_MANAGER, SummaryInputs
 from ..ai.interviews_reply import InvalidReplyError, validate_summary
@@ -21,6 +23,7 @@ from ..ai.interviews_turn import Interviewer
 from ..ai.interviews_turn_log import log_llm_call, log_result
 from ..constants.interviews_constants import (
     FIRST_POSITION,
+    PROFILE_REQUIRED_MESSAGE,
     SUMMARY_TASK,
     SUMMARY_THRESHOLD,
     SUMMARY_TIME_CAP_SECONDS,
@@ -37,6 +40,7 @@ from ..dependencies.models.interviews_model import (
 from ..repositories.interviews_repository import InterviewsRepository
 from ..schemas.interviews_schema import BankQuestion, InterviewCreateIn
 from ..services.interviews_retrieval_service import RetrievalService
+from ..utils.interviews_profile_utils import profile_query_text
 from ..utils.interviews_session_utils import (
     InterviewSetup,
     bank_question,
@@ -79,6 +83,7 @@ class InterviewsService:
         context: ContextManager = CONTEXT_MANAGER,
         tracer: Tracer | None = None,
         retrieval: RetrievalService | None = None,
+        profiles: ProfileService | None = None,
     ):
         self.repo = repo
         self.bank = bank
@@ -87,6 +92,8 @@ class InterviewsService:
         self.llm = llm
         # Picks the interview's reference notes at start (knowledge-base RAG); None = no notes (evals, older tests).
         self.retrieval = retrieval
+        # The candidate profiles (8c), read through their service, never their repository. None = no profile exists.
+        self.profiles = profiles
         # Langfuse traces (one per request that can call the LLM); a disabled tracer costs nothing.
         self.tracer = tracer or Tracer(None)
         self.llm_max_tokens = llm_max_tokens
@@ -114,6 +121,10 @@ class InterviewsService:
         session = InterviewSession(
             id=uuid.uuid7(), user_id=user.id, **data.model_dump()
         )
+        # Read live, before any trace, model or embedding call: a refused start costs nothing and creates nothing.
+        profile = self.profiles.find_for_interview(user.id) if data.use_profile and self.profiles else None
+        if data.use_profile and profile is None:
+            raise ProfileRequiredError(PROFILE_REQUIRED_MESSAGE)
         setup = InterviewSetup(
             session.id,
             data.role,
@@ -121,6 +132,7 @@ class InterviewsService:
             data.interview_type,
             data.question_count,
             data.job_description,
+            profile=profile,
         )
         trace = self.tracer.trace(
             "start-interview", user_id=str(user.id), session_id=str(session.id), input=data.model_dump(mode="json")
@@ -140,6 +152,7 @@ class InterviewsService:
                     setup.level,
                     summary=setup.job_description_summary,
                     job_description=setup.job_description,
+                    profile_query=profile_query_text(setup.profile) if setup.profile is not None else None,
                 )
                 setup = setup._replace(reference_notes=tuple(retrieval.notes))
                 note_refs = [

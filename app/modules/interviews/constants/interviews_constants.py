@@ -257,6 +257,11 @@ JOB_PASTE_MAX_CHARS = 1_000_000
 JOB_TEXT_UNREADABLE_MESSAGE = (
     "We couldn't find a job description in what you pasted. Please paste just the job description into the box."
 )
+# A start with use_profile and no stored profile (resume-aware-interview AC2).
+PROFILE_REQUIRED_MESSAGE = (
+    "This interview is set to use your résumé, but you haven't uploaded one yet. Upload a résumé first, "
+    "or start the interview without it."
+)
 
 
 class JobTextFormat(StrEnum):
@@ -479,6 +484,10 @@ WINDOW_INPUT_LIMIT = 5000
 # Added to the limit for a main-question write that carries reference notes: six maximum-size notes are about 1,100
 # tokens and the v6 prompts about 100 more than v4/v5. Older history is still trimmed first; the notes go last.
 REFERENCE_NOTES_TOKEN_ALLOWANCE = 1500
+# Added on top for a main-question write that carries the candidate profile: a profile at every field cap renders to
+# about 3,400 characters (~850 tokens) without organization and period, and v8's profile rules add ~200 more. Older
+# history is trimmed first, then the profile block, then the notes (resume-aware-interview).
+PROFILE_TOKEN_ALLOWANCE = 1200
 TRUNCATION_MARKER = " [answer shortened]"
 NOTE_MAX_LENGTH = 200
 # A job description longer than this is condensed once at interview start.
@@ -716,6 +725,10 @@ class NoteSource(StrEnum):
 
 
 RETRIEVAL_TOP_K = 6
+# Of those, at most this many may come from the candidate profile's query (resume-aware-interview): the job description
+# keeps the topic, the profile only adds notes it didn't pick. 0 turns the profile half of the query off (code kept),
+# the switch the eval's decision rule uses if the query change breaks the skill_coverage guard.
+RETRIEVAL_PROFILE_SLOTS = 2
 # The embedding call at interview start never delays the start by more than this; then filter mode takes over.
 RETRIEVAL_TIME_CAP_SECONDS = 5.0
 # Cosine similarity a vector-mode note must reach. From the retrieval eval's sweep (2026-11-11, gemini-embedding-001,
@@ -735,3 +748,9 @@ KNOWLEDGE_VECTOR_SIZE = 768
 # 0.83 -> 0.57 vs v5); in v7 the job description picks the topic and the notes only set depth. v6 files kept for history.
 INTERVIEWER_V7_PROMPT_VERSION = "interviewer_v7"
 INTERVIEWER_V7_JSON_PROMPT_VERSION = "interviewer_v7_json"
+# v7 plus the candidate profile (resume-aware-interview); used only for main-question writes of an interview that opted
+# in with a stored profile, with or without notes. A new version instead of editing v7, the v6/v7 lesson: a shipped
+# prompt is never changed in place, so every stored question stays explained by its version, and interviews without a
+# profile keep sending exactly today's prompts. v8 also drops "developer" from the role line (non-developer roles).
+INTERVIEWER_V8_PROMPT_VERSION = "interviewer_v8"
+INTERVIEWER_V8_JSON_PROMPT_VERSION = "interviewer_v8_json"

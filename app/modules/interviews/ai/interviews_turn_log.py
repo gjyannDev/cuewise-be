@@ -171,18 +171,20 @@ def log_retrieval(
     scores: Sequence[float | None],
     outcome: str,
     latency_ms: int,
+    profile_notes: int = 0,
 ) -> None:
-    """Which reference notes an interview got at start: mode, count, scores and the reason code. Never the query or
-    note text."""
+    """Which reference notes an interview got at start: mode, count, scores, how many the candidate profile's query
+    added, and the reason code. Never the query, the profile or note text."""
     rag_logger.log(
         level,
-        "retrieval session=%s mode=%s count=%s scores=%s latency_ms=%s outcome=%s",
+        "retrieval session=%s mode=%s count=%s scores=%s latency_ms=%s outcome=%s profile_notes=%s",
         session_id,
         mode or "-",
         len(scores),
         ",".join("-" if s is None else f"{s:.3f}" for s in scores) or "-",
         latency_ms,
         outcome,
+        profile_notes,
     )
 
 

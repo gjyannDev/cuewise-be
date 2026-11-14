@@ -16,7 +16,7 @@ from app.modules.interviews.ai.interviews_context import (
     CONTEXT_MANAGER,
     InterviewerInputs,
     WindowLedger,
-    WithReferenceNotes,
+    WithInterviewData,
 )
 from app.modules.interviews.ai.interviews_turn import Interviewer
 from app.modules.interviews.ai.interviews_turn_types import Settled
@@ -28,6 +28,7 @@ from app.modules.interviews.constants.interviews_constants import (
     INTERVIEWER_V5_PROMPT_VERSION,
     INTERVIEWER_V7_JSON_PROMPT_VERSION,
     INTERVIEWER_V7_PROMPT_VERSION,
+    INTERVIEWER_V8_JSON_PROMPT_VERSION,
     KNOWLEDGE_HEADING_MAX_LENGTH,
     KNOWLEDGE_SECTION_MAX_LENGTH,
     RETRIEVAL_TOP_K,
@@ -160,7 +161,7 @@ def test_over_the_limit_even_without_history_the_notes_go_and_the_question_is_st
     without = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION).build(data, 0)
     limit = sum(len(m.content) for m in without.messages) // 4 + 1  # fits without the notes, not with them
     plain = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION, limit=limit)
-    notes_aware = WithReferenceNotes(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION, allowance=0)
+    notes_aware = WithInterviewData(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION, INTERVIEWER_V8_JSON_PROMPT_VERSION, allowance=0)
     manager = ContextManager({"w": Task(default="w", strategies={"w": notes_aware})})
 
     built = manager.build("w", data)
@@ -171,7 +172,7 @@ def test_over_the_limit_even_without_history_the_notes_go_and_the_question_is_st
 
 def test_interviews_without_notes_keep_the_plain_limit():  # AC17: the allowance is for notes only
     plain = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION)
-    notes_aware = WithReferenceNotes(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION)
+    notes_aware = WithInterviewData(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION, INTERVIEWER_V8_JSON_PROMPT_VERSION)
     with_notes = notes_aware.limit_for(inputs())
 
     assert notes_aware.limit_for(inputs(notes=())) == plain.limit == WINDOW_INPUT_LIMIT
@@ -183,7 +184,7 @@ def test_older_history_is_trimmed_before_the_notes():  # AC29: notes are the las
     with_notes = CONTEXT_MANAGER.build(INTERVIEWER_TASK, data)
     limit = with_notes.report.estimated_tokens - 20
     plain = WindowLedger(INTERVIEWER_V4_PROMPT_VERSION, limit=limit)
-    manager = ContextManager({"w": Task(default="w", strategies={"w": WithReferenceNotes(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION, allowance=0)})})
+    manager = ContextManager({"w": Task(default="w", strategies={"w": WithInterviewData(plain, INTERVIEWER_V7_JSON_PROMPT_VERSION, INTERVIEWER_V8_JSON_PROMPT_VERSION, allowance=0)})})
 
     built = manager.build("w", data)
 
