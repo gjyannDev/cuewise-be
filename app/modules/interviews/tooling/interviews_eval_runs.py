@@ -7,7 +7,9 @@ was recorded. Imports neither eval module, so both can use it.
 """
 
 import hashlib
+import itertools
 import subprocess
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -72,6 +74,18 @@ def run_name(task: str, stamp: str, repeat: int, arm: str | None = None, *, labe
 def run_stamp() -> str:
     """Local time, as the Langfuse list shows the run's start: the name and the timestamp column then match."""
     return datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+
+
+def pacer(pause: float, *, sleep: Callable[[float], None] = time.sleep) -> Callable[[], None]:
+    """`wait()` sleeps `pause` seconds on every call but the first. Called before each case, it spaces the cases (and
+    the repeats) of one command out for free-tier rate limits without delaying the first call."""
+    calls = itertools.count()
+
+    def wait() -> None:
+        if next(calls) and pause:
+            sleep(pause)
+
+    return wait
 
 
 def notes_fingerprint(content_hashes: Iterable[str]) -> str:

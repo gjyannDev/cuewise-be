@@ -36,7 +36,7 @@ import re
 import sys
 import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -90,6 +90,7 @@ from .interviews_eval_runs import (
     Score,
     final_line,
     git_commit,
+    pacer,
     run_cases,
     run_description,
     run_metadata,
@@ -746,6 +747,24 @@ def dataset_items(cases: Sequence[EvalCase], task: str) -> list[dict]:
     ]
 
 
+# The RAG tasks always paused between calls (free-tier embedding limits); the other tasks only when asked to.
+RAG_PAUSE_SECONDS = 2.5
+
+
+def pause_for(task: str, requested: float | None) -> float:
+    """Seconds to wait between cases: what `--pause-seconds` asked for, else the task's default."""
+    if requested is not None:
+        return requested
+    return RAG_PAUSE_SECONDS if task in RAG_TASKS else 0.0
+
+
+def _non_negative_seconds(value: str) -> float:
+    seconds = float(value)
+    if seconds < 0:
+        raise argparse.ArgumentTypeError("--pause-seconds must not be negative")
+    return seconds
+
+
 def _positive(value: str) -> int:
     number = int(value)
     if number < 1:
@@ -788,7 +807,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--sheet", default="blind_ranking.md", help="generation/ranking: the blind sheet's path")
     parser.add_argument("--seed", type=int, default=8, help="generation: the seed of the sheet's label order")
     parser.add_argument(
-        "--pause-seconds", type=float, default=2.5, help="retrieval/generation: wait between calls (free-tier limits)"
+        "--pause-seconds",
+        type=_non_negative_seconds,
+        default=None,
+        help=(
+            "wait between cases, for free-tier rate limits (also between repeats); default: 2.5 for the RAG tasks, "
+            "0 for the others"
+        ),
     )
     return parser
 
@@ -798,9 +823,11 @@ def main(
     *,
     provider: LLMProvider | None = None,
     tracer: Tracer | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    args.pause_seconds = pause_for(args.task, args.pause_seconds)
     from app.core.ai.factory import build_provider
     from app.core.ai.tracing import build_tracer
     from app.core.config import settings
@@ -836,6 +863,7 @@ def main(
         f"notes={args.notes} summary={args.summary} repeat={args.repeat}\n"
     )
     decide = args.task == "decide"
+    wait = pacer(args.pause_seconds, sleep=sleep)
     runs, decisions = [], []
     records: list[ExperimentRun | None] = []
     # One event loop for every streamed call, so the provider's async connections are reused, never moved between loops.
@@ -848,7 +876,7 @@ def main(
                 # Its own cases, checks and summary (interviews_feedback_evals.py); imported here to avoid a cycle.
                 from ..tooling.interviews_feedback_evals import run_feedback
 
-                run_feedback(args, provider, tracer, settings, model=model, commit=commit, stamp=stamp)
+                run_feedback(args, provider, tracer, settings, model=model, commit=commit, stamp=stamp, wait=wait)
                 return 0
             cases = load_cases(EVAL_CASES_PATH)
             if decide:
@@ -858,7 +886,7 @@ def main(
                 # Each repeat is one Langfuse experiment run (langfuse-experiments).
                 results, record = _run_as_experiment(
                     provider, cases, args, context, settings.llm_max_tokens, portal, tracer,
-                    model=model, commit=commit, stamp=stamp, repeat=run,
+                    model=model, commit=commit, stamp=stamp, repeat=run, wait=wait,
                 )  # fmt: skip
                 records.append(record)
                 runs.append(summarize(results))
@@ -924,6 +952,7 @@ def _run_as_experiment(
     commit: str,
     stamp: str,
     repeat: int,
+    wait: Callable[[], None],
 ) -> tuple[list[CaseResult], ExperimentRun | None]:
     """One repeat of a moved task as one Langfuse experiment run: same cases, same console lines, plus a run that
     carries what produced it and the scores the console summary is built from."""
@@ -943,6 +972,7 @@ def _run_as_experiment(
         run_scores_of = write_run_scores
 
     def run_one(case: EvalCase) -> CaseResult:
+        wait()
         result = _run_one(provider, case, args, context, max_tokens, portal)
         _print_case(case, result)
         return result

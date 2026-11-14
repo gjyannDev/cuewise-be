@@ -338,6 +338,15 @@ def run_main(client, argv, provider):
     return main(["--task", "feedback", *argv], provider=provider, tracer=tracer)
 
 
+def test_pause_seconds_spaces_the_feedback_cases_across_repeats():  # free-tier limits: every task, not just RAG
+    slept: list[float] = []
+
+    argv = ["--task", "feedback", "--repeat", "2", "--pause-seconds", "1"]
+    assert main(argv, provider=Grader(4), tracer=Tracer(None), sleep=slept.append) == 0
+
+    assert slept == [1.0] * (len(CASES) * 2 - 1)  # one wait per case, none before the very first
+
+
 def trace_of(client, case_id, repeat=1):
     run = client.experiments[repeat - 1]["run_name"]
     return f"trace-{run}-feedback:{case_id}"

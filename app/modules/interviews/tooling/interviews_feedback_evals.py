@@ -512,6 +512,7 @@ def run_feedback(
     model: str | None,
     commit: str,
     stamp: str,
+    wait: Callable[[], None],
 ) -> None:
     """Every case, in file order, once per repeat; each repeat is one Langfuse experiment run of the feedback dataset.
     The console is unchanged apart from its last line, which names the runs (or says why nothing was recorded)."""
@@ -531,6 +532,7 @@ def run_feedback(
         earlier: dict[str, FeedbackCaseResult] = {}
 
         def run_one(case: FeedbackEvalCase, earlier: dict[str, FeedbackCaseResult] = earlier) -> FeedbackCaseResult:
+            wait()
             result = run_feedback_case(
                 provider,
                 case,

@@ -31,6 +31,7 @@ from app.modules.interviews.tooling.interviews_evals import (
     check_streamed_reply,
     load_cases,
     main,
+    pause_for,
     run_case,
     run_decide_case,
     run_stream_case,
@@ -307,6 +308,50 @@ def test_main_runs_every_case_n_times_and_prints_the_aggregate(capsys):
     out = capsys.readouterr().out
     assert out.count("run 1/2") == 1 and out.count("run 2/2") == 1
     assert "pass rate mean=" in out and "finish=length" in out
+
+
+def test_pause_seconds_spaces_the_cases_of_a_write_run_and_its_repeats():  # free-tier limits: every task, not just RAG
+    slept: list[float] = []
+    provider = FakeProvider(default=noted)
+
+    argv = ["--repeat", "2", "--summary", "off", "--pause-seconds", "2"]
+    assert main(argv, provider=provider, sleep=slept.append) == 0
+
+    assert len(provider.calls) > 1
+    assert slept == [2.0] * (len(provider.calls) - 1)  # one call per case, and never a wait before the first
+
+
+def test_without_pause_seconds_a_write_run_never_sleeps():
+    slept: list[float] = []
+
+    assert main(["--summary", "off"], provider=FakeProvider(default=noted), sleep=slept.append) == 0
+
+    assert slept == []
+
+
+def test_a_negative_pause_is_refused(capsys):
+    with pytest.raises(SystemExit):
+        main(["--pause-seconds", "-1"], provider=FakeProvider())
+
+    assert "must not be negative" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("task", "requested", "expected"),
+    [
+        ("write", None, 0.0),
+        ("decide", None, 0.0),
+        ("stream", None, 0.0),
+        ("feedback", None, 0.0),
+        ("retrieval", None, 2.5),
+        ("generation", None, 2.5),
+        ("ranking", None, 2.5),
+        ("write", 3.0, 3.0),
+        ("retrieval", 0.0, 0.0),
+    ],
+)
+def test_the_pause_defaults_to_the_rag_pause_for_rag_tasks_and_none_for_the_rest(task, requested, expected):
+    assert pause_for(task, requested) == expected
 
 
 # --- decide evals (follow-ups): labelled cases, accuracy, over- and under-probing ---
