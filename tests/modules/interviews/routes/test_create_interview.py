@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.auth.models.auth_model import User
@@ -35,6 +36,44 @@ def _question_count(db):
 # --- happy path ---
 
 
+# --- resume-aware-interview: the use_profile flag ---
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        pytest.param({}, False, id="omitted-is-false"),
+        pytest.param({"use_profile": False}, False, id="false"),
+    ],
+)
+def test_use_profile_is_stored_and_returned(start_interview, make_user, db, overrides, expected):  # AC1, AC3, EC2
+    user = make_user()
+
+    r = start_interview(user, **overrides)
+
+    assert r.status_code == 201
+    assert r.json()["session"]["use_profile"] is expected
+    [saved] = _sessions(db, user)
+    assert saved.use_profile is expected
+
+
+def test_session_written_without_the_flag_reads_as_false(db, make_user):  # AC3, EC11
+    user = make_user()
+    # A row as an older release wrote it: the INSERT names no use_profile column, so the server default fills it.
+    db.execute(
+        sql_text(
+            "INSERT INTO interview_sessions (id, user_id, role, level, interview_type, question_count) "
+            "VALUES (:id, :user_id, 'backend', 'junior', 'behavioral', 3)"
+        ),
+        {"id": uuid.uuid7().hex, "user_id": user.id.hex},
+    )
+    db.commit()
+
+    [saved] = _sessions(db, user)
+    assert saved.use_profile is False
+
+
+
 def test_start_creates_saved_session_and_returns_only_the_first_question(start_interview, make_user, db):  # AC2
     user = make_user()
 
@@ -51,6 +90,7 @@ def test_start_creates_saved_session_and_returns_only_the_first_question(start_i
         "interview_type",
         "question_count",
         "job_description",
+        "use_profile",
         "status",
         "created_at",
     }
@@ -138,6 +178,11 @@ def test_mixed_short_on_one_type_is_409(start_interview, make_user, make_bank_qu
         pytest.param({"user_id": str(uuid.uuid4())}, id="server-field-user-id"),
         pytest.param({"job_description": "x" * 2001}, id="description-too-long"),
         pytest.param({"job_description": "  " + "x" * 2001 + "  "}, id="description-too-long-after-trim"),
+        # resume-aware-interview AC1: strict boolean, no coercion of look-alikes.
+        pytest.param({"use_profile": "true"}, id="use-profile-string"),
+        pytest.param({"use_profile": 1}, id="use-profile-int"),
+        pytest.param({"use_profile": "yes"}, id="use-profile-word"),
+        pytest.param({"use_profile": True, "profile": {}}, id="use-profile-with-unknown-field"),
     ],
 )
 def test_invalid_setup_is_422_and_creates_nothing(start_interview, make_user, db, overrides):  # AC6, EC3-EC6

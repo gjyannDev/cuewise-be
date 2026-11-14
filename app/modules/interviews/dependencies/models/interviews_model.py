@@ -3,12 +3,14 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy import text as sql_text
@@ -54,6 +56,9 @@ class InterviewSession(UUIDPrimaryKeyMixin, Base):
     job_description: Mapped[str | None] = mapped_column(String(JOB_DESCRIPTION_MAX_LENGTH))
     # Made once at start when the job description is long; sent instead of it on every call. Never returned by the API.
     job_description_summary: Mapped[str | None] = mapped_column(String(SUMMARY_MAX_LENGTH))
+    # Opt-in to the candidate profile (8d). Only the choice is stored: the profile itself is read live each turn,
+    # so a profile DELETE really deletes. The server default makes rows from before this column read false.
+    use_profile: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     status: Mapped[str] = mapped_column(
         String(32),
         default=SessionStatus.in_progress,

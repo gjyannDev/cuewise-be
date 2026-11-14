@@ -118,6 +118,8 @@ class InterviewCreateIn(BaseModel):
         StringConstraints(strip_whitespace=True, max_length=JOB_DESCRIPTION_MAX_LENGTH),
         AfterValidator(lambda v: v or None),
     ] = None
+    # Opt-in: send the stored résumé profile to the model on main questions. strict: "true" and 1 are refused.
+    use_profile: bool = Field(default=False, strict=True)
 
 
 class SessionOut(BaseModel):
@@ -129,6 +131,7 @@ class SessionOut(BaseModel):
     interview_type: InterviewType
     question_count: int
     job_description: str | None
+    use_profile: bool
     status: SessionStatus
     created_at: datetime
 
