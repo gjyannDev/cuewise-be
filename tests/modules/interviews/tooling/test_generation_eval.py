@@ -25,7 +25,9 @@ from app.modules.interviews.repositories.interviews_knowledge_repository import 
 from app.modules.interviews.services.interviews_knowledge_service import ingest_corpus
 from app.modules.interviews.tooling import interviews_rag_evals as rag_module
 from app.modules.interviews.tooling.interviews_rag_evals import (
-    ARMS,
+    DEFAULT_ARMS as ARMS,
+)
+from app.modules.interviews.tooling.interviews_rag_evals import (
     GENERATION_KEYWORDS_PATH,
     run_generation,
 )

@@ -61,5 +61,20 @@
    "expected": ["designer-fundamentals.md#Visual hierarchy and layout"]},
   {"id": "vague-make-an-impact-mid", "kind": "vague", "role": "backend", "level": "mid",
    "query": "Looking for a motivated engineer to join our fast-growing team and make an impact.",
-   "expected": ["general-behavioral-experienced.md#Ownership and delivery"]}
+   "expected": ["general-behavioral-experienced.md#Ownership and delivery"]},
+  {"id": "prof-payments-backend-mid", "kind": "profile", "role": "backend", "level": "mid",
+   "query": "Python, PostgreSQL, Redis, idempotency keys, Backend Engineer, refunds-service",
+   "expected": ["backend-design.md#Data consistency and transactions", "backend-design.md#Caching and scaling reads"]},
+  {"id": "prof-accessible-ui-frontend-junior", "kind": "profile", "role": "frontend", "level": "junior",
+   "query": "React, CSS, ARIA, screen readers, Frontend Intern, settings-dashboard",
+   "expected": ["frontend-fundamentals.md#HTML, CSS and accessibility"]},
+  {"id": "prof-offline-mobile-senior", "kind": "profile", "role": "mobile", "level": "senior",
+   "query": "Kotlin, Room, WorkManager, offline sync, Senior Android Engineer, field-notes-app",
+   "expected": ["mobile-architecture.md#Offline-first and sync"]},
+  {"id": "prof-iac-devops-mid", "kind": "profile", "role": "devops", "level": "mid",
+   "query": "Terraform, AWS, Kubernetes, Helm, Platform Engineer, infra-modules",
+   "expected": ["devops-platform.md#Infrastructure as code in practice"]},
+  {"id": "prof-pipelines-data-mid", "kind": "profile", "role": "data", "level": "mid",
+   "query": "Airflow, dbt, Spark, Data Engineer, nightly-etl",
+   "expected": ["data-engineering.md#Pipelines and orchestration"]}
 ]

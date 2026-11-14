@@ -15,7 +15,9 @@ from app.modules.interviews.constants.interviews_constants import (
     Level,
 )
 from app.modules.interviews.tooling.interviews_rag_evals import (
-    ARMS,
+    DEFAULT_ARMS as ARMS,
+)
+from app.modules.interviews.tooling.interviews_rag_evals import (
     CaseKind,
     RetrievalCase,
     SheetError,

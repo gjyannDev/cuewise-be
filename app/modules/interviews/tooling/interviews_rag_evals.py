@@ -48,6 +48,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.ai.embedder import Embedder, EmbeddingKind
 from app.core.ai.provider import LLMError, LLMProvider
 from app.core.ai.tracing import ExperimentRun, Tracer
+from app.modules.profile.schemas.profile_schema import CandidateProfile
 
 from ..ai.interviews_context import CONTEXT_MANAGER, InterviewerInputs
 from ..ai.interviews_reply import InvalidReplyError, parse_streamed_reply, split_header
@@ -55,8 +56,10 @@ from ..constants.interviews_constants import (
     INTERVIEWER_STREAM_TASK,
     INTERVIEWER_V5_PROMPT_VERSION,
     INTERVIEWER_V7_PROMPT_VERSION,
+    INTERVIEWER_V8_PROMPT_VERSION,
     MODULE_DIR,
     RETRIEVAL_MIN_SIMILARITY,
+    RETRIEVAL_PROFILE_SLOTS,
     InterviewType,
     JobRole,
     Level,
@@ -64,6 +67,7 @@ from ..constants.interviews_constants import (
 from ..repositories.interviews_knowledge_repository import KnowledgeRepository
 from ..services.interviews_retrieval_service import RetrievalService
 from ..utils.interviews_knowledge_utils import ReferenceNote, pick_filter_notes
+from ..utils.interviews_profile_utils import profile_query_text
 from ..utils.interviews_utils import QuestionTurn
 from .interviews_eval_runs import (
     Score,
@@ -76,14 +80,38 @@ from .interviews_eval_runs import (
     run_name,
     run_stamp,
 )
+from .interviews_profile_eval_metrics import (
+    ArmProfileSummary,
+    ProfileRow,
+    SetupFacts,
+    injection_ignored,
+    presumption_hits,
+    profile_only_mention_share,
+    profile_summary,
+)
 
 RETRIEVAL_CASES_PATH = MODULE_DIR / "data" / "retrieval_eval_cases.json"
 GENERATION_KEYWORDS_PATH = MODULE_DIR / "data" / "generation_eval_keywords.json"
+GENERATION_PROFILES_PATH = MODULE_DIR / "data" / "generation_eval_profiles.json"
 RETRIEVAL_DATASET = "interviews-eval/retrieval"
 GENERATION_DATASET = "interviews-eval/generation"
 RAG_TASKS = ("retrieval", "generation", "ranking")
-ARMS = ("A", "B", "C")
-LABELS = ("X", "Y", "Z")
+# A no notes (v5), B filter notes (v7), C vector notes (v7): the 8a arms. D: v8 with the setup's synthetic profile and
+# the same job-description notes as C (the prompt change only). E: v8, profile, and quota-merged notes (prompt and
+# query). 8d runs `--arms C,D,E`; without --arms the run is today's A, B, C.
+ALL_ARMS = ("A", "B", "C", "D", "E")
+DEFAULT_ARMS = ("A", "B", "C")
+PROFILE_ARMS = frozenset({"D", "E"})
+ARM_PROMPTS = {
+    "A": INTERVIEWER_V5_PROMPT_VERSION,
+    "B": INTERVIEWER_V7_PROMPT_VERSION,
+    "C": INTERVIEWER_V7_PROMPT_VERSION,
+    "D": INTERVIEWER_V8_PROMPT_VERSION,
+    "E": INTERVIEWER_V8_PROMPT_VERSION,
+}
+# Neutral sheet labels, one per arm in the run, in a seeded random order per setup.
+LABELS = ("X", "Y", "Z", "V", "W")
+_COUNT_WORDS = {2: "two", 3: "three", 4: "four", 5: "five"}
 RECALL_K = 5
 # The filter-only baseline is random by design; averaging over a fixed set of orderings makes it comparable run to run.
 BASELINE_SEEDS = [uuid.UUID(int=seed) for seed in range(1, 21)]
@@ -94,7 +122,11 @@ MIN_CASES = 15
 REQUIRED_KINDS = {"synonym": 3, "vague": 1, "role_boundary": 1}
 
 
-CaseKind = Literal["plain", "synonym", "vague", "role_boundary"]
+CaseKind = Literal["plain", "synonym", "vague", "role_boundary", "profile"]
+# A profile case's query is a candidate's short items, as profile_query_text writes them (resume-aware-interview).
+PROFILE_CASE_KIND = "profile"
+PROFILE_ITEM_MAX_LENGTH = 40
+PROFILE_ITEM_MAX_WORDS = 4
 
 
 class RetrievalCase(BaseModel):
@@ -201,7 +233,23 @@ def case_set_problems(cases: Sequence[RetrievalCase]) -> list[str]:
             problems.append(f"{found} {kind} queries; at least {needed} are needed")
     ids = [c.id for c in cases]
     problems += [f"duplicate case id {i!r}" for i in sorted({i for i in ids if ids.count(i) > 1})]
+    problems += [
+        f"profile case {c.id!r}: the query must be short items (two or more, comma-separated, no sentences)"
+        for c in cases
+        if c.kind == PROFILE_CASE_KIND and not _is_short_items(c.query)
+    ]
     return problems
+
+
+def _is_short_items(query: str) -> bool:
+    items = [item.strip() for item in query.split(",")]
+    return len(items) >= 2 and all(
+        item
+        and len(item) <= PROFILE_ITEM_MAX_LENGTH
+        and len(item.split()) <= PROFILE_ITEM_MAX_WORDS
+        and not item.endswith((".", "?", "!"))
+        for item in items
+    )
 
 
 # --- generation metrics ---
@@ -230,14 +278,22 @@ def simulate_main_questions(
     job_description: str | None,
     notes: Sequence[ReferenceNote],
     max_tokens: int,
+    profile: CandidateProfile | None = None,
 ) -> list[WrittenQuestion]:
-    """One interview's main questions through the streamed writer's text format (the same prompt for every arm, v5
-    or v7), with a canned neutral answer between them and no decide call or follow-ups."""
+    """One interview's main questions through the streamed writer's text format (the arm's prompt: v5, v7, or v8 with
+    a profile), with a canned neutral answer between them and no decide call or follow-ups."""
     turns: list[QuestionTurn] = []
     written: list[WrittenQuestion] = []
     for _ in range(question_count):
         inputs = InterviewerInputs(
-            role, level, interview_type, question_count, job_description, turns, reference_notes=notes
+            role,
+            level,
+            interview_type,
+            question_count,
+            job_description,
+            turns,
+            reference_notes=notes,
+            candidate_profile=profile,
         )
         built = CONTEXT_MANAGER.build(INTERVIEWER_STREAM_TASK, inputs)
         try:
@@ -304,19 +360,81 @@ def summarize_arm(
 # --- the blind sheet ---
 
 
+def parse_arms(text: str) -> tuple[str, ...]:
+    """`--arms`: comma-separated arm letters (any case), at least two (a ranking compares sets), each once; returned in
+    A-E order so runs and sheets read the same whatever order was typed."""
+    parts = [part.strip().upper() for part in text.split(",")]
+    unknown = [part for part in parts if part not in ALL_ARMS]
+    if unknown:
+        raise argparse.ArgumentTypeError(f"unknown arm(s) {unknown}; choose from {', '.join(ALL_ARMS)}")
+    if len(set(parts)) != len(parts):
+        raise argparse.ArgumentTypeError("an arm is listed twice")
+    if len(parts) < 2:
+        raise argparse.ArgumentTypeError("pick at least two arms to compare")
+    return tuple(arm for arm in ALL_ARMS if arm in parts)
+
+
+def load_generation_profiles(path: Path = GENERATION_PROFILES_PATH) -> dict[str, CandidateProfile]:
+    """The synthetic profile of each setup (arms D and E), validated by the same schema the app stores."""
+    return load_profile_eval_data(path).profiles
+
+
+class ExtraSetupFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: JobRole
+    level: Level
+    interview_type: InterviewType
+    question_count: int = Field(ge=1)
+
+
+class ExtraSetup(BaseModel):
+    """A generation-only setup, run with arm D or E: the injection and the mismatch cases (not shared eval cases)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    setup: ExtraSetupFields
+    job_description: str | None = None
+    skills: list[str]
+    # Strings the profile's injected text asks for; a question containing one obeyed it.
+    forbidden: list[str] = []
+
+
+class ProfileEvalData(NamedTuple):
+    profiles: dict[str, CandidateProfile]
+    extra_setups: list[ExtraSetup]
+    presumption_phrases: list[str]
+
+
+def load_profile_eval_data(path: Path = GENERATION_PROFILES_PATH) -> ProfileEvalData:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return ProfileEvalData(
+        {setup_id: CandidateProfile.model_validate(raw) for setup_id, raw in data["profiles"].items()},
+        TypeAdapter(list[ExtraSetup]).validate_python(data.get("extra_setups", [])),
+        list(data.get("presumption_phrases", [])),
+    )
+
+
 def build_sheet(
     sets: Mapping[str, Mapping[str, Sequence[str] | None]],
     *,
     seed: int,
     contexts: Mapping[str, Sequence[str]] | None = None,
+    arms: Sequence[str] = DEFAULT_ARMS,
 ) -> Sheet:
-    """One block per setup with the three question sets under X/Y/Z in a seeded random order. A setup where an arm
-    has no full set is left out (and listed), so every graded setup compares all three. `contexts` maps a setup to the
-    lines you judge against (role, level, job description); they are quoted so they can never read as a ranking."""
+    """One block per setup with each arm's question set under a neutral label in a seeded random order. A setup where
+    an arm has no full set is left out (and listed), so every graded setup compares all arms. `contexts` maps a setup
+    to the lines you judge against (role, level, job description); they are quoted so they can never read as a
+    ranking."""
     rng = random.Random(seed)
+    labels = LABELS[: len(arms)]
     lines = [
         "# Blind ranking",
-        "For each setup, rank the three question sets from best to worst on the Ranking line, e.g. `Ranking: Y > X > Z`.",
+        (
+            f"For each setup, rank the {len(arms)} question sets from best to worst on the Ranking line, "
+            f"e.g. `Ranking: {' > '.join(reversed(labels))}`."
+        ),
         "Judge each set against the setup's role, level and job description (the quoted lines under its heading).",
         (
             "Optional, under each set: `Rating:` four whole numbers from 1 to 5, in this order: fit (role and level), "
@@ -328,20 +446,20 @@ def build_sheet(
     key: dict[str, dict[str, str]] = {}
     excluded = []
     for setup_id in sorted(sets):
-        arms = sets[setup_id]
-        if any(not arms.get(arm) for arm in ARMS):
+        arms_sets = sets[setup_id]
+        if any(not arms_sets.get(arm) for arm in arms):
             excluded.append(setup_id)
             continue
-        order = list(ARMS)
+        order = list(arms)
         rng.shuffle(order)
-        key[setup_id] = dict(zip(LABELS, order, strict=True))
+        key[setup_id] = dict(zip(labels, order, strict=True))
         lines.append(f"## Setup {setup_id}")
         for context in (contexts or {}).get(setup_id, ()):
             lines.append(f"> {context}".rstrip())
         lines += ["", "Ranking:", ""]
         for label, arm in key[setup_id].items():
             lines.append(f"### {label}")
-            lines += [f"{n}. {q}" for n, q in enumerate(arms[arm] or [], start=1)]
+            lines += [f"{n}. {q}" for n, q in enumerate(arms_sets[arm] or [], start=1)]
             lines += ["Rating:", "Note:", ""]
     return Sheet("\n".join(lines), key, excluded)
 
@@ -379,7 +497,8 @@ def read_rankings(text: str, key: Mapping[str, Mapping[str, str]]) -> RankingRep
     missing = [s for s in key if s not in rankings]
     if missing:
         raise SheetError(f"line {len(text.splitlines())}: no ranking for setup {', '.join(missing)}")
-    first: dict[str, int] = dict.fromkeys(ARMS, 0)
+    in_key = {arm for labels in key.values() for arm in labels.values()}
+    first: dict[str, int] = dict.fromkeys((arm for arm in ALL_ARMS if arm in in_key), 0)
     for setup_id, labels in rankings.items():
         first[key[setup_id][labels[0]]] += 1
     return RankingReport(first, len(rankings), rankings, ratings, notes)
@@ -418,7 +537,7 @@ def _ranking(number: int, raw: str, labels: Mapping[str, str]) -> list[str]:
     if repeated:
         raise SheetError(f"line {number}: repeated label {repeated!r}")
     if len(ranked) != len(labels):
-        raise SheetError(f"line {number}: rank all three ({', '.join(labels)})")
+        raise SheetError(f"line {number}: rank all {_COUNT_WORDS[len(labels)]} ({', '.join(labels)})")
     return ranked
 
 
@@ -554,8 +673,14 @@ def run_retrieval(
     print(f"\nthreshold used: {RETRIEVAL_MIN_SIMILARITY}")
     print(f"vector: recall@5={totals['vector_recall_at_5']:.3f} MRR={totals['vector_mrr']:.3f}")
     print(f"filter: recall@5={totals['filter_recall_at_5']:.3f} MRR={totals['filter_mrr']:.3f}  ({len(BASELINE_SEEDS)} orderings)")
+    if "profile_vector_recall_at_5" in totals:
+        print(
+            f"profile cases (vector, scored apart): recall@5={totals['profile_vector_recall_at_5']:.3f} "
+            f"MRR={totals['profile_vector_mrr']:.3f}"
+        )
     print("\nthreshold  recall@5  kept")
-    sweep = threshold_sweep([row.ranking for row in rows], [set(row.case.expected) for row in rows], SWEEP_THRESHOLDS)
+    jd_rows = [row for row in rows if row.case.kind != PROFILE_CASE_KIND]
+    sweep = threshold_sweep([row.ranking for row in jd_rows], [set(row.case.expected) for row in jd_rows], SWEEP_THRESHOLDS)
     for threshold, recall, kept in sweep:
         print(f"{threshold:>9.2f}  {recall:>8.3f}  {kept:>4.1f}")
     print(f"\n{final_line([record], enabled=tracer.enabled)}")
@@ -629,14 +754,23 @@ def _retrieval_scores(row: RetrievalRow) -> list[Score]:
 
 
 def retrieval_run_scores(rows: Sequence[RetrievalRow]) -> list[tuple[str, float]]:
-    """The run's averages, as the console prints them: an errored case counts as a miss."""
-    return [
-        ("vector_recall_at_5", mean(r.vector_recall for r in rows)),
-        ("vector_mrr", mean(r.vector_rr for r in rows)),
-        ("filter_recall_at_5", mean(r.filter_recall for r in rows)),
-        ("filter_mrr", mean(r.filter_rr for r in rows)),
+    """The run's averages, as the console prints them: an errored case counts as a miss. Job-description cases and
+    profile cases are averaged apart, so the job-description numbers stay comparable with runs before profile cases."""
+    jd = [r for r in rows if r.case.kind != PROFILE_CASE_KIND] or list(rows)
+    profile = [r for r in rows if r.case.kind == PROFILE_CASE_KIND]
+    scores = [
+        ("vector_recall_at_5", mean(r.vector_recall for r in jd)),
+        ("vector_mrr", mean(r.vector_rr for r in jd)),
+        ("filter_recall_at_5", mean(r.filter_recall for r in jd)),
+        ("filter_mrr", mean(r.filter_rr for r in jd)),
         ("errored_count", sum(r.error is not None for r in rows)),
     ]
+    if profile:
+        scores += [
+            ("profile_vector_recall_at_5", mean(r.vector_recall for r in profile)),
+            ("profile_vector_mrr", mean(r.vector_rr for r in profile)),
+        ]
+    return scores
 
 
 class ArmInterview(NamedTuple):
@@ -646,6 +780,11 @@ class ArmInterview(NamedTuple):
     questions: list[WrittenQuestion]
     start_ms: float
     skills: list[str]
+    # Résumé-aware runs (a D or E arm selected): the notes' chunk ids, how many the profile query added, and the
+    # profile metrics of this interview (computed for every arm, C included).
+    note_ids: tuple[str, ...] = ()
+    profile_notes: int = 0
+    profile_scores: tuple[tuple[str, float], ...] = ()
 
 
 def run_generation(
@@ -658,33 +797,47 @@ def run_generation(
     tracer: Tracer,
     model: str | None = None,
 ) -> int:
-    """Every setup written three ways (arm A no notes, B filter notes, C vector notes); per repeat, each arm is one
-    Langfuse experiment run of the setups, so the arms sit side by side. The console table, the blind sheet and its
-    key are unchanged; a third local file maps each setup and arm to its result, so ranking can post your rank."""
+    """Every setup written once per selected arm (A no notes, B filter notes, C vector notes, D v8 + profile with C's
+    notes, E v8 + profile with quota-merged notes); per repeat, each arm is one Langfuse experiment run of the setups,
+    so the arms sit side by side. The console table, the blind sheet and its key are unchanged; a third local file maps
+    each setup and arm to its result, so ranking can post your rank."""
     from ..tooling.interviews_evals import EVAL_CASES_PATH, load_cases
 
+    arms: tuple[str, ...] = getattr(args, "arms", None) or DEFAULT_ARMS
     data = json.loads(GENERATION_KEYWORDS_PATH.read_text(encoding="utf-8"))
     by_id = {c.id: c for c in load_cases(EVAL_CASES_PATH) if c.id in data["setups"]}
-    setups = [by_id[setup_id] for setup_id in sorted(by_id)]
+    setups: list[Any] = [by_id[setup_id] for setup_id in sorted(by_id)]
+    skills_of: dict[str, list[str]] = dict(data["setups"])
+    profile_data = load_profile_eval_data() if PROFILE_ARMS & set(arms) else None
+    if profile_data is not None:
+        setups = sorted([*setups, *profile_data.extra_setups], key=lambda case: case.id)
+        skills_of |= {extra.id: extra.skills for extra in profile_data.extra_setups}
+        if missing := [c.id for c in setups if c.id not in profile_data.profiles]:
+            print(f"No synthetic profile for setup(s) {', '.join(missing)} in {GENERATION_PROFILES_PATH.name}.")
+            return 1
+    facts = _setup_facts(setups, profile_data)
+    phrases = profile_data.presumption_phrases if profile_data is not None else []
     active = _ready_notes(repo, embedder)
     if active is None:
         return 1
     fingerprint = notes_fingerprint(chunk.content_hash for chunk in active)
     commit = git_commit() if tracer.enabled else "unknown"
     stamp, description = run_stamp(), run_description(args.note)
-    items = {c.id: generation_item(c, data["setups"][c.id]) for c in setups}
-    results: dict[str, list[list[WrittenQuestion]]] = {arm: [] for arm in ARMS}
-    starts: dict[str, list[float]] = {arm: [] for arm in ARMS}
+    items = {c.id: generation_item(c, skills_of[c.id]) for c in setups}
+    results: dict[str, list[list[WrittenQuestion]]] = {arm: [] for arm in arms}
+    starts: dict[str, list[float]] = {arm: [] for arm in arms}
+    profile_rows: dict[str, list[ProfileRow]] = {arm: [] for arm in arms}
     sets: dict[str, dict[str, Sequence[str] | None]] = {}
     traces: dict[str, dict[str, str]] = {}
     records: list[ExperimentRun | None] = []
     for repeat in range(1, args.repeat + 1):
-        for arm in ARMS:
-            prompt = INTERVIEWER_V5_PROMPT_VERSION if arm == "A" else INTERVIEWER_V7_PROMPT_VERSION
+        for arm in arms:
+            prompt = ARM_PROMPTS[arm]
 
             def run_one(case, arm: str = arm, repeat: int = repeat) -> ArmInterview:
                 session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{case.id}/{repeat}")
-                notes, start_ms = _arm_notes(arm, case, repo, embedder, session_id, tracer)
+                profile = facts[case.id].profile if arm in PROFILE_ARMS else None
+                notes, start_ms, profile_notes = _arm_notes(arm, case, repo, embedder, session_id, tracer, profile)
                 questions = simulate_main_questions(
                     provider,
                     role=case.setup.role,
@@ -694,9 +847,18 @@ def run_generation(
                     job_description=case.job_description,
                     notes=notes,
                     max_tokens=max_tokens,
+                    profile=profile,
                 )
                 time.sleep(args.pause_seconds)
-                return ArmInterview(tuple(n.competency for n in notes), questions, start_ms, data["setups"][case.id])
+                return ArmInterview(
+                    tuple(n.competency for n in notes),
+                    questions,
+                    start_ms,
+                    skills_of[case.id],
+                    tuple(str(n.chunk_id) for n in notes),
+                    profile_notes,
+                    _profile_scores(questions, facts.get(case.id), phrases, profile_notes),
+                )
 
             rows, record = run_cases(
                 tracer,
@@ -725,6 +887,7 @@ def run_generation(
                         "embedding_model": embedder.model,
                         "embedding_dimensions": embedder.dimensions,
                         "threshold": RETRIEVAL_MIN_SIMILARITY,
+                        "profile_slots": RETRIEVAL_PROFILE_SLOTS,
                         "notes_fingerprint": fingerprint,
                         "note": description,
                     },
@@ -735,21 +898,29 @@ def run_generation(
             for case, row in zip(setups, rows, strict=True):
                 results[arm].append(row.questions)
                 starts[arm].append(row.start_ms)
+                valid = [w.question for w in row.questions if w.question]
+                profile_rows[arm].append(
+                    ProfileRow(
+                        repeat, case.id, valid, row.note_ids, row.profile_notes, skill_coverage(valid, row.skills)
+                    )
+                )
                 if repeat == 1:
                     questions = [w.question for w in row.questions]
                     sets.setdefault(case.id, {})[arm] = None if None in questions else [q for q in questions if q]
                     if record is not None and (trace_id := record.trace_ids.get(f"generation:{case.id}")):
                         traces.setdefault(case.id, {})[arm] = trace_id
-    skills = [data["setups"][c.id] for _ in range(args.repeat) for c in setups]
+    skills = [skills_of[c.id] for _ in range(args.repeat) for c in setups]
     baseline = None
     print("arm  questions  valid  competencies  skill_coverage  prompt_tokens  added_tokens  start_ms")
-    for arm in ARMS:
+    for arm in arms:
         s = summarize_arm(results[arm], data["competencies"], skills=skills, start_ms=starts[arm])
         baseline = s.prompt_tokens if baseline is None else baseline
         coverage = "-" if s.skill_coverage is None else f"{s.skill_coverage:.2f}"
         print(f"{arm:<4} {s.questions:>9}  {s.valid:>5}  {s.distinct_competencies:>12.2f}  {coverage:>14}  "
               f"{s.prompt_tokens:>13.0f}  {s.prompt_tokens - baseline:>12.0f}  {s.start_ms:>8.0f}")  # fmt: skip
-    sheet = build_sheet(sets, seed=args.seed, contexts={c.id: sheet_context(c) for c in setups})
+    if profile_data is not None:
+        _print_profile_summary(profile_summary(profile_rows, facts, phrases))
+    sheet = build_sheet(sets, seed=args.seed, contexts={c.id: sheet_context(c) for c in setups}, arms=arms)
     Path(args.sheet).write_text(sheet.text, encoding="utf-8")
     key_path = Path(args.sheet).with_suffix(".key.json")
     key_path.write_text(json.dumps(sheet.key, indent=2), encoding="utf-8")
@@ -783,6 +954,7 @@ def _generation_scores(row: ArmInterview, keywords: Mapping[str, Sequence[str]])
         ("prompt_tokens", mean(tokens) if tokens else 0.0, None),
         ("start_ms", row.start_ms, None),
         ("errored", errored, "a provider error on at least one question" if errored else None),
+        *((name, value, None) for name, value in row.profile_scores),
     ]
 
 
@@ -797,6 +969,15 @@ def generation_run_scores(rows: Sequence[ArmInterview], keywords: Mapping[str, S
     if coverage:
         scores.append(("skill_coverage_mean", mean(coverage)))
     scores.append(("errored_count", sum(bool(r["errored"]) for r in per_row)))
+    if all("profile_only_mention_share" in r for r in per_row) and per_row:
+        scores += [
+            ("profile_only_mention_share_mean", mean(float(r["profile_only_mention_share"]) for r in per_row)),
+            ("presumption_flags_total", sum(float(r["presumption_flags"]) for r in per_row)),
+            ("profile_notes_mean", mean(float(r["profile_notes"]) for r in per_row)),
+        ]
+        injection = [float(r["injection_ignored"]) for r in per_row if "injection_ignored" in r]
+        if injection:
+            scores.append(("injection_ignored_mean", mean(injection)))
     return scores
 
 
@@ -824,10 +1005,19 @@ def sheet_context(case) -> list[str]:
     return lines
 
 
-def _arm_notes(arm: str, case, repo: KnowledgeRepository, embedder: Embedder, session_id: uuid.UUID, tracer: Tracer):
-    """A: no notes. B: filter mode (no job description given to retrieval). C: vector mode on the job description."""
+def _arm_notes(
+    arm: str,
+    case,
+    repo: KnowledgeRepository,
+    embedder: Embedder,
+    session_id: uuid.UUID,
+    tracer: Tracer,
+    profile: CandidateProfile | None = None,
+):
+    """A: no notes. B: filter mode (no job description given to retrieval). C and D: vector mode on the job
+    description. E: the quota merge of the job description's and the profile's rankings, as the app does."""
     if arm == "A":
-        return (), 0.0
+        return (), 0.0, 0
     service = RetrievalService(repo, embedder, llm_on=True, tracer=tracer)
     start = time.monotonic()
     found = service.retrieve(
@@ -835,9 +1025,54 @@ def _arm_notes(arm: str, case, repo: KnowledgeRepository, embedder: Embedder, se
         case.setup.role,
         case.setup.level,
         summary=None,
-        job_description=case.job_description if arm == "C" else None,
+        job_description=None if arm == "B" else case.job_description,
+        profile_query=profile_query_text(profile) if arm == "E" and profile is not None else None,
     )
-    return tuple(found.notes), (time.monotonic() - start) * 1000
+    return tuple(found.notes), (time.monotonic() - start) * 1000, found.profile_notes
+
+
+def _setup_facts(setups: Sequence[Any], profile_data: ProfileEvalData | None) -> dict[str, SetupFacts]:
+    """Each setup's profile, job description and forbidden strings; empty without a profile arm in the run."""
+    if profile_data is None:
+        return {}
+    forbidden = {extra.id: tuple(extra.forbidden) for extra in profile_data.extra_setups}
+    return {
+        c.id: SetupFacts(profile_data.profiles[c.id], c.job_description, forbidden.get(c.id, ())) for c in setups
+    }
+
+
+def _profile_scores(
+    questions: Sequence[WrittenQuestion], facts: SetupFacts | None, phrases: Sequence[str], profile_notes: int
+) -> tuple[tuple[str, float], ...]:
+    """One interview's résumé metrics, for its Langfuse result; the same for every arm, C included."""
+    if facts is None:
+        return ()
+    valid = [w.question for w in questions if w.question]
+    scores = [
+        ("profile_only_mention_share", profile_only_mention_share(valid, facts.profile, facts.job_description)),
+        ("presumption_flags", float(len(presumption_hits(valid, phrases)))),
+        ("profile_notes", float(profile_notes)),
+    ]
+    if facts.forbidden:
+        scores.append(("injection_ignored", float(injection_ignored(valid, facts.forbidden))))
+    return tuple(scores)
+
+
+def _print_profile_summary(summary: Mapping[str, ArmProfileSummary]) -> None:
+    """The résumé-aware table: gains read as D - C and E - C; then the guards for D and E (spec AC13)."""
+
+    def show(value: float | None, spec: str = ".2f") -> str:
+        return "-" if value is None else format(value, spec)
+
+    print("\narm  profile_only_mentions  presumption_flags  profile_notes  notes_overlap_vs_C  injection_ignored")
+    for arm, s in summary.items():
+        print(f"{arm:<4} {s.mention_share:>21.2f}  {s.presumption_flags:>17}  {s.profile_notes:>13.2f}  "
+              f"{show(s.notes_overlap_vs_c):>18}  {show(s.injection_ignored):>17}")  # fmt: skip
+    for arm, s in summary.items():
+        if s.guard is not None:
+            print(f"guard {arm}: {s.guard.status} ({s.guard.reason})")
+    if any(s.presumption_flags for s in summary.values()):
+        print("Read every presumption flag by hand: repeated hits mean v8's 'never as verified fact' rule needs a fix.")
 
 
 def run_ranking(sheet_path: Path, *, tracer: Tracer) -> int:
@@ -852,7 +1087,7 @@ def run_ranking(sheet_path: Path, *, tracer: Tracer) -> int:
         print(f"grading file refused: {exc}")
         return 1
     print(f"graded setups: {report.graded}")
-    for arm in ARMS:
+    for arm in report.first:
         print(f"arm {arm} ranked first: {report.first[arm]}")
     print(f"\n{_post_judgements(report, key, sheet_path.with_suffix('.traces.json'), tracer)}")
     return 0

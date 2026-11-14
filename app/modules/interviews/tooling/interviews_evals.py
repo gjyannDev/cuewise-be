@@ -97,7 +97,7 @@ from .interviews_eval_runs import (
     run_name,
     run_stamp,
 )
-from .interviews_rag_evals import RAG_TASKS, run_rag_task
+from .interviews_rag_evals import DEFAULT_ARMS, RAG_TASKS, parse_arms, run_rag_task
 
 EVAL_CASES_PATH = MODULE_DIR / "data" / "eval_cases.json"
 # In Langfuse: the prefix of the dataset each task's cases are mirrored to.
@@ -806,6 +806,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--sheet", default="blind_ranking.md", help="generation/ranking: the blind sheet's path")
     parser.add_argument("--seed", type=int, default=8, help="generation: the seed of the sheet's label order")
+    parser.add_argument(
+        "--arms",
+        type=parse_arms,
+        default=DEFAULT_ARMS,
+        help=(
+            "generation: comma-separated arms to run, e.g. C,D,E for the résumé-aware comparison (A no notes, B filter "
+            "notes, C vector notes, D v8 + profile, E v8 + profile + profile query); default A,B,C"
+        ),
+    )
     parser.add_argument(
         "--pause-seconds",
         type=_non_negative_seconds,
