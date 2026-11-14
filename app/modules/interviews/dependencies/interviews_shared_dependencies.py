@@ -5,9 +5,10 @@ from datetime import UTC, datetime
 from fastapi import Request
 
 from app.core.ai.context import ContextManager
+
+# Shared with every feature; re-exported so the interviews imports and test overrides stay the same objects.
+from app.core.ai.dependencies import get_llm_provider, get_tracer  # noqa: F401
 from app.core.ai.embedder import Embedder
-from app.core.ai.provider import LLMProvider
-from app.core.ai.tracing import Tracer
 from app.core.ai.transcriber import Transcriber
 
 from ..ai.interviews_context import CONTEXT_MANAGER
@@ -20,11 +21,6 @@ def get_bank() -> list[BankQuestion]:
     return QUESTION_BANK
 
 
-def get_llm_provider(request: Request) -> LLMProvider | None:
-    """Built once at startup (app lifespan); None when no key is configured or the lifespan didn't run."""
-    return getattr(request.app.state, "llm_provider", None)
-
-
 def get_transcriber(request: Request) -> Transcriber | None:
     """Built once at startup (app lifespan); None when no Deepgram key is configured or the lifespan didn't run."""
     return getattr(request.app.state, "transcriber", None)
@@ -33,11 +29,6 @@ def get_transcriber(request: Request) -> Transcriber | None:
 def get_embedder(request: Request) -> Embedder | None:
     """Built once at startup (app lifespan); None without the Google key or when the lifespan didn't run."""
     return getattr(request.app.state, "embedder", None)
-
-
-def get_tracer(request: Request) -> Tracer:
-    """Built once at startup (app lifespan); a disabled tracer when the lifespan didn't run."""
-    return getattr(request.app.state, "tracer", None) or Tracer(None)
 
 
 def get_clock() -> Callable[[], float]:

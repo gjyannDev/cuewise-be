@@ -4,12 +4,14 @@ Model output is untrusted: it is parsed and validated here before anything uses 
 raises InvalidReplyError with a short machine-readable reason (logged, never shown to users).
 """
 
-import json
 import re
 from collections.abc import Sequence
 from typing import Annotated, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
+
+# Shared with every feature that reads a JSON reply; re-exported so `interviews_reply.load_object` keeps working.
+from app.core.ai.json_reply import InvalidReplyError, load_object
 
 from ..constants.interviews_constants import (
     MAX_QUESTION_LENGTH,
@@ -22,19 +24,11 @@ from ..constants.interviews_constants import (
 )
 from ..utils.interviews_utils import APP_TAG
 
-# One optional ```json fence around the whole reply; anything before or after it makes the reply invalid.
-_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 _QUESTION_MARKS = ("?", "？")
 # interviewer_v5's first line in next-question mode. "CATEGORY: behavioral" is 20 characters; a longer first line
 # with no newline yet is question text, not a header.
 _HEADER = re.compile(r"^\s*category\s*:\s*(\w+)\s*$", re.IGNORECASE)
 _HEADER_MAX_LENGTH = 32
-
-
-class InvalidReplyError(Exception):
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
 
 
 class _RawReply(BaseModel):
@@ -151,23 +145,6 @@ def _check_question(
 
 def _normalized(question: str) -> str:
     return " ".join(question.casefold().split())
-
-
-def load_object(raw: str) -> dict:
-    """The reply as a JSON object: one optional fence around it, nothing else before or after."""
-    text = raw.strip()
-    if text.startswith("```"):
-        fenced = _FENCE.match(text)
-        if fenced is None:
-            raise InvalidReplyError("fence")
-        text = fenced.group(1)
-    try:
-        data = json.loads(text)
-    except ValueError as exc:
-        raise InvalidReplyError("not_json") from exc
-    if not isinstance(data, dict):
-        raise InvalidReplyError("not_object")
-    return data
 
 
 class _RawDecision(BaseModel):
