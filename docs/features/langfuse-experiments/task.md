@@ -78,7 +78,7 @@ Phase 2 suggested commit message (you commit; Phase 1's message above covers Ste
 ## Tests Pending
 - Step 13 (AC20): real runs of write, stream, feedback, retrieval, generation and ranking; checks listed under Current Step.
 - `retrieval` real run (left from Step 7).
-- Your decision on `follow_up_decision_v2` (keep v1 or switch), and confirming which `decide` pair was v1 via `prompt.decision` in its metadata.
+- Confirming which `decide` pair was v1 via `prompt.decision` in its metadata. (`follow_up_decision_v2`: decided 2026-11-14, keep v1; the uncommitted v2 file is gone, so its contract test was removed. The v2 text survives in the traces of `decide/20261112-063054`.)
 
 ## Test Cases
 | ID | Step | Case | Tag | Source | Status |

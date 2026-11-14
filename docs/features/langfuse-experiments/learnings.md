@@ -137,7 +137,7 @@ retrieval preflight still waits that long before printing its message.
 | Run (local) | What changed | Versions | Summary numbers | Failures by type | Decision |
 |------|--------|----------|-----------------|------------------|----------|
 | 11-12 14:17 `decide/20261112-061726/r1,r2` | none: baseline | `follow_up_decision_v1` (assumed: the earlier pair; confirm `prompt.decision` in the run metadata); model in metadata | r2: decision_accuracy 0.87, pass_rate 0.87, over_probing 1, under_probing 0, errored 0; valid 15/15, injection ignored 15/15; about $0.005 a run, 4.3 s per case | 1 over-probe → quality | baseline |
-| 11-12 14:30 `decide/20261112-063054/r1,r2` | `follow_up_decision_v2`: decide completeness first | `follow_up_decision_v2` (assumed, as above) | r1 and r2 the same: decision_accuracy 0.87, pass_rate 0.87, over_probing 0, under_probing 1, errored 0; about $0.005 a run, 3.6 to 4.9 s per case | 1 under-probe → quality | a trade, no gain: keep v1 recommended; **your decision pending** |
+| 11-12 14:30 `decide/20261112-063054/r1,r2` | `follow_up_decision_v2`: decide completeness first | `follow_up_decision_v2` (assumed, as above) | r1 and r2 the same: decision_accuracy 0.87, pass_rate 0.87, over_probing 0, under_probing 1, errored 0; about $0.005 a run, 3.6 to 4.9 s per case | 1 under-probe → quality | a trade, no gain: **keep v1** (decided 2026-11-14). The v2 file was never committed and is not kept, so its contract test was removed; the exact v2 text is in this run's traces in Langfuse if it is ever wanted again |
 | pending | `--task retrieval` | pending | pending | pending | pending |
 
 **Go/no-go gate (AC12): go** (2026-11-12). The two `decide` pairs above lined up case by case in Langfuse's runs list;

@@ -141,19 +141,6 @@ def test_the_decide_prompt_renders_fully_and_names_every_action_and_gap(level, i
     assert LEVEL_GUIDANCE[level] in text and "<interview_status>" in text
 
 
-def test_decide_prompt_v2_can_replace_v1_without_breaking_the_contract():  # langfuse-experiments: a ready experiment
-    v1, v2 = load_prompt("follow_up_decision_v1"), load_prompt("follow_up_decision_v2")
-
-    assert [line for line in v2.splitlines() if re.match(r"^# \w", line)] == SECTIONS
-    assert set(re.findall(r"\{\{\w+\}\}", v2)) == set(re.findall(r"\{\{\w+\}\}", v1))
-    assert all(f'"{value}"' in v2 for value in [*FollowUpAction, *FollowUpGap])
-    # The same role line: the test fakes route decide calls by it, and it names the same job.
-    assert v2.splitlines()[1] == v1.splitlines()[1]
-    # The one change: the reasons to move on come before the gap list.
-    assert v2.index('answer "next_question"') < v2.index('answer "follow_up"')
-    assert v1.index('Answer "follow_up"') < v1.index('Answer "next_question"')
-
-
 def test_v4_renders_like_v3_but_asks_for_no_note_and_allows_follow_ups():  # AC9
     text = render_interviewer_v2_prompt(
         role=JobRole.data,
