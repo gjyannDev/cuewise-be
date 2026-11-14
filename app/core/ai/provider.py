@@ -43,9 +43,18 @@ class LLMError(Exception):
 
     retryable: ClassVar[bool] = False
 
-    def __init__(self, message: str, *, status_code: int | None = None, finish_reason: str | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        finish_reason: str | None = None,
+        retry_after: float | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
+        # Seconds the vendor asked us to wait (its Retry-After header); None when it did not say.
+        self.retry_after = retry_after
         # "length" here means the token cap ran out before any reply text (e.g. a reasoning model still thinking).
         self.finish_reason = finish_reason
         # Filled in by the provider once it stops trying, so callers can log them.

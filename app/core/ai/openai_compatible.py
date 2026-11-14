@@ -180,7 +180,7 @@ class OpenAICompatibleProvider:
             raise LLMTimeoutError("LLM request timed out") from exc
         except httpx.TransportError as exc:
             raise LLMServerError("LLM connection failed") from exc
-        raise_for_status(response.status_code)
+        raise_for_status(response.status_code, response.headers.get("retry-after"))
         return self._parse(response)
 
     async def _stream_attempt(
@@ -196,7 +196,7 @@ class OpenAICompatibleProvider:
             async with self._async_client.stream("POST", "chat/completions", json=body, timeout=timeout) as response:
                 if response.status_code != 200:
                     await response.aread()
-                    raise_for_status(response.status_code)
+                    raise_for_status(response.status_code, response.headers.get("retry-after"))
                 async for line in response.aiter_lines():
                     if not line.startswith(_DATA):
                         continue  # blank separators and SSE comments (keep-alives)

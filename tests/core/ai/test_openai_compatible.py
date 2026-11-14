@@ -182,6 +182,28 @@ def test_rate_limit_then_success_retries_once_with_backoff(make_provider, clock)
     assert 0.5 <= delay <= 0.75  # 0.5s base plus up to 50% jitter
 
 
+def test_retry_after_sets_the_wait_instead_of_the_short_backoff(make_provider, clock):
+    provider, _ = make_provider(
+        httpx.Response(429, headers={"Retry-After": "5"}), httpx.Response(200, json=completion())
+    )
+
+    result = provider.complete(MESSAGES, max_tokens=150)
+
+    assert result.attempts == 2
+    assert clock.sleeps == [5.0]
+
+
+def test_a_retry_after_longer_than_the_budget_fails_at_once_without_waiting(make_provider, clock):
+    provider, requests = make_provider(httpx.Response(429, headers={"Retry-After": "60"}), budget=30.0)
+
+    with pytest.raises(LLMRateLimitError) as exc:
+        provider.complete(MESSAGES, max_tokens=150)
+
+    assert len(requests) == 1
+    assert clock.sleeps == []
+    assert exc.value.retry_after == 60.0
+
+
 @pytest.mark.parametrize(
     ("failure", "error"),
     [

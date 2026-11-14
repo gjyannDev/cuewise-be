@@ -114,7 +114,7 @@ class DeepgramTranscriber:
             raise LLMTimeoutError("Transcription request timed out") from exc
         except httpx.TransportError as exc:
             raise LLMServerError("Transcription connection failed") from exc
-        raise_for_status(response.status_code)
+        raise_for_status(response.status_code, response.headers.get("retry-after"))
         return _parse(response)
 
     def _elapsed_ms(self, start: float) -> int:

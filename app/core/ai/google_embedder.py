@@ -113,7 +113,7 @@ class GoogleEmbedder:
             raise LLMTimeoutError("Embedding request timed out") from exc
         except httpx.TransportError as exc:
             raise LLMServerError("Embedding connection failed") from exc
-        raise_for_status(response.status_code)
+        raise_for_status(response.status_code, response.headers.get("retry-after"))
         return self._parse(response, count)
 
     def _parse(self, response: httpx.Response, count: int) -> list[list[float]]:
