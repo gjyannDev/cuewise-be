@@ -10,7 +10,13 @@ import pytest
 
 from app.core.ai.fake import FakeProvider, FakeStream
 from app.core.ai.provider import ChatMessage, LLMResult, LLMServerError, LLMTimeoutError
-from app.core.ai.tracing import Tracer, TracingProvider, build_tracer
+from app.core.ai.tracing import (
+    REDACT_LABEL,
+    REDACTED,
+    Tracer,
+    TracingProvider,
+    build_tracer,
+)
 from app.core.config import Settings
 from tests.fake_langfuse import FakeLangfuse
 
@@ -332,6 +338,60 @@ async def test_stream_sdk_failure_does_not_change_the_stream():  # AC9
     items = await drain(provider.stream(MESSAGES, max_tokens=100))
 
     assert items[-1].text == "Fine."
+
+
+# --- redaction (resume-upload: résumé content never reaches Langfuse) -----------------------------------------------
+
+REDACTED_LABELS = {"task": "profile-extract", "prompt_version": "profile_extract_v1", REDACT_LABEL: True}
+
+
+def test_a_redacted_call_records_a_placeholder_instead_of_the_messages(tracer, client):  # resume-upload EC33
+    traced(tracer, result()).complete(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS)
+
+    final = client.generations[0].final
+    assert final["input"] == REDACTED
+    assert "Hello there" not in repr(final)
+
+
+def test_a_redacted_success_keeps_model_usage_and_labels_but_not_the_reply(tracer, client):  # resume-upload EC33
+    traced(tracer, result()).complete(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS)
+
+    final = client.generations[0].final
+    assert final["output"] == REDACTED
+    assert (final["name"], final["model"]) == ("profile-extract", "gemini-test")
+    assert final["usage_details"]["input"] == 40
+    assert final["metadata"]["prompt_version"] == "profile_extract_v1" and final["metadata"]["latency_ms"] == 350
+    assert "Tell me about a bug." not in repr(final)
+
+
+async def test_a_redacted_failure_records_no_partial_text(tracer, client):  # resume-upload EC33
+    error = LLMServerError("LLM provider error", status_code=503)
+    provider = traced(tracer, FakeStream(["Half of a résumé "], error=error))
+
+    with pytest.raises(LLMServerError):
+        await drain(provider.stream(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS))
+
+    final = client.generations[0].final
+    assert final["level"] == "ERROR" and final["output"] is None
+    assert "Half" not in repr(final)
+
+
+async def test_a_redacted_stream_closed_early_records_no_partial_text(tracer, client):  # resume-upload EC33
+    provider = traced(tracer, FakeStream(["One ", "two "]))
+
+    stream = provider.stream(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS)
+    assert await anext(stream) == "One "
+    await stream.aclose()
+
+    final = client.generations[0].final
+    assert final["level"] == "WARNING" and final["output"] == REDACTED
+
+
+def test_an_unlabelled_call_still_records_full_content(tracer, client):  # langfuse-tracing default unchanged
+    traced(tracer, result()).complete(MESSAGES, max_tokens=100, trace_labels={**REDACTED_LABELS, REDACT_LABEL: False})
+
+    final = client.generations[0].final
+    assert final["input"][1]["content"] == "Hello there" and final["output"] == "Tell me about a bug."
 
 
 # --- trace boundary ---------------------------------------------------------------------------------------------

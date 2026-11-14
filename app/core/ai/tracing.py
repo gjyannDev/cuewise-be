@@ -25,6 +25,12 @@ TraceLabels = Mapping[str, str | int | None]
 
 DEFAULT_GENERATION_NAME = "llm-call"
 
+# A call labelled with REDACT_LABEL (truthy) records this placeholder instead of its messages and reply text, and no
+# partial text when it fails: for personal data such as résumés (resume-upload). Model, usage, latency and the labels
+# are still recorded, so cost and speed stay visible.
+REDACT_LABEL = "redact"
+REDACTED = "[redacted]"
+
 
 class ExperimentRun(NamedTuple):
     """What a recorded experiment run left behind: its name and link, and the trace of each item (by item id)."""
@@ -57,6 +63,7 @@ class Generation:
     def __init__(self, observation: Any | None, labels: TraceLabels):
         self._obs = observation
         self._labels = dict(labels)
+        self._redact = bool(labels.get(REDACT_LABEL))
         self._done = observation is None
 
     @_safe("generation update")
@@ -71,7 +78,7 @@ class Generation:
 
     def succeed(self, result: LLMResult) -> None:
         fields: dict[str, Any] = {
-            "output": result.text,
+            "output": REDACTED if self._redact else result.text,
             "model": result.model,
             "metadata": self._labels
             | {
@@ -90,7 +97,7 @@ class Generation:
         self._finish(
             level="ERROR",
             status_message=f"{type(error).__name__}{status}",
-            output=partial_text or None,
+            output=None if self._redact else partial_text or None,
             metadata=self._labels
             | {
                 "attempts": error.attempts,
@@ -104,7 +111,7 @@ class Generation:
         self._finish(
             level="WARNING",
             status_message="cancelled",
-            output=partial_text,
+            output=REDACTED if self._redact else partial_text,
             metadata=self._labels,
         )
 
@@ -301,7 +308,7 @@ class Tracer:
             observation = self._client.start_observation(
                 name=str(labels.get("task") or DEFAULT_GENERATION_NAME),
                 as_type="generation",
-                input=[m.model_dump() for m in messages],
+                input=REDACTED if labels.get(REDACT_LABEL) else [m.model_dump() for m in messages],
                 metadata=dict(labels),
                 model_parameters=dict(model_parameters or {}),
             )
