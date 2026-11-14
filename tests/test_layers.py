@@ -8,7 +8,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 # Modules already in layer folders; each joins once it is migrated (see docs/features/layered-modules/plan.md).
-MIGRATED: tuple[str, ...] = ("auth", "users", "interviews")
+MIGRATED: tuple[str, ...] = ("auth", "users", "interviews", "profile")
 
 
 def check_layers(files: Mapping[str, str], modules: Iterable[str] | None = None) -> list[str]:

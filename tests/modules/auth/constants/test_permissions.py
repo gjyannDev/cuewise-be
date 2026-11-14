@@ -11,14 +11,15 @@ INTERVIEW_PERMISSIONS = {
     Permission.interviews_answer,
     Permission.interviews_feedback,
 }
+PROFILE_PERMISSIONS = {Permission.profile_manage_self}  # resume-upload: every signed-in role manages its own profile
 
 
 def test_admin_holds_every_user_permission():  # AC16, interviews AC12
-    assert permissions_for(Role.admin) == {Permission.users_read, Permission.users_read_self} | INTERVIEW_PERMISSIONS
+    assert permissions_for(Role.admin) == {Permission.users_read, Permission.users_read_self} | INTERVIEW_PERMISSIONS | PROFILE_PERMISSIONS
 
 
 def test_user_can_only_read_self():  # AC16, interviews AC12
-    assert permissions_for(Role.user) == {Permission.users_read_self} | INTERVIEW_PERMISSIONS
+    assert permissions_for(Role.user) == {Permission.users_read_self} | INTERVIEW_PERMISSIONS | PROFILE_PERMISSIONS
 
 
 def test_every_role_has_a_permission_entry():  # AC16, inferred: new role forgotten in the map

@@ -11,3 +11,4 @@ from app.modules.interviews.dependencies.models.interviews_model import (  # noq
     InterviewQuestion,
     InterviewSession,
 )
+from app.modules.profile.models.profile_model import CandidateProfileRow  # noqa: F401

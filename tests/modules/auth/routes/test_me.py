@@ -5,13 +5,14 @@ from app.modules.auth.constants.auth_constants import Role
 
 ME = "/api/v1/auth/me"
 INTERVIEW_PERMISSIONS = {"interviews:create", "interviews:read_self", "interviews:answer", "interviews:feedback"}
+PROFILE_PERMISSIONS = {"profile:manage_self"}  # resume-upload
 
 
 @pytest.mark.parametrize(
     ("role", "permissions"),
     [
-        (Role.admin, {"users:read", "users:read_self"} | INTERVIEW_PERMISSIONS),
-        (Role.user, {"users:read_self"} | INTERVIEW_PERMISSIONS),
+        (Role.admin, {"users:read", "users:read_self"} | INTERVIEW_PERMISSIONS | PROFILE_PERMISSIONS),
+        (Role.user, {"users:read_self"} | INTERVIEW_PERMISSIONS | PROFILE_PERMISSIONS),
     ],
 )
 def test_me_returns_profile_with_resolved_permissions(client, make_user, auth_header, role, permissions):  # AC5, AC17

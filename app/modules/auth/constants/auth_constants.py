@@ -16,6 +16,7 @@ class Permission(StrEnum):
     interviews_read_self = "interviews:read_self"
     interviews_answer = "interviews:answer"
     interviews_feedback = "interviews:feedback"
+    profile_manage_self = "profile:manage_self"
 
 
 # Every signed-in role can practice interviews on its own sessions.
@@ -28,10 +29,15 @@ _INTERVIEW_PERMISSIONS = frozenset(
     }
 )
 
+# Every signed-in role can upload, read and delete its own résumé profile.
+_PROFILE_PERMISSIONS = frozenset({Permission.profile_manage_self})
+
 # Single source of truth for what each role may do. Edit here to change access.
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
-    Role.admin: frozenset({Permission.users_read, Permission.users_read_self}) | _INTERVIEW_PERMISSIONS,
-    Role.user: frozenset({Permission.users_read_self}) | _INTERVIEW_PERMISSIONS,
+    Role.admin: frozenset({Permission.users_read, Permission.users_read_self})
+    | _INTERVIEW_PERMISSIONS
+    | _PROFILE_PERMISSIONS,
+    Role.user: frozenset({Permission.users_read_self}) | _INTERVIEW_PERMISSIONS | _PROFILE_PERMISSIONS,
 }
 
 
