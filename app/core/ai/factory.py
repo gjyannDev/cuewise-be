@@ -2,7 +2,7 @@ import logging
 
 from app.core.config import Settings
 
-from .deepgram import DeepgramTranscriber
+from .deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from .google_embedder import GoogleEmbedder
 from .openai_compatible import OpenAICompatibleProvider
 from .provider import LLMProvider
@@ -10,6 +10,7 @@ from .tracing import Tracer, TracingProvider
 
 logger = logging.getLogger("app.llm")
 stt_logger = logging.getLogger("app.stt")
+tts_logger = logging.getLogger("app.tts")
 rag_logger = logging.getLogger("app.rag")
 
 
@@ -40,16 +41,35 @@ def build_provider(settings: Settings, *, model: str | None = None, tracer: Trac
 def build_transcriber(settings: Settings) -> DeepgramTranscriber | None:
     """Speech-to-text for voice answers; None without a key. Never traced: audio and transcripts stay out of Langfuse.
     """
-    if settings.deepgram_api_key is None:
+    speech = settings.speech
+    if speech.api_key is None:
         stt_logger.warning("Transcription disabled (DEEPGRAM_API_KEY is empty): voice answers are off")
         return None
     return DeepgramTranscriber(
-        api_key=settings.deepgram_api_key.get_secret_value(),
-        model=settings.deepgram_model,
-        base_url=settings.deepgram_base_url,
-        timeout_seconds=settings.transcription_timeout_seconds,
-        max_retries=settings.transcription_max_retries,
-        total_budget_seconds=settings.transcription_total_budget_seconds,
+        api_key=speech.api_key.get_secret_value(),
+        model=speech.stt.model,
+        base_url=speech.base_url,
+        timeout_seconds=speech.stt.timeout_seconds,
+        max_retries=speech.stt.max_retries,
+        total_budget_seconds=speech.stt.total_budget_seconds,
+    )
+
+
+def build_synthesizer(settings: Settings) -> DeepgramSynthesizer | None:
+    """Text-to-speech for the interviewer's voice; None without a key (the interview still works, as text). Never
+    traced, like the transcriber."""
+    speech = settings.speech
+    if speech.api_key is None:
+        tts_logger.warning("Speech disabled (DEEPGRAM_API_KEY is empty): the interviewer voice is off")
+        return None
+    return DeepgramSynthesizer(
+        api_key=speech.api_key.get_secret_value(),
+        model=speech.tts.model,
+        encoding=speech.tts.encoding,
+        base_url=speech.base_url,
+        timeout_seconds=speech.tts.timeout_seconds,
+        max_retries=speech.tts.max_retries,
+        total_budget_seconds=speech.tts.total_budget_seconds,
     )
 
 

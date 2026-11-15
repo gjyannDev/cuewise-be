@@ -1,4 +1,4 @@
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -28,6 +28,40 @@ class ProviderConfig(BaseModel):
     api_key: SecretStr
     model: str
     base_url: str
+
+
+# Aura output encodings the app can serve (each maps to a media type in `core/ai/deepgram.py`).
+SpeechEncoding = Literal["mp3", "opus", "aac", "flac", "linear16"]
+
+
+class _SpeechPart(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    model: str
+    timeout_seconds: float
+    max_retries: int
+    total_budget_seconds: float
+
+
+class SttSettings(_SpeechPart):
+    """Speech-to-text (voice answers)."""
+
+
+class TtsSettings(_SpeechPart):
+    """Text-to-speech (the interviewer's voice)."""
+
+    encoding: SpeechEncoding
+
+
+class SpeechSettings(BaseModel):
+    """The speech vendor's settings, grouped (see `Settings.speech`). One key and base URL serve both directions."""
+
+    model_config = ConfigDict(frozen=True)
+
+    api_key: SecretStr | None
+    base_url: str
+    stt: SttSettings
+    tts: TtsSettings
 
 
 class Settings(BaseSettings):
@@ -79,6 +113,14 @@ class Settings(BaseSettings):
     transcription_max_retries: int = Field(default=1, ge=0)
     # Kept under the web app's 25 s forwarder timeout, so a slow transcription fails here with a clean 503.
     transcription_total_budget_seconds: float = Field(default=20, gt=0)
+    # Text-to-speech for the interviewer's voice (Deepgram Aura, same key). Aura 1 "asteria" won the Phase 0 spike
+    # (2026-11-15): ~0.3-0.5 s per clip warm, against ~0.9-2 s for Aura 2 "thalia" (see interview-room/task.md).
+    deepgram_tts_model: str = "aura-asteria-en"
+    deepgram_tts_encoding: SpeechEncoding = "mp3"
+    speech_timeout_seconds: float = Field(default=8, gt=0)
+    speech_max_retries: int = Field(default=1, ge=0)
+    # Under the web app's forwarder budget for the speech routes, so a slow clip fails here with a clean 503.
+    speech_total_budget_seconds: float = Field(default=10, gt=0)
 
     # Langfuse tracing: both keys set = on, anything less = off (see `langfuse_enabled`).
     langfuse_public_key: SecretStr | None = None
@@ -167,6 +209,28 @@ class Settings(BaseSettings):
     @property
     def transcription_configured(self) -> bool:
         return self.deepgram_api_key is not None
+
+    @property
+    def speech(self) -> SpeechSettings:
+        """Every speech setting in one read-only group, so the speech factories depend on one object. The env var
+        names stay flat (a nested model would rename them, e.g. `DEEPGRAM__API_KEY`, and break existing .env files)."""
+        return SpeechSettings(
+            api_key=self.deepgram_api_key,
+            base_url=self.deepgram_base_url,
+            stt=SttSettings(
+                model=self.deepgram_model,
+                timeout_seconds=self.transcription_timeout_seconds,
+                max_retries=self.transcription_max_retries,
+                total_budget_seconds=self.transcription_total_budget_seconds,
+            ),
+            tts=TtsSettings(
+                model=self.deepgram_tts_model,
+                encoding=self.deepgram_tts_encoding,
+                timeout_seconds=self.speech_timeout_seconds,
+                max_retries=self.speech_max_retries,
+                total_budget_seconds=self.speech_total_budget_seconds,
+            ),
+        )
 
     @property
     def embedding_configured(self) -> bool:

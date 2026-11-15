@@ -67,7 +67,9 @@ def test_llm_settings_default_to_off_with_documented_limits(no_llm_env):  # inte
     assert s.llm_providers == []
     assert s.llm_provider_configs == []
     assert s.llm_configured is False
-    assert (s.llm_timeout_seconds, s.llm_max_retries, s.llm_total_budget_seconds, s.llm_max_tokens) == (15, 2, 30, 800)
+    # 4000 since the token cap was raised (a reasoning model's thinking counts against it); the user confirmed 4000
+    # is right (2026-11-15).
+    assert (s.llm_timeout_seconds, s.llm_max_retries, s.llm_total_budget_seconds, s.llm_max_tokens) == (15, 2, 30, 4000)
 
 
 def test_listed_provider_with_its_block_is_configured(no_llm_env):  # sse-streaming Step 0
@@ -272,9 +274,66 @@ def test_env_example_lists_langfuse_and_app_env():  # AC14
 def no_stt_env(monkeypatch):
     """Settings without a developer's real Deepgram key or transcription limits."""
     for name in list(os.environ):
-        if name.upper().startswith(("DEEPGRAM_", "TRANSCRIPTION_")):
+        if name.upper().startswith(("DEEPGRAM_", "TRANSCRIPTION_", "SPEECH_")):
             monkeypatch.delenv(name, raising=False)
     return monkeypatch
+
+
+def test_speech_settings_group_the_existing_env_values_for_both_directions(no_stt_env):  # interview-room Step 6
+    no_stt_env.setenv("DEEPGRAM_API_KEY", "dg-very-secret")
+    no_stt_env.setenv("DEEPGRAM_MODEL", "nova-3-medical")
+    no_stt_env.setenv("DEEPGRAM_TTS_MODEL", "aura-2-orion-en")
+    no_stt_env.setenv("TRANSCRIPTION_TIMEOUT_SECONDS", "12")
+
+    speech = _settings().speech
+
+    assert speech.api_key is not None and speech.api_key.get_secret_value() == "dg-very-secret"
+    assert speech.base_url == "https://api.deepgram.com/"
+    assert (speech.stt.model, speech.stt.timeout_seconds, speech.stt.max_retries, speech.stt.total_budget_seconds) == (
+        "nova-3-medical",
+        12,
+        1,
+        20,
+    )
+    assert (speech.tts.model, speech.tts.encoding) == ("aura-2-orion-en", "mp3")
+    assert (speech.tts.timeout_seconds, speech.tts.max_retries, speech.tts.total_budget_seconds) == (8, 1, 10)
+    assert "dg-very-secret" not in repr(speech)
+
+
+def test_the_tts_defaults_without_a_key(no_stt_env):
+    speech = _settings().speech
+
+    assert speech.api_key is None
+    assert (speech.tts.model, speech.tts.encoding) == ("aura-asteria-en", "mp3")
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("SPEECH_TIMEOUT_SECONDS", "0"),
+        ("SPEECH_MAX_RETRIES", "-1"),
+        ("SPEECH_TOTAL_BUDGET_SECONDS", "0"),
+        ("DEEPGRAM_TTS_ENCODING", "wav"),
+    ],
+)
+def test_speech_limits_must_be_positive_and_the_encoding_known(no_stt_env, name, value):
+    no_stt_env.setenv(name, value)
+
+    with pytest.raises(ValidationError):
+        _settings()
+
+
+def test_env_example_lists_every_speech_setting():
+    with open(".env.example", encoding="utf-8") as f:
+        keys = {line.split("=", 1)[0] for line in f if "=" in line and not line.startswith("#")}
+
+    assert {
+        "DEEPGRAM_TTS_MODEL",
+        "DEEPGRAM_TTS_ENCODING",
+        "SPEECH_TIMEOUT_SECONDS",
+        "SPEECH_MAX_RETRIES",
+        "SPEECH_TOTAL_BUDGET_SECONDS",
+    } <= keys
 
 
 def test_transcription_is_off_without_a_key_with_documented_defaults(no_stt_env):  # voice AC6, EC22

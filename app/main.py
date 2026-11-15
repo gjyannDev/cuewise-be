@@ -3,7 +3,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
-from app.core.ai.factory import build_embedder, build_provider, build_transcriber
+from app.core.ai.factory import (
+    build_embedder,
+    build_provider,
+    build_synthesizer,
+    build_transcriber,
+)
 from app.core.ai.tracing import build_tracer
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
@@ -26,10 +31,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     tracer = build_tracer(settings)
     provider = build_provider(settings, tracer=tracer)
     transcriber = build_transcriber(settings)
+    synthesizer = build_synthesizer(settings)
     embedder = build_embedder(settings)
     app.state.tracer = tracer
     app.state.llm_provider = provider
     app.state.transcriber = transcriber
+    app.state.synthesizer = synthesizer
     app.state.embedder = embedder
     try:
         yield
@@ -39,6 +46,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await provider.aclose()
         if transcriber is not None:
             await transcriber.aclose()
+        if synthesizer is not None:
+            await synthesizer.aclose()
         if embedder is not None:
             embedder.close()
         # After the provider: its last calls are recorded by now, so this flush sends them too.

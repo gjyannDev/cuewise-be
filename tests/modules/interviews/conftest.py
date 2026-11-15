@@ -5,14 +5,14 @@ from typing import NamedTuple
 import pytest
 from sqlalchemy import delete
 
-from app.core.ai.fake import FakeProvider, FakeTranscriber
+from app.core.ai.fake import FakeProvider, FakeSynthesizer, FakeTranscriber
 from app.core.rate_limit import RateLimiter
+from app.core.speech.limits import SPEECH_PER_MINUTE, TRANSCRIPTIONS_PER_MINUTE
 from app.main import app
 from app.modules.interviews.constants.interviews_constants import (
     DECISION_PROMPT_VERSION,
     FEEDBACK_SCORE_PROMPT_VERSION,
     FEEDBACK_WRITE_PROMPT_VERSION,
-    TRANSCRIPTIONS_PER_MINUTE,
     Level,
     QuestionCategory,
 )
@@ -20,9 +20,11 @@ from app.modules.interviews.dependencies.interviews_shared_dependencies import (
     get_bank,
     get_clock,
     get_llm_provider,
+    get_synthesizer,
     get_transcriber,
 )
-from app.modules.interviews.dependencies.interviews_transcription_dependencies import (
+from app.modules.interviews.dependencies.interviews_voice_dependencies import (
+    get_speech_limiter,
     get_transcription_limiter,
 )
 from app.modules.interviews.schemas.interviews_schema import BankQuestion
@@ -365,3 +367,41 @@ def transcribe(client, auth_header, stt):
         )
 
     return _transcribe
+
+
+class _Tts:
+    """The text-to-speech seam of a test: a scripted synthesizer and a fresh per-test speech limiter."""
+
+    def __init__(self):
+        self.fake: FakeSynthesizer | None = FakeSynthesizer()
+        self.limiter = RateLimiter(limit=SPEECH_PER_MINUTE, window_seconds=60)
+
+    def script(self, *replies, content_type: str = "audio/mpeg") -> None:
+        self.fake = FakeSynthesizer(replies, content_type=content_type)
+
+    def disable(self) -> None:
+        """No synthesizer configured (DEEPGRAM_API_KEY blank)."""
+        self.fake = None
+
+
+@pytest.fixture
+def tts():
+    state = _Tts()
+    app.dependency_overrides[get_synthesizer] = lambda: state.fake
+    app.dependency_overrides[get_speech_limiter] = lambda: state.limiter
+    yield state
+    app.dependency_overrides.pop(get_synthesizer, None)
+    app.dependency_overrides.pop(get_speech_limiter, None)
+
+
+@pytest.fixture
+def speak(client, auth_header, tts):
+    """GET the spoken audio of one transcript line; `route` is "questions" or "messages"."""
+
+    def _speak(user, session_id, line_id, route="questions", headers=None):
+        return client.get(
+            f"/api/v1/interviews/{session_id}/{route}/{line_id}/speech",
+            headers=auth_header(user) if headers is None else headers,
+        )
+
+    return _speak

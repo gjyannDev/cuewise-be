@@ -1,8 +1,10 @@
-"""Deepgram pre-recorded speech-to-text (`POST /v1/listen`, Nova models) over plain httpx.
+"""Deepgram over plain httpx: pre-recorded speech-to-text (`POST /v1/listen`, Nova models) and Aura text-to-speech
+(`POST /v1/speak`).
 
-Deliberately no SDK, like `openai_compatible.py`: the request (raw audio body, options as query params) and the
-response fields read here are all visible. The audio is sent exactly as recorded; Deepgram detects the container
-(WebM, OGG, MP4, WAV), so no `encoding` is passed.
+Deliberately no SDK, like `openai_compatible.py`: the requests and the response fields read here are all visible. For
+speech-to-text the audio is sent exactly as recorded; Deepgram detects the container (WebM, OGG, MP4, WAV), so no
+`encoding` is passed. Both adapters only build their request and parse their response; the attempt loop is the shared
+`run_with_retries`.
 """
 
 import random
@@ -13,14 +15,34 @@ from typing import Any
 import anyio
 import httpx
 
-from .provider import LLMBadResponseError, LLMError, LLMServerError, LLMTimeoutError
-from .retry import raise_for_status, retry_delay
+from app.core.config import SpeechEncoding
+
+from .provider import LLMBadResponseError, LLMServerError, LLMTimeoutError
+from .retry import Attempted, raise_for_status, run_with_retries
+from .synthesizer import SynthesisResult
 from .transcriber import TranscriptionResult
 
 LISTEN_PATH = "v1/listen"
+SPEAK_PATH = "v1/speak"
+# Aura `encoding` -> the media type its audio is, used only when the response doesn't say (Aura's default containers).
+# Keyed by the settings' `SpeechEncoding`, so the two lists can't drift (a test checks they match).
+SPEAK_CONTENT_TYPES: dict[SpeechEncoding, str] = {
+    "mp3": "audio/mpeg",
+    "opus": "audio/ogg",
+    "aac": "audio/aac",
+    "flac": "audio/flac",
+    "linear16": "audio/wav",
+}
 
 
-class DeepgramTranscriber:
+class _DeepgramAdapter:
+    """What both Deepgram adapters share: one authenticated client, the retry knobs, the shared retry loop and the
+    mapping of request failures to `LLMError`s. Each adapter only builds its request and parses its response.
+
+    Each adapter keeps its own client (connection pool): they are built, closed and timed out independently, and a
+    second pool to the same host costs a couple of idle connections at most.
+    """
+
     def __init__(
         self,
         *,
@@ -43,14 +65,6 @@ class DeepgramTranscriber:
         self._sleep = sleep
         self._clock = clock
         self._rng = rng or random.Random()
-        # `mip_opt_out` is not sent: v1 stays in Deepgram's Model Improvement Program (opting out costs more).
-        # A tuple, not a list: httpx's params type accepts it (tuples are covariant, lists aren't).
-        self._params: tuple[tuple[str, str], ...] = (
-            ("model", model),
-            ("language", "en"),
-            ("smart_format", "true"),
-            ("filler_words", "false"),
-        )
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/") + "/",
             headers={"Authorization": f"Token {api_key}"},
@@ -64,61 +78,68 @@ class DeepgramTranscriber:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def _with_retries[T](self, attempt: Callable[[float], Awaitable[T]]) -> Attempted[T]:
+        return await run_with_retries(
+            attempt,
+            max_retries=self._max_retries,
+            budget=self._budget,
+            clock=self._clock,
+            sleep=self._sleep,
+            rng=self._rng,
+        )
+
+    async def _post(self, path: str, what: str, *, remaining: float, **request: Any) -> httpx.Response:
+        """One POST that never waits past the total budget; a non-2xx or failed request becomes a typed `LLMError`."""
+        try:
+            response = await self._client.post(path, timeout=min(self._timeout, remaining), **request)
+        except httpx.TimeoutException as exc:
+            raise LLMTimeoutError(f"{what} request timed out") from exc
+        # Every other request failure (a dropped connection, a body that can't be decoded, ...), not only transport
+        # ones: anything unmapped would escape the gateway as an unhandled 500.
+        except httpx.RequestError as exc:
+            raise LLMServerError(f"{what} request failed") from exc
+        raise_for_status(response.status_code, response.headers.get("retry-after"))
+        return response
+
+
+class DeepgramTranscriber(_DeepgramAdapter):
+    def __init__(self, *, model: str, **adapter: Any):
+        super().__init__(model=model, **adapter)
+        # `mip_opt_out` is not sent: v1 stays in Deepgram's Model Improvement Program (opting out costs more).
+        # A tuple, not a list: httpx's params type accepts it (tuples are covariant, lists aren't).
+        self._params: tuple[tuple[str, str], ...] = (
+            ("model", model),
+            ("language", "en"),
+            ("smart_format", "true"),
+            ("filler_words", "false"),
+        )
+
     async def transcribe(
         self, audio: bytes, *, content_type: str, keyterms: Sequence[str] = ()
     ) -> TranscriptionResult:
         # Keyterms (Nova-3 only) go on the URL, one repeated `keyterm` param per term; none sends none.
         params = (*self._params, *(("keyterm", term) for term in keyterms))
-        start = self._clock()
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                remaining = self._budget - (self._clock() - start)
-                text, duration = await self._attempt(audio, content_type, params, remaining=remaining)
-            except LLMError as exc:
-                exc.attempts, exc.latency_ms = attempt, self._elapsed_ms(start)
-                delay = retry_delay(
-                    exc,
-                    attempt=attempt,
-                    max_retries=self._max_retries,
-                    elapsed=self._clock() - start,
-                    budget=self._budget,
-                    rng=self._rng,
-                )
-                if delay is None:
-                    raise
-                await self._sleep(delay)
-                continue
-            return TranscriptionResult(
-                text=text,
-                duration_seconds=duration,
-                model=self._model,
-                latency_ms=self._elapsed_ms(start),
-                attempts=attempt,
-            )
 
-    async def _attempt(
-        self, audio: bytes, content_type: str, params: tuple[tuple[str, str], ...], *, remaining: float
-    ) -> tuple[str, float | None]:
-        try:
-            # Never wait past the total budget, even on the last attempt.
-            response = await self._client.post(
+        async def attempt(remaining: float) -> tuple[str, float | None]:
+            response = await self._post(
                 LISTEN_PATH,
+                "Transcription",
+                remaining=remaining,
                 params=params,
                 content=audio,
                 headers={"Content-Type": content_type},
-                timeout=min(self._timeout, remaining),
             )
-        except httpx.TimeoutException as exc:
-            raise LLMTimeoutError("Transcription request timed out") from exc
-        except httpx.TransportError as exc:
-            raise LLMServerError("Transcription connection failed") from exc
-        raise_for_status(response.status_code, response.headers.get("retry-after"))
-        return _parse(response)
+            return _parse(response)
 
-    def _elapsed_ms(self, start: float) -> int:
-        return round((self._clock() - start) * 1000)
+        done = await self._with_retries(attempt)
+        text, duration = done.value
+        return TranscriptionResult(
+            text=text,
+            duration_seconds=duration,
+            model=self._model,
+            latency_ms=done.latency_ms,
+            attempts=done.attempts,
+        )
 
 
 def _parse(response: httpx.Response) -> tuple[str, float | None]:
@@ -132,3 +153,36 @@ def _parse(response: httpx.Response) -> tuple[str, float | None]:
         raise LLMBadResponseError("Transcription response has no usable transcript")
     duration = (data.get("metadata") or {}).get("duration")
     return transcript.strip(), float(duration) if isinstance(duration, int | float) else None
+
+
+class DeepgramSynthesizer(_DeepgramAdapter):
+    """Aura text-to-speech: the text goes in a JSON body, the voice (`model`) and `encoding` on the URL, and the
+    whole clip comes back as the response body (buffered: the caller needs it whole for its replay cache)."""
+
+    def __init__(self, *, model: str, encoding: SpeechEncoding, **adapter: Any):
+        super().__init__(model=model, **adapter)
+        self._fallback_type = SPEAK_CONTENT_TYPES[encoding]
+        self._params: tuple[tuple[str, str], ...] = (("model", model), ("encoding", encoding))
+
+    async def synthesize(self, text: str) -> SynthesisResult:
+        async def attempt(remaining: float) -> tuple[bytes, str]:
+            response = await self._post(SPEAK_PATH, "Speech", remaining=remaining, params=self._params, json={"text": text})
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            content_type = content_type or self._fallback_type
+            # A 200 that isn't audio (an error page, JSON) or has no body would play as silence or noise: not retried.
+            if not response.content or not content_type.startswith("audio/"):
+                raise LLMBadResponseError("Speech response has no usable audio")
+            return response.content, content_type
+
+        done = await self._with_retries(attempt)
+        audio, content_type = done.value
+        return SynthesisResult(
+            audio=audio,
+            content_type=content_type,
+            model=self._model,
+            characters=len(text),
+            latency_ms=done.latency_ms,
+            attempts=done.attempts,
+        )
+
+

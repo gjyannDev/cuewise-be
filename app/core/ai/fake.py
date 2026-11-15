@@ -1,4 +1,5 @@
-"""Test doubles for LLMProvider, Transcriber and Embedder: scripted replies or errors, record every call. No network."""
+"""Test doubles for LLMProvider, Transcriber, SpeechSynthesizer and Embedder: scripted replies or errors, record every
+call. No network."""
 
 import hashlib
 import random
@@ -13,6 +14,7 @@ import anyio
 from .context import CHARS_PER_TOKEN
 from .embedder import EmbeddingKind, EmbeddingResult
 from .provider import ChatMessage, LLMError, LLMResult, LLMTimeoutError, ReasoningEffort
+from .synthesizer import SynthesisResult
 from .transcriber import TranscriptionResult
 
 
@@ -163,6 +165,37 @@ class FakeTranscriber:
             return reply
         return TranscriptionResult(
             text=reply, duration_seconds=self._duration, model="fake-stt", latency_ms=0, attempts=1
+        )
+
+    async def aclose(self) -> None:
+        pass
+
+
+class FakeSynthesizer:
+    """Scripted clips (bytes, a full result, or an error), one per call; records each call's text. Without a script,
+    every call returns a few bytes of `audio/mpeg`."""
+
+    DEFAULT_AUDIO = b"ID3fake-mp3"
+
+    def __init__(self, replies: Iterable[bytes | SynthesisResult | LLMError] = (), *, content_type: str = "audio/mpeg"):
+        self._replies = deque(replies)
+        self._content_type = content_type
+        self.calls: list[str] = []
+
+    async def synthesize(self, text: str) -> SynthesisResult:
+        self.calls.append(text)
+        reply = self._replies.popleft() if self._replies else self.DEFAULT_AUDIO
+        if isinstance(reply, LLMError):
+            raise reply
+        if isinstance(reply, SynthesisResult):
+            return reply
+        return SynthesisResult(
+            audio=reply,
+            content_type=self._content_type,
+            model="fake-tts",
+            characters=len(text),
+            latency_ms=0,
+            attempts=1,
         )
 
     async def aclose(self) -> None:

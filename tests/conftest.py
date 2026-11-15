@@ -12,8 +12,10 @@ if os.getenv("LLM_LIVE_TEST") != "1":
     os.environ["LLM_PROVIDERS"] = ""
     # The same key turns embeddings on: tests use the fake embedder, never the real one.
     os.environ["LLM_GOOGLE_API_KEY"] = ""
-# Same for speech-to-text: tests never call the real Deepgram API.
-os.environ["DEEPGRAM_API_KEY"] = ""
+# Same for speech (to text and to speech): tests never call the real Deepgram API, except the opt-in live speech tests
+# (SPEECH_LIVE_TEST=1), which keep the configured key.
+if os.getenv("SPEECH_LIVE_TEST") != "1":
+    os.environ["DEEPGRAM_API_KEY"] = ""
 
 import pytest
 from fastapi import APIRouter

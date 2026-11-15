@@ -3,9 +3,14 @@ import os
 
 import pytest
 
-from app.core.ai.deepgram import DeepgramTranscriber
+from app.core.ai.deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from app.core.ai.embedder import EmbeddingKind
-from app.core.ai.factory import build_embedder, build_provider, build_transcriber
+from app.core.ai.factory import (
+    build_embedder,
+    build_provider,
+    build_synthesizer,
+    build_transcriber,
+)
 from app.core.ai.fake import FakeEmbedder, FakeProvider
 from app.core.ai.google_embedder import GoogleEmbedder
 from app.core.ai.openai_compatible import OpenAICompatibleProvider
@@ -22,7 +27,7 @@ from app.core.config import Settings
 def settings_with(monkeypatch):
     def _settings(**env):
         for name in list(os.environ):
-            if name.upper().startswith(("LLM_", "OPENROUTER_", "DEEPGRAM_", "TRANSCRIPTION_", "EMBEDDING_")):
+            if name.upper().startswith(("LLM_", "OPENROUTER_", "DEEPGRAM_", "TRANSCRIPTION_", "SPEECH_", "EMBEDDING_")):
                 monkeypatch.delenv(name, raising=False)
         for name, value in env.items():
             monkeypatch.setenv(name, value)
@@ -42,6 +47,27 @@ def test_no_deepgram_key_means_no_transcriber_and_one_warning(settings_with, app
     [warning] = [r for r in app_logs.records if r.name == "app.stt"]
     assert warning.levelno == logging.WARNING
     assert "voice answers are off" in warning.getMessage()
+
+
+def test_no_deepgram_key_means_no_synthesizer_and_one_warning(settings_with, app_logs):  # interview-room EC3
+    assert build_synthesizer(settings_with()) is None
+
+    [warning] = [r for r in app_logs.records if r.name == "app.tts"]
+    assert warning.levelno == logging.WARNING
+    assert "interviewer voice is off" in warning.getMessage()
+
+
+@pytest.mark.anyio
+async def test_a_deepgram_key_builds_an_aura_synthesizer_with_the_configured_voice(settings_with, app_logs):
+    synthesizer = build_synthesizer(
+        settings_with(DEEPGRAM_API_KEY="dg-secret-123", DEEPGRAM_TTS_MODEL="aura-2-orion-en")
+    )
+
+    assert isinstance(synthesizer, DeepgramSynthesizer)
+    assert synthesizer.model == "aura-2-orion-en"
+    assert not [r for r in app_logs.records if r.name == "app.tts"]
+    assert all("dg-secret-123" not in r.getMessage() for r in app_logs.records)
+    await synthesizer.aclose()
 
 
 @pytest.mark.anyio

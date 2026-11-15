@@ -120,15 +120,6 @@ class StreamEvent(StrEnum):
     error = "error"
 
 
-class AudioContainer(StrEnum):
-    """Recording containers a voice answer may arrive in (what browsers' MediaRecorder produces, plus WAV)."""
-
-    webm = "webm"
-    ogg = "ogg"
-    mp4 = "mp4"
-    wav = "wav"
-
-
 class FeedbackStatus(StrEnum):
     """A feedback row's life: `generating` while a request holds it, then `generated` (final) or `failed` (POST again)."""
 
@@ -187,24 +178,7 @@ WRITE_RESERVE_SECONDS = MIN_SECONDS_FOR_WRITE
 # Comment lines sent while a stream is idle, so proxies with idle timeouts keep the connection open.
 STREAM_PING_SECONDS = 15
 
-# --- Voice answers (speech-to-text) ---
-# Declared upload type (without codec parameters) -> the container it must really be.
-AUDIO_CONTENT_TYPES = {
-    "audio/webm": AudioContainer.webm,
-    "audio/ogg": AudioContainer.ogg,
-    "audio/mp4": AudioContainer.mp4,
-    "audio/x-m4a": AudioContainer.mp4,
-    "audio/m4a": AudioContainer.mp4,
-    "audio/wav": AudioContainer.wav,
-    "audio/x-wav": AudioContainer.wav,
-    "audio/wave": AudioContainer.wav,
-}
-# Compressed audio can't be measured without decoding, so size bounds a clip (and its cost): 120 s of browser Opus or
-# AAC is about 1-2 MB. The web app also stops recording at 120 s.
-TRANSCRIPTION_MAX_BYTES = 3 * 1024 * 1024
-# Checked against the duration the vendor reports; a little over the web app's 120 s for encoder rounding.
-TRANSCRIPTION_MAX_SECONDS = 125
-TRANSCRIPTIONS_PER_MINUTE = 10
+# Voice answers: the audio rules and the transcription limit live in `app/core/speech` (shared by every speech feature).
 # Feedback generation spends two LLM calls (the first reads the whole interview); a retry is only needed after a failure.
 FEEDBACKS_PER_MINUTE = 3
 

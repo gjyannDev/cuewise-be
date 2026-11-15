@@ -1,6 +1,6 @@
 import time
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
@@ -8,13 +8,13 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.errors import ErrorResponse
 from app.core.pagination import PageDep
+from app.core.speech.audio import TRANSCRIPTION_MAX_BYTES
 from app.modules.auth.constants.auth_constants import Permission
 from app.modules.auth.dependencies.auth_dependencies import require_permissions
 from app.modules.auth.models.auth_model import User
 
 from ..constants.interviews_constants import (
     STREAM_PING_SECONDS,
-    TRANSCRIPTION_MAX_BYTES,
     HistorySortColumn,
     SessionStatus,
     SortDirection,
@@ -29,8 +29,9 @@ from ..dependencies.interviews_job_url_dependencies import (
     limit_job_imports,
 )
 from ..dependencies.interviews_start_dependencies import InterviewsControllerDep
-from ..dependencies.interviews_transcription_dependencies import (
-    TranscriptionControllerDep,
+from ..dependencies.interviews_voice_dependencies import (
+    VoiceControllerDep,
+    limit_speech,
     limit_transcriptions,
 )
 from ..schemas.interviews_schema import (
@@ -277,7 +278,7 @@ async def transcribe_answer(
     session_id: uuid.UUID,
     audio: UploadFile,
     user: Annotated[User, require_permissions(Permission.interviews_answer)],
-    ctrl: TranscriptionControllerDep,
+    ctrl: VoiceControllerDep,
 ) -> TranscriptionOut:
     """A recorded answer (multipart part `audio`: WebM, OGG, MP4 or WAV, up to 3 MB) as text for the candidate to
     review. Nothing is saved; the text becomes an answer only if they send it to /messages."""
@@ -285,3 +286,51 @@ async def transcribe_answer(
     # One byte past the cap is enough to know it's too large, and the rest is never held in memory.
     data = await audio.read(TRANSCRIPTION_MAX_BYTES + 1)
     return await ctrl.transcribe(user, session_id, role, data, audio.content_type or "")
+
+
+# The interviewer's lines, spoken. Two routes because questions and reactions live in two tables; the text is always
+# read from the database (the request carries none). Every "not yours / not shown / not speakable / wrong route" case
+# is the same 404. The clip's Content-Type is the synthesizer's, audio/mpeg by default.
+_SPEECH_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {"content": {"audio/mpeg": {}}, "description": "The line as one audio clip (read the Content-Type)."},
+    404: {"model": ErrorResponse},
+    429: {"model": ErrorResponse},
+    503: {"model": ErrorResponse},
+}
+
+
+@router.get(
+    "/{session_id}/questions/{question_id}/speech",
+    status_code=status.HTTP_200_OK,
+    response_class=Response,
+    dependencies=[Depends(limit_speech)],
+    responses=_SPEECH_RESPONSES,
+)
+async def speak_question(
+    session_id: uuid.UUID,
+    question_id: uuid.UUID,
+    user: Annotated[User, require_permissions(Permission.interviews_answer)],
+    ctrl: VoiceControllerDep,
+) -> Response:
+    """A question or follow-up the candidate has already been shown, spoken. Works on finished interviews too
+    (replays)."""
+    line = await run_in_threadpool(ctrl.prepare_question_speech, user, session_id, question_id)
+    return await ctrl.speak(user, line)
+
+
+@router.get(
+    "/{session_id}/messages/{message_id}/speech",
+    status_code=status.HTTP_200_OK,
+    response_class=Response,
+    dependencies=[Depends(limit_speech)],
+    responses=_SPEECH_RESPONSES,
+)
+async def speak_reaction(
+    session_id: uuid.UUID,
+    message_id: uuid.UUID,
+    user: Annotated[User, require_permissions(Permission.interviews_answer)],
+    ctrl: VoiceControllerDep,
+) -> Response:
+    """An interviewer reaction, spoken. A candidate answer is never spoken (404)."""
+    line = await run_in_threadpool(ctrl.prepare_reaction_speech, user, session_id, message_id)
+    return await ctrl.speak(user, line)

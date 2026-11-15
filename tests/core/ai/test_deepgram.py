@@ -1,15 +1,22 @@
+import json
+from typing import get_args
 from urllib.parse import parse_qs
 
 import httpx
 import pytest
 
-from app.core.ai.deepgram import DeepgramTranscriber
+from app.core.ai.deepgram import (
+    SPEAK_CONTENT_TYPES,
+    DeepgramSynthesizer,
+    DeepgramTranscriber,
+)
 from app.core.ai.provider import (
     LLMBadResponseError,
     LLMRequestError,
     LLMServerError,
     LLMTimeoutError,
 )
+from app.core.config import SpeechEncoding
 
 pytestmark = pytest.mark.anyio
 
@@ -265,3 +272,138 @@ async def test_a_dropped_connection_is_a_server_error(make_transcriber):
 
     with pytest.raises(LLMServerError):
         await transcriber.transcribe(AUDIO, content_type="audio/webm")
+
+
+async def test_any_other_request_failure_is_a_server_error_not_a_crash(make_transcriber):  # review R4
+    # DecodingError is an httpx RequestError but not a TransportError: it used to escape as an unhandled 500.
+    transcriber, _ = make_transcriber(*(httpx.DecodingError("bad gzip") for _ in range(3)))
+
+    with pytest.raises(LLMServerError):
+        await transcriber.transcribe(AUDIO, content_type="audio/webm")
+
+
+# --- DeepgramSynthesizer: Aura text-to-speech (`POST /v1/speak`) ---
+
+MP3 = b"ID3\x04\x00" + b"\xff\xfb" * 64
+
+
+@pytest.fixture
+def make_synthesizer(clock):
+    """Synthesizer whose HTTP layer is a scripted list of responses (or exceptions), one per attempt."""
+
+    def _make(*script, max_retries=2, budget=10.0, timeout=8.0, encoding="mp3"):
+        requests: list[httpx.Request] = []
+        steps = list(script)
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            step = steps.pop(0)
+            if isinstance(step, Exception):
+                raise step
+            return step
+
+        synthesizer = DeepgramSynthesizer(
+            api_key=API_KEY,
+            model="aura-2-thalia-en",
+            encoding=encoding,
+            base_url="https://dg.test/",
+            timeout_seconds=timeout,
+            max_retries=max_retries,
+            total_budget_seconds=budget,
+            transport=httpx.MockTransport(handler),
+            sleep=clock.sleep,
+            clock=clock,
+        )
+        return synthesizer, requests
+
+    return _make
+
+
+def audio(body: bytes = MP3, content_type: str | None = "audio/mpeg") -> httpx.Response:
+    headers = {} if content_type is None else {"content-type": content_type}
+    return httpx.Response(200, content=body, headers=headers)
+
+
+async def test_speak_posts_the_text_as_json_with_the_voice_and_encoding(make_synthesizer):
+    synthesizer, requests = make_synthesizer(audio())
+
+    await synthesizer.synthesize("Tell me about a time you led a migration.")
+
+    [request] = requests
+    assert request.method == "POST"
+    assert request.url.path == "/v1/speak"
+    assert parse_qs(request.url.query.decode()) == {"model": ["aura-2-thalia-en"], "encoding": ["mp3"]}
+    assert request.headers["authorization"] == f"Token {API_KEY}"
+    assert request.headers["content-type"] == "application/json"
+    assert json.loads(request.content) == {"text": "Tell me about a time you led a migration."}
+
+
+async def test_speak_returns_the_audio_and_the_content_type_the_vendor_sent(make_synthesizer):
+    synthesizer, _ = make_synthesizer(audio(content_type="audio/mpeg"))
+
+    result = await synthesizer.synthesize("Good example.")
+
+    assert result.audio == MP3
+    assert result.content_type == "audio/mpeg"
+    assert (result.model, result.characters, result.attempts) == ("aura-2-thalia-en", 13, 1)
+    assert synthesizer.model == "aura-2-thalia-en"
+
+
+async def test_without_a_content_type_the_encodings_type_is_used(make_synthesizer):
+    synthesizer, _ = make_synthesizer(audio(content_type=None), encoding="opus")
+
+    result = await synthesizer.synthesize("Hi.")
+
+    assert result.content_type == "audio/ogg"
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+async def test_speak_retries_transient_failures_within_the_budget(make_synthesizer, clock, status):
+    synthesizer, requests = make_synthesizer(httpx.Response(status), audio())
+
+    result = await synthesizer.synthesize("Hi.")
+
+    assert (len(requests), result.attempts, len(clock.sleeps)) == (2, 2, 1)
+
+
+async def test_speak_does_not_retry_other_4xx(make_synthesizer):
+    synthesizer, requests = make_synthesizer(httpx.Response(401), audio())
+
+    with pytest.raises(LLMRequestError):
+        await synthesizer.synthesize("Hi.")
+
+    assert len(requests) == 1
+
+
+async def test_a_speak_timeout_is_retried_then_raised(make_synthesizer):
+    synthesizer, requests = make_synthesizer(*(httpx.ReadTimeout("slow") for _ in range(3)))
+
+    with pytest.raises(LLMTimeoutError) as exc:
+        await synthesizer.synthesize("Hi.")
+
+    assert (len(requests), exc.value.attempts) == (3, 3)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [audio(body=b""), audio(content_type="application/json"), audio(content_type="text/html")],
+    ids=["empty-body", "json", "html"],
+)
+async def test_an_empty_or_non_audio_200_is_a_bad_response_and_not_retried(make_synthesizer, response):
+    synthesizer, requests = make_synthesizer(response, audio())
+
+    with pytest.raises(LLMBadResponseError):
+        await synthesizer.synthesize("Hi.")
+
+    assert len(requests) == 1
+
+
+async def test_any_other_speak_request_failure_is_a_server_error_not_a_crash(make_synthesizer):  # review R4
+    synthesizer, _ = make_synthesizer(*(httpx.DecodingError("bad gzip") for _ in range(3)))
+
+    with pytest.raises(LLMServerError):
+        await synthesizer.synthesize("Hi.")
+
+
+def test_every_configurable_encoding_has_a_media_type():  # review R12: one list of encodings, kept in step
+    assert set(get_args(SpeechEncoding)) == set(SPEAK_CONTENT_TYPES)

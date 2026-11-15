@@ -1,5 +1,5 @@
 """The interview itself: start it (first question, optional job-description summary), read it, list the history and
-the transcript. Answer turns are in interviews_answer_service.py, voice answers in interviews_transcription_service.py.
+the transcript. Answer turns are in interviews_answer_service.py, voice answers and speech in interviews_voice_service.py.
 """
 
 import logging

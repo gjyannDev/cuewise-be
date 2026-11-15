@@ -10,9 +10,9 @@ from app.core.ai.provider import (
     LLMTimeoutError,
 )
 from app.core.ai.transcriber import TranscriptionResult
+from app.core.speech.audio import TRANSCRIPTION_MAX_BYTES
 from app.modules.interviews.constants.interviews_constants import (
     ROLE_KEYTERMS,
-    TRANSCRIPTION_MAX_BYTES,
     JobRole,
 )
 from app.modules.interviews.dependencies.models.interviews_model import InterviewSession

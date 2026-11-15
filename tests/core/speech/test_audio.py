@@ -1,7 +1,6 @@
 import pytest
 
-from app.modules.interviews.constants.interviews_constants import AudioContainer
-from app.modules.interviews.utils.interviews_utils import audio_container
+from app.core.speech.audio import AudioContainer, audio_container
 
 WEBM = b"\x1a\x45\xdf\xa3" + b"\x00" * 32
 OGG = b"OggS" + b"\x00" * 32

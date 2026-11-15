@@ -100,6 +100,12 @@ class TranscriptionUnavailableError(AppError):
     status_code, code = 503, "TRANSCRIPTION_UNAVAILABLE"
 
 
+class SpeechUnavailableError(AppError):
+    """Text-to-speech is off (no key) or its vendor failed. The interview still works: the line is in the transcript."""
+
+    status_code, code = 503, "SPEECH_UNAVAILABLE"
+
+
 class JobUrlUnreachableError(AppError):
     """Any network-side failure of a job link. One message for every cause, so refusals can't map internal hosts."""
 

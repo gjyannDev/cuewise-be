@@ -19,10 +19,14 @@ from sqlalchemy.orm import Session
 from ..constants.interviews_constants import (
     FeedbackStatus,
     HistorySortColumn,
+    MessageRole,
     SessionStatus,
     SortDirection,
 )
-from ..dependencies.models.interviews_knowledge_model import InterviewSessionChunk, KnowledgeChunk
+from ..dependencies.models.interviews_knowledge_model import (
+    InterviewSessionChunk,
+    KnowledgeChunk,
+)
 from ..dependencies.models.interviews_model import (
     InterviewFeedback,
     InterviewMessage,
@@ -170,6 +174,29 @@ class InterviewsRepository:
                 select(InterviewQuestion)
                 .where(InterviewQuestion.session_id == session_id, InterviewQuestion.position <= up_to_position)
                 .order_by(InterviewQuestion.position)
+            )
+        )
+
+    def get_shown_question(
+        self, session_id: uuid.UUID, question_id: uuid.UUID, up_to_position: int
+    ) -> InterviewQuestion | None:
+        """A question of this session the candidate has already seen (`position <= up_to_position`); None otherwise,
+        so an upcoming question is never readable by id."""
+        return self.db.scalar(
+            select(InterviewQuestion).where(
+                InterviewQuestion.id == question_id,
+                InterviewQuestion.session_id == session_id,
+                InterviewQuestion.position <= up_to_position,
+            )
+        )
+
+    def get_interviewer_reaction(self, session_id: uuid.UUID, message_id: uuid.UUID) -> InterviewMessage | None:
+        """An interviewer reaction of this session; None for a candidate answer or another session's message."""
+        return self.db.scalar(
+            select(InterviewMessage).where(
+                InterviewMessage.id == message_id,
+                InterviewMessage.session_id == session_id,
+                InterviewMessage.role == MessageRole.interviewer,
             )
         )
 
