@@ -17,11 +17,11 @@ from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewQuestion,
 )
 from app.modules.interviews.utils.interviews_utils import (
-    INTERVIEWER_PROMPT,
     QuestionTurn,
     build_interviewer_messages,
     interviewer_history,
     job_description_block,
+    load_prompt,
     render_interviewer_prompt,
     render_template,
 )
@@ -54,7 +54,9 @@ def test_renderer_fails_on_a_missing_value():
 
 
 def test_prompt_comes_from_the_versioned_file():  # AC10, concept 3
-    assert INTERVIEWER_PROMPT == (PROMPTS_DIR / f"{INTERVIEWER_PROMPT_VERSION}.md").read_text(encoding="utf-8")
+    assert load_prompt(INTERVIEWER_PROMPT_VERSION) == (PROMPTS_DIR / f"{INTERVIEWER_PROMPT_VERSION}.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_prompt_carries_the_setup_and_the_json_format():  # AC10

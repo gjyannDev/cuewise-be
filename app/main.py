@@ -11,6 +11,7 @@ from app.core.logging import setup_logging
 from app.core.middleware import RequestContextMiddleware
 from app.modules.auth.routes.auth_route import router as auth_router
 from app.modules.interviews.routes.interviews_route import router as interviews_router
+from app.modules.interviews.utils.interviews_prompt_utils import check_prompts
 from app.modules.profile.routes.profile_route import router as profile_router
 from app.modules.users.routes.users_route import router as users_router
 
@@ -19,6 +20,8 @@ setup_logging(settings.debug)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Before anything else: a missing or broken routed prompt stops startup instead of failing mid-interview.
+    check_prompts()
     # One LLM client for the whole app (connection reuse); None when no key is configured.
     tracer = build_tracer(settings)
     provider = build_provider(settings, tracer=tracer)

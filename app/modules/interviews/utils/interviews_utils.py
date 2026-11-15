@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from pydantic import TypeAdapter, ValidationError
 
+from app.core.ai.prompts import load_prompt as core_load_prompt
 from app.core.ai.provider import ChatMessage
 from app.core.errors import NotEnoughQuestionsError
 
@@ -121,7 +122,8 @@ QUESTION_BANK = load_bank(QUESTION_BANK_PATH)
 
 
 def load_prompt(version: str) -> str:
-    return (PROMPTS_DIR / f"{version}.md").read_text(encoding="utf-8")
+    """An interviews prompt by version (cached; the startup check reads every routed one before the first request)."""
+    return core_load_prompt(PROMPTS_DIR, version)
 
 
 def build_transcript(
@@ -174,15 +176,6 @@ APP_TAG = re.compile(
 
 def neutralize_app_tags(text: str) -> str:
     return APP_TAG.sub("[tag removed]", text)
-
-
-# Loaded at import like the bank: a missing prompt file stops the app at startup, not mid-interview.
-INTERVIEWER_PROMPT = load_prompt(INTERVIEWER_PROMPT_VERSION)
-INTERVIEWER_V2_PROMPT = load_prompt(INTERVIEWER_V2_PROMPT_VERSION)
-SUMMARY_PROMPT = load_prompt(SUMMARY_PROMPT_VERSION)
-DECISION_PROMPT = load_prompt(DECISION_PROMPT_VERSION)
-FEEDBACK_SCORE_PROMPT = load_prompt(FEEDBACK_SCORE_PROMPT_VERSION)
-FEEDBACK_WRITE_PROMPT = load_prompt(FEEDBACK_WRITE_PROMPT_VERSION)
 
 
 def load_rubric(path: Path) -> Rubric:
@@ -243,11 +236,11 @@ def render_interviewer_prompt(
     interview_type: InterviewType,
     question_number: int,
     question_count: int,
-    template: str = INTERVIEWER_PROMPT,
+    template: str | None = None,
 ) -> str:
     """Only trusted values go in here; the job description and answers never enter the system prompt."""
     return render_template(
-        template,
+        template or load_prompt(INTERVIEWER_PROMPT_VERSION),
         {
             "role": role.value,
             "level": level.value,
@@ -265,11 +258,12 @@ def render_interviewer_v2_prompt(
     level: Level,
     interview_type: InterviewType,
     question_count: int,
-    template: str = INTERVIEWER_V2_PROMPT,
+    template: str | None = None,
 ) -> str:
-    """Per-interview constants only, so the text is identical on every call of an interview (a cacheable prefix)."""
+    """Per-interview constants only, so the text is identical on every call of an interview (a cacheable prefix).
+    Used by v2 and every later interviewer prompt; callers pass their own template (v2 is only the fallback)."""
     return render_template(
-        template,
+        template or load_prompt(INTERVIEWER_V2_PROMPT_VERSION),
         {
             "role": role.value,
             "level": level.value,
@@ -281,14 +275,19 @@ def render_interviewer_v2_prompt(
     )
 
 
-def render_summary_prompt() -> str:
-    return render_template(SUMMARY_PROMPT, {"max_words": SUMMARY_MAX_WORDS, "max_length": SUMMARY_MAX_LENGTH})
+def render_summary_prompt(template: str | None = None) -> str:
+    return render_template(
+        template or load_prompt(SUMMARY_PROMPT_VERSION),
+        {"max_words": SUMMARY_MAX_WORDS, "max_length": SUMMARY_MAX_LENGTH},
+    )
 
 
-def render_decision_prompt(*, role: JobRole, level: Level, interview_type: InterviewType) -> str:
+def render_decision_prompt(
+    *, role: JobRole, level: Level, interview_type: InterviewType, template: str | None = None
+) -> str:
     """Per-interview constants only, like v2: the decide call's system prompt never changes during an interview."""
     return render_template(
-        DECISION_PROMPT,
+        template or load_prompt(DECISION_PROMPT_VERSION),
         {
             "role": role.value,
             "level": level.value,
@@ -324,7 +323,7 @@ def render_feedback_score_prompt(
     role: JobRole,
     level: Level,
     interview_type: InterviewType,
-    template: str = FEEDBACK_SCORE_PROMPT,
+    template: str | None = None,
     rubric: Rubric = FEEDBACK_RUBRIC,
 ) -> str:
     """Per-interview constants and the rubric only: no answer or job-description text ever enters the system prompt."""
@@ -333,7 +332,7 @@ def render_feedback_score_prompt(
         f"  {category.value}: " + ", ".join(f'"{c.value}"' for c in CATEGORY_CRITERIA[category]) for category in categories
     )
     return render_template(
-        template,
+        template or load_prompt(FEEDBACK_SCORE_PROMPT_VERSION),
         {
             "role": role.value,
             "level": level.value,
@@ -351,7 +350,7 @@ def render_feedback_score_prompt(
 
 
 def render_feedback_write_prompt(
-    *, role: JobRole, level: Level, interview_type: InterviewType, template: str = FEEDBACK_WRITE_PROMPT
+    *, role: JobRole, level: Level, interview_type: InterviewType, template: str | None = None
 ) -> str:
     """Counts and limits come from the constants the write parser checks; a test checks the labels match too."""
 
@@ -360,7 +359,7 @@ def render_feedback_write_prompt(
         return f"{fewest} to {most}" if most - fewest > 1 else f"{fewest} or {most}"
 
     return render_template(
-        template,
+        template or load_prompt(FEEDBACK_WRITE_PROMPT_VERSION),
         {
             "role": role.value,
             "level": level.value,
