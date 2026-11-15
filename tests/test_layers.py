@@ -35,6 +35,20 @@ def check_layers(files: Mapping[str, str], modules: Iterable[str] | None = None)
     return violations
 
 
+def check_core(files: Mapping[str, str]) -> list[str]:
+    """Every `app/core` import of a feature module (`app.modules...`): core is shared by every feature, so it must never
+    depend on one (CLAUDE.md, "Shared, feature-agnostic helpers go in `app/core/`")."""
+    violations: list[str] = []
+    for path, source in sorted(files.items()):
+        parts = path.removesuffix(".py").split("/")
+        if parts[:2] != ["app", "core"]:
+            continue
+        for module, _ in _imports(source, parts[:-1]):
+            if module == "app.modules" or module.startswith("app.modules."):
+                violations.append(f"{path}: core imports {module}")
+    return violations
+
+
 def _imports(source: str, package: list[str]) -> list[tuple[str, list[str]]]:
     """(absolute module, imported names) per import statement; relative imports resolved against `package`."""
     found: list[tuple[str, list[str]]] = []
@@ -159,6 +173,27 @@ def test_a_layer_file_left_at_a_module_root_is_reported():
     assert _one(f"{AUTH}/auth_controller.py", "") == [
         f"{AUTH}/auth_controller.py: file at the module root; move it into a layer folder"
     ]
+
+
+def test_a_core_file_importing_only_core_and_libraries_is_clean():
+    files = {
+        "app/core/speech/gateway.py": "import logging\nfrom app.core.errors import AppError\nfrom ..ai.provider import LLMError\n",
+    }
+    assert check_core(files) == []
+
+
+def test_a_core_file_importing_a_feature_module_is_reported():
+    path = "app/core/speech/gateway.py"
+    assert check_core({path: "from app.modules.interviews.constants.interviews_constants import JobRole\n"}) == [
+        f"{path}: core imports app.modules.interviews.constants.interviews_constants"
+    ]
+    assert check_core({path: "import app.modules.auth\n"}) == [f"{path}: core imports app.modules.auth"]
+
+
+def test_the_real_core_imports_no_feature_module():
+    root = Path(__file__).resolve().parents[1]
+    files = {p.relative_to(root).as_posix(): p.read_text(encoding="utf-8") for p in (root / "app" / "core").rglob("*.py")}
+    assert check_core(files) == []
 
 
 def test_the_real_tree_follows_the_layer_rules():
