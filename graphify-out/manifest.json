@@ -2668,5 +2668,29 @@
     "seen": 1794649379.4432042,
     "ast_hash": "ffe2174bf53ef2e3f0d50318a4d4635f",
     "semantic_hash": ""
+  },
+  "docs/features/agentic-workflow/learnings.md": {
+    "mtime": 1794712275.1754055,
+    "seen": 1794712287.6744316,
+    "ast_hash": "7ab1ea7f1e74ed10650d54177dc4c091",
+    "semantic_hash": ""
+  },
+  "docs/features/agentic-workflow/plan.md": {
+    "mtime": 1794711613.0454223,
+    "seen": 1794712115.6276417,
+    "ast_hash": "e26995c00796a684d96f2a71270c3c32",
+    "semantic_hash": ""
+  },
+  "docs/features/agentic-workflow/spec.md": {
+    "mtime": 1794710993.4459283,
+    "seen": 1794712115.6276429,
+    "ast_hash": "708188ef177ddac1c54bc05b94149ddb",
+    "semantic_hash": ""
+  },
+  "docs/features/agentic-workflow/task.md": {
+    "mtime": 1794712274.4165792,
+    "seen": 1794712287.6744359,
+    "ast_hash": "ea0577f4f3531b6855573b8cdd88667d",
+    "semantic_hash": ""
   }
 }
