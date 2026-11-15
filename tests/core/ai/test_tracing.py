@@ -125,10 +125,17 @@ def tracer(client, propagated):
 
 
 def result(text="Tell me about a bug.", **overrides):
-    fields = dict(
-        text=text, model="gemini-test", prompt_tokens=40, completion_tokens=12, latency_ms=350, finish_reason="stop",
-        attempts=1, cached_tokens=8, reasoning_tokens=3,
-    )
+    fields = {
+        "text": text,
+        "model": "gemini-test",
+        "prompt_tokens": 40,
+        "completion_tokens": 12,
+        "latency_ms": 350,
+        "finish_reason": "stop",
+        "attempts": 1,
+        "cached_tokens": 8,
+        "reasoning_tokens": 3,
+    }
     return LLMResult(**{**fields, **overrides})
 
 
@@ -413,9 +420,8 @@ def test_trace_with_a_broken_sdk_still_runs_the_body_and_keeps_its_exception(): 
 
     with broken.trace("answer-turn", user_id="u", session_id="s"):
         ran.append(True)
-    with pytest.raises(ValueError):
-        with broken.trace("answer-turn", user_id="u", session_id="s"):
-            raise ValueError("business error")
+    with pytest.raises(ValueError), broken.trace("answer-turn", user_id="u", session_id="s"):
+        raise ValueError("business error")
 
     assert ran == [True]
 

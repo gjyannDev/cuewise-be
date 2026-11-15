@@ -48,7 +48,7 @@ def _safe(action: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def guarded(*args: Any, **kwargs: Any) -> Any:
             try:
                 return fn(*args, **kwargs)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  fail-open: any SDK error is logged and the call carries on
                 logger.warning("langfuse %s failed (%s)", action, type(exc).__name__)
                 return None
 
@@ -197,14 +197,14 @@ class Tracer:
                 )
                 trace_id = getattr(span, "trace_id", None)
                 stack.enter_context(self._propagate(**attrs))  # type: ignore[misc]
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  fail-open: a trace that can't start must not stop the request
                 logger.warning("langfuse trace start failed (%s)", type(exc).__name__)
         try:
             yield trace_id
         finally:
             try:
                 stack.close()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  fail-open: a trace that can't close must not stop the request
                 logger.warning("langfuse trace end failed (%s)", type(exc).__name__)
 
     @_safe("trace output")
@@ -248,7 +248,7 @@ class Tracer:
             self._client.create_dataset(name=name)
             for item in items:
                 self._client.create_dataset_item(dataset_name=name, **item)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  fail-open: a dataset upload failure is reported as False
             logger.warning("langfuse dataset upsert failed (%s)", type(exc).__name__)
             return False
         return True
@@ -312,7 +312,7 @@ class Tracer:
                 metadata=dict(labels),
                 model_parameters=dict(model_parameters or {}),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  fail-open: the call runs untraced if the generation can't start
             logger.warning("langfuse generation start failed (%s)", type(exc).__name__)
             return Generation(None, labels)
         return Generation(observation, labels)
@@ -320,7 +320,7 @@ class Tracer:
     @contextmanager
     def step(
         self, name: str, *, metadata: Mapping[str, Any] | None = None
-    ) -> Iterator["Step"]:
+    ) -> Iterator[Step]:
         """A named step inside the current trace (a Langfuse `chain`): the generations and checks started inside it
         nest under it, so a trace reads score -> attempts -> checks instead of a flat list of calls. Start/stop
         failures are swallowed; the body's own exceptions are not."""
@@ -333,14 +333,14 @@ class Tracer:
                         name=name, as_type="chain", metadata=dict(metadata or {})
                     )
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  fail-open: a step that can't start must not stop the request
                 logger.warning("langfuse step start failed (%s)", type(exc).__name__)
         try:
             yield Step(observation)
         finally:
             try:
                 stack.close()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  fail-open: a step that can't close must not stop the request
                 logger.warning("langfuse step end failed (%s)", type(exc).__name__)
 
     @_safe("check")
@@ -378,7 +378,7 @@ class Tracer:
         for action in (self._client.flush, self._client.shutdown):
             try:
                 action()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  fail-open: shutdown tries every step even if one fails
                 logger.warning("langfuse shutdown step failed (%s)", type(exc).__name__)
 
 
@@ -402,7 +402,7 @@ def build_tracer(settings: Any, *, environment: str | None = None) -> Tracer:
             base_url=settings.langfuse_base_url,
             environment=environment or settings.app_env,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  fail-open: tracing turns off instead of stopping startup
         logger.warning(
             "Langfuse tracing is off: client setup failed (%s)", type(exc).__name__
         )

@@ -6,7 +6,9 @@ from sqlalchemy import select
 
 from app.core.ai.fake import FakeEmbedder
 from app.core.ai.provider import LLMRateLimitError
-from app.modules.interviews.dependencies.models.interviews_knowledge_model import KnowledgeChunk
+from app.modules.interviews.dependencies.models.interviews_knowledge_model import (
+    KnowledgeChunk,
+)
 from app.modules.interviews.tooling.interviews_knowledge_ingest import main
 
 
