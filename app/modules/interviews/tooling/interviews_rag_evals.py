@@ -54,9 +54,6 @@ from ..ai.interviews_context import CONTEXT_MANAGER, InterviewerInputs
 from ..ai.interviews_reply import InvalidReplyError, parse_streamed_reply, split_header
 from ..constants.interviews_constants import (
     INTERVIEWER_STREAM_TASK,
-    INTERVIEWER_V5_PROMPT_VERSION,
-    INTERVIEWER_V7_PROMPT_VERSION,
-    INTERVIEWER_V8_PROMPT_VERSION,
     MODULE_DIR,
     RETRIEVAL_MIN_SIMILARITY,
     RETRIEVAL_PROFILE_SLOTS,
@@ -64,6 +61,7 @@ from ..constants.interviews_constants import (
     JobRole,
     Level,
 )
+from ..constants.interviews_prompt_registry import INTERVIEWER_STREAM, Data
 from ..repositories.interviews_knowledge_repository import KnowledgeRepository
 from ..services.interviews_retrieval_service import RetrievalService
 from ..utils.interviews_knowledge_utils import ReferenceNote, pick_filter_notes
@@ -102,12 +100,13 @@ RAG_TASKS = ("retrieval", "generation", "ranking")
 ALL_ARMS = ("A", "B", "C", "D", "E")
 DEFAULT_ARMS = ("A", "B", "C")
 PROFILE_ARMS = frozenset({"D", "E"})
+# What each arm sends, from the stream route (the generation eval runs the streamed turn).
 ARM_PROMPTS = {
-    "A": INTERVIEWER_V5_PROMPT_VERSION,
-    "B": INTERVIEWER_V7_PROMPT_VERSION,
-    "C": INTERVIEWER_V7_PROMPT_VERSION,
-    "D": INTERVIEWER_V8_PROMPT_VERSION,
-    "E": INTERVIEWER_V8_PROMPT_VERSION,
+    "A": INTERVIEWER_STREAM[Data.plain],
+    "B": INTERVIEWER_STREAM[Data.notes],
+    "C": INTERVIEWER_STREAM[Data.notes],
+    "D": INTERVIEWER_STREAM[Data.profile],
+    "E": INTERVIEWER_STREAM[Data.profile],
 }
 # Neutral sheet labels, one per arm in the run, in a seeded random order per setup.
 LABELS = ("X", "Y", "Z", "V", "W")

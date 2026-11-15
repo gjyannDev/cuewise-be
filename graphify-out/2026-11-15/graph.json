@@ -43758,18 +43758,6 @@
       "source_location": "L1"
     },
     {
-      "id": "docs_features_agentic_workflow_task_8_milestone_a_dry_run_needs_the_user",
-      "label": "8. Milestone A dry run (needs the user)",
-      "_origin": "ast",
-      "community": 152,
-      "community_name": "Implementation: Agentic Workflow v2",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "8. milestone a dry run (needs the user)",
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L22"
-    },
-    {
       "id": "docs_features_agentic_workflow_task_baseline_failures",
       "label": "Baseline Failures",
       "_origin": "ast",
@@ -43779,7 +43767,7 @@
       "node_kind": "heading",
       "norm_label": "baseline failures",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L62"
+      "source_location": "L89"
     },
     {
       "id": "docs_features_agentic_workflow_task_changes_made",
@@ -43791,7 +43779,7 @@
       "node_kind": "heading",
       "norm_label": "changes made",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L28"
+      "source_location": "L34"
     },
     {
       "id": "docs_features_agentic_workflow_task_completed_steps",
@@ -43827,7 +43815,7 @@
       "node_kind": "heading",
       "norm_label": "debug log",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L71"
+      "source_location": "L100"
     },
     {
       "id": "docs_features_agentic_workflow_task_deviations_from_plan",
@@ -43839,7 +43827,19 @@
       "node_kind": "heading",
       "norm_label": "deviations from plan",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L68"
+      "source_location": "L96"
+    },
+    {
+      "id": "docs_features_agentic_workflow_task_dry_runs_needs_the_user",
+      "label": "Dry runs (needs the user)",
+      "_origin": "ast",
+      "community": 152,
+      "community_name": "Implementation: Agentic Workflow v2",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "dry runs (needs the user)",
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L22"
     },
     {
       "id": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
@@ -43863,7 +43863,7 @@
       "node_kind": "heading",
       "norm_label": "known issues",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L65"
+      "source_location": "L92"
     },
     {
       "id": "docs_features_agentic_workflow_task_links",
@@ -43875,7 +43875,7 @@
       "node_kind": "heading",
       "norm_label": "links",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L81"
+      "source_location": "L110"
     },
     {
       "id": "docs_features_agentic_workflow_task_open_questions",
@@ -43887,7 +43887,7 @@
       "node_kind": "heading",
       "norm_label": "open questions",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L59"
+      "source_location": "L86"
     },
     {
       "id": "docs_features_agentic_workflow_task_skills_consulted_during_implementation",
@@ -43899,7 +43899,7 @@
       "node_kind": "heading",
       "norm_label": "skills consulted during implementation",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L74"
+      "source_location": "L103"
     },
     {
       "id": "docs_features_agentic_workflow_task_status",
@@ -43923,7 +43923,7 @@
       "node_kind": "heading",
       "norm_label": "test cases",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L50"
+      "source_location": "L74"
     },
     {
       "id": "docs_features_agentic_workflow_task_test_results",
@@ -43935,7 +43935,7 @@
       "node_kind": "heading",
       "norm_label": "test results",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L41"
+      "source_location": "L47"
     },
     {
       "id": "docs_features_agentic_workflow_task_tests_pending",
@@ -43947,7 +43947,7 @@
       "node_kind": "heading",
       "norm_label": "tests pending",
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L46"
+      "source_location": "L70"
     },
     {
       "id": "agents_skills_langfuse_references_cost_optimization",
@@ -55405,7 +55405,7 @@
       "node_kind": "heading",
       "norm_label": "3. when to use it",
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L22"
+      "source_location": "L29"
     },
     {
       "id": "docs_features_agentic_workflow_learnings_4_how_it_works",
@@ -55417,7 +55417,7 @@
       "node_kind": "heading",
       "norm_label": "4. how it works",
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L32"
+      "source_location": "L39"
     },
     {
       "id": "docs_features_agentic_workflow_learnings_5_what_can_go_wrong",
@@ -55429,7 +55429,7 @@
       "node_kind": "heading",
       "norm_label": "5. what can go wrong",
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L51"
+      "source_location": "L58"
     },
     {
       "id": "docs_features_agentic_workflow_learnings_6_try_it_yourself",
@@ -55441,7 +55441,7 @@
       "node_kind": "heading",
       "norm_label": "6. try it yourself",
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L59"
+      "source_location": "L66"
     },
     {
       "id": "docs_features_agentic_workflow_learnings_7_what_surprised_me",
@@ -55453,7 +55453,7 @@
       "node_kind": "heading",
       "norm_label": "7. what surprised me",
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L64"
+      "source_location": "L71"
     },
     {
       "id": "docs_features_agentic_workflow_learnings_8_check_your_understanding",
@@ -55465,7 +55465,7 @@
       "node_kind": "heading",
       "norm_label": "8. check your understanding",
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L70"
+      "source_location": "L78"
     },
     {
       "id": "docs_features_agentic_workflow_learnings_9_go_deeper_still_open",
@@ -55477,7 +55477,7 @@
       "node_kind": "heading",
       "norm_label": "9. go deeper / still open",
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L86"
+      "source_location": "L94"
     },
     {
       "id": "docs_features_agentic_workflow_learnings_learn_agentic_workflow_patterns_reflection_tool_use_bounded_autonomy",
@@ -186279,7 +186279,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L22",
+      "source_location": "L29",
       "weight": 1.0
     },
     {
@@ -186290,7 +186290,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L32",
+      "source_location": "L39",
       "weight": 1.0
     },
     {
@@ -186312,7 +186312,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L51",
+      "source_location": "L58",
       "weight": 1.0
     },
     {
@@ -186323,7 +186323,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L59",
+      "source_location": "L66",
       "weight": 1.0
     },
     {
@@ -186334,7 +186334,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L64",
+      "source_location": "L71",
       "weight": 1.0
     },
     {
@@ -186345,7 +186345,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L70",
+      "source_location": "L78",
       "weight": 1.0
     },
     {
@@ -186356,7 +186356,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/learnings.md",
-      "source_location": "L86",
+      "source_location": "L94",
       "weight": 1.0
     },
     {
@@ -186691,13 +186691,46 @@
     },
     {
       "source": "docs_features_agentic_workflow_task_current_step",
-      "target": "docs_features_agentic_workflow_task_8_milestone_a_dry_run_needs_the_user",
+      "target": "docs_features_agentic_workflow_task_dry_runs_needs_the_user",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/task.md",
       "source_location": "L22",
+      "weight": 1.0
+    },
+    {
+      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
+      "target": "docs_features_agentic_workflow_task_debug_log",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L100",
+      "weight": 1.0
+    },
+    {
+      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
+      "target": "docs_features_agentic_workflow_task_skills_consulted_during_implementation",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L103",
+      "weight": 1.0
+    },
+    {
+      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
+      "target": "docs_features_agentic_workflow_task_links",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L110",
       "weight": 1.0
     },
     {
@@ -186713,17 +186746,6 @@
     },
     {
       "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_changes_made",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L28",
-      "weight": 1.0
-    },
-    {
-      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
       "target": "docs_features_agentic_workflow_task_status",
       "relation": "contains",
       "_origin": "ast",
@@ -186735,79 +186757,24 @@
     },
     {
       "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
+      "target": "docs_features_agentic_workflow_task_changes_made",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L34",
+      "weight": 1.0
+    },
+    {
+      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
       "target": "docs_features_agentic_workflow_task_test_results",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L41",
-      "weight": 1.0
-    },
-    {
-      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_tests_pending",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L46",
-      "weight": 1.0
-    },
-    {
-      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_test_cases",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L50",
-      "weight": 1.0
-    },
-    {
-      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_open_questions",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L59",
-      "weight": 1.0
-    },
-    {
-      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_baseline_failures",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L62",
-      "weight": 1.0
-    },
-    {
-      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_known_issues",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L65",
-      "weight": 1.0
-    },
-    {
-      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_deviations_from_plan",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L68",
+      "source_location": "L47",
       "weight": 1.0
     },
     {
@@ -186823,18 +186790,18 @@
     },
     {
       "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_debug_log",
+      "target": "docs_features_agentic_workflow_task_tests_pending",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L71",
+      "source_location": "L70",
       "weight": 1.0
     },
     {
       "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_skills_consulted_during_implementation",
+      "target": "docs_features_agentic_workflow_task_test_cases",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -186845,13 +186812,46 @@
     },
     {
       "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
-      "target": "docs_features_agentic_workflow_task_links",
+      "target": "docs_features_agentic_workflow_task_open_questions",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "docs/features/agentic-workflow/task.md",
-      "source_location": "L81",
+      "source_location": "L86",
+      "weight": 1.0
+    },
+    {
+      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
+      "target": "docs_features_agentic_workflow_task_baseline_failures",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L89",
+      "weight": 1.0
+    },
+    {
+      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
+      "target": "docs_features_agentic_workflow_task_known_issues",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L92",
+      "weight": 1.0
+    },
+    {
+      "source": "docs_features_agentic_workflow_task_implementation_agentic_workflow_v2",
+      "target": "docs_features_agentic_workflow_task_deviations_from_plan",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/features/agentic-workflow/task.md",
+      "source_location": "L96",
       "weight": 1.0
     },
     {

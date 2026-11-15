@@ -24,28 +24,17 @@ from app.modules.profile.schemas.profile_schema import CandidateProfile
 
 from ..ai.interviews_feedback import FeedbackThread, StoredResult
 from ..constants.interviews_constants import (
-    DECISION_PROMPT_VERSION,
     DECISION_TASK,
     FEEDBACK_ANSWER_CAP,
     FEEDBACK_SCORE_INPUT_LIMIT,
-    FEEDBACK_SCORE_PROMPT_VERSION,
     FEEDBACK_SCORE_TASK,
-    FEEDBACK_WRITE_PROMPT_VERSION,
     FEEDBACK_WRITE_TASK,
     FULL_HISTORY,
-    INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_STREAM_TASK,
     INTERVIEWER_TASK,
-    INTERVIEWER_V4_PROMPT_VERSION,
-    INTERVIEWER_V5_PROMPT_VERSION,
-    INTERVIEWER_V7_JSON_PROMPT_VERSION,
-    INTERVIEWER_V7_PROMPT_VERSION,
-    INTERVIEWER_V8_JSON_PROMPT_VERSION,
-    INTERVIEWER_V8_PROMPT_VERSION,
     MAX_FOLLOW_UPS,
     PROFILE_TOKEN_ALLOWANCE,
     REFERENCE_NOTES_TOKEN_ALLOWANCE,
-    SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
     TRUNCATION_MARKER,
     WINDOW_ANSWER_CAP,
@@ -58,6 +47,16 @@ from ..constants.interviews_constants import (
     JobRole,
     Level,
     QuestionKind,
+)
+from ..constants.interviews_prompt_registry import (
+    DECISION_VERSION,
+    FEEDBACK_SCORE_VERSION,
+    FEEDBACK_WRITE_VERSION,
+    FULL_HISTORY_VERSION,
+    INTERVIEWER_JSON,
+    INTERVIEWER_STREAM,
+    SUMMARY_VERSION,
+    Data,
 )
 from ..utils.interviews_knowledge_utils import ReferenceNote
 from ..utils.interviews_profile_utils import candidate_profile_block
@@ -113,7 +112,7 @@ class FullHistory:
     # Never trimmed: the honest baseline. Annotated so it matches the Strategy protocol's `int | None`.
     limit: int | None = None
 
-    def __init__(self, version: str = INTERVIEWER_PROMPT_VERSION):
+    def __init__(self, version: str = FULL_HISTORY_VERSION):
         self.version = version
         self.template = load_prompt(version)
 
@@ -142,7 +141,7 @@ class FullHistory:
 class WindowLedger:
     def __init__(
         self,
-        version: str = INTERVIEWER_V4_PROMPT_VERSION,
+        version: str = INTERVIEWER_JSON[Data.plain],
         *,
         window: int = WINDOW_TURNS,
         cap: int = WINDOW_ANSWER_CAP,
@@ -364,7 +363,7 @@ class FollowUpDecision:
         notes = sum(1 for _, turn in ledger if turn.note)
         return StrategyOutput(
             messages,
-            DECISION_PROMPT_VERSION,
+            DECISION_VERSION,
             _counts(len(turns) - start, len(ledger), notes, inputs.summary_used),
         )
 
@@ -397,7 +396,7 @@ class JobDescriptionSummary:
         ]
         return StrategyOutput(
             messages,
-            SUMMARY_PROMPT_VERSION,
+            SUMMARY_VERSION,
             {"job_description_chars": len(inputs.job_description)},
         )
 
@@ -430,7 +429,7 @@ class FeedbackScore:
 
     def __init__(
         self,
-        version: str = FEEDBACK_SCORE_PROMPT_VERSION,
+        version: str = FEEDBACK_SCORE_VERSION,
         *,
         cap: int = FEEDBACK_ANSWER_CAP,
         limit: int | None = FEEDBACK_SCORE_INPUT_LIMIT,
@@ -476,7 +475,7 @@ class FeedbackWrite:
 
     limit: int | None = None
 
-    def __init__(self, version: str = FEEDBACK_WRITE_PROMPT_VERSION):
+    def __init__(self, version: str = FEEDBACK_WRITE_VERSION):
         self.version = version
         self.template = load_prompt(version)
 
@@ -526,7 +525,8 @@ def write_trace_labels(task: str, built: BuiltContext, budget_left_ms: int) -> d
 
 
 def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextManager:
-    """`prompts` maps a strategy name to a prompt version (the eval runner's --prompt, for ablations)."""
+    """`prompts` maps a strategy name to a prompt version (the eval runner's --prompt, for ablations); it replaces
+    only the plain version. Which version each call sends otherwise: interviews_prompt_registry.py."""
     prompts = prompts or {}
     return ContextManager(
         {
@@ -535,24 +535,23 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
                 strategies={
                     # The JSON writer: the first question and the JSON answer route.
                     WINDOW_LEDGER: WithInterviewData(
-                        WindowLedger(prompts.get(WINDOW_LEDGER, INTERVIEWER_V4_PROMPT_VERSION)),
-                        INTERVIEWER_V7_JSON_PROMPT_VERSION,
-                        INTERVIEWER_V8_JSON_PROMPT_VERSION,
+                        WindowLedger(prompts.get(WINDOW_LEDGER, INTERVIEWER_JSON[Data.plain])),
+                        notes_version=INTERVIEWER_JSON[Data.notes],
+                        profile_version=INTERVIEWER_JSON[Data.profile],
                     ),
-                    FULL_HISTORY: FullHistory(
-                        prompts.get(FULL_HISTORY, INTERVIEWER_PROMPT_VERSION)
-                    ),
+                    FULL_HISTORY: FullHistory(prompts.get(FULL_HISTORY, FULL_HISTORY_VERSION)),
                 },
             ),
             DECISION_TASK: Task(default=DECIDE, strategies={DECIDE: FollowUpDecision()}),
-            # The streamed turn's write call (v5, shown while it streams); its own task keeps v4's cache prefix intact.
+            # The streamed turn's write call (plain text, shown while it streams); its own task keeps the JSON
+            # writer's cache prefix intact.
             INTERVIEWER_STREAM_TASK: Task(
                 default=WINDOW_LEDGER,
                 strategies={
                     WINDOW_LEDGER: WithInterviewData(
-                        WindowLedger(INTERVIEWER_V5_PROMPT_VERSION, text_replies=True),
-                        INTERVIEWER_V7_PROMPT_VERSION,
-                        INTERVIEWER_V8_PROMPT_VERSION,
+                        WindowLedger(INTERVIEWER_STREAM[Data.plain], text_replies=True),
+                        notes_version=INTERVIEWER_STREAM[Data.notes],
+                        profile_version=INTERVIEWER_STREAM[Data.profile],
                     )
                 },
             ),

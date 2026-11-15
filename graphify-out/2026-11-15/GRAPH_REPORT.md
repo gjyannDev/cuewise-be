@@ -1,7 +1,7 @@
 # Graph Report - cuewise-be  (2026-11-15)
 
 ## Corpus Check
-- 438 files · ~385,494 words
+- 438 files · ~386,095 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 7 file(s) not represented in the graph (top: (none) 3, .example 1, .ini 1)
 
@@ -893,7 +893,7 @@ Nodes (56): get_llm_provider(), get_tracer(), Request, Request dependencies for 
 
 ### Community 152 - "Implementation: Agentic Workflow v2"
 Cohesion: 0.12
-Nodes (16): 8. Milestone A dry run (needs the user), Baseline Failures, Changes Made, Completed Steps, Current Step, Debug Log, Deviations from Plan, Implementation: Agentic Workflow v2 (+8 more)
+Nodes (16): Baseline Failures, Changes Made, Completed Steps, Current Step, Debug Log, Deviations from Plan, Dry runs (needs the user), Implementation: Agentic Workflow v2 (+8 more)
 
 ### Community 154 - "Implementation: Job URL (Slice 8b)"
 Cohesion: 0.15

@@ -41,8 +41,6 @@ from ..ai.interviews_feedback import (
 from ..ai.interviews_feedback_turn import FeedbackGenerator, hint_for
 from ..constants.interviews_constants import (
     CATEGORY_CRITERIA,
-    FEEDBACK_SCORE_PROMPT_VERSION,
-    FEEDBACK_WRITE_PROMPT_VERSION,
     MODULE_DIR,
     SCORE_MAX,
     SCORE_MIN,
@@ -52,6 +50,10 @@ from ..constants.interviews_constants import (
     QuestionCategory,
     QuestionKind,
     TextSource,
+)
+from ..constants.interviews_prompt_registry import (
+    FEEDBACK_SCORE_VERSION,
+    FEEDBACK_WRITE_VERSION,
 )
 from ..tooling.interviews_evals import DATASET_PREFIX, Check
 from .interviews_eval_runs import (
@@ -559,12 +561,12 @@ def run_feedback(
             scores_of=lambda result: [*feedback_scores_for(result), ("errored", result.error is not None, result.error)],
             run_scores_of=feedback_run_scores,
             name="feedback",
-            run_name=run_name("feedback", stamp, run, label=f"{FEEDBACK_SCORE_PROMPT_VERSION}/{model or 'default-model'}"),
+            run_name=run_name("feedback", stamp, run, label=f"{FEEDBACK_SCORE_VERSION}/{model or 'default-model'}"),
             metadata=run_metadata(
                 task="feedback",
                 commit=commit,
                 model=model,
-                prompts={"score": FEEDBACK_SCORE_PROMPT_VERSION, "write": FEEDBACK_WRITE_PROMPT_VERSION},
+                prompts={"score": FEEDBACK_SCORE_VERSION, "write": FEEDBACK_WRITE_VERSION},
                 repeat=run,
                 flags={
                     "score_max_tokens": settings.feedback_score_max_tokens,

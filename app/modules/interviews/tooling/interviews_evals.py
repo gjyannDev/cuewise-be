@@ -63,17 +63,11 @@ from ..ai.interviews_reply import (
     validate_summary,
 )
 from ..constants.interviews_constants import (
-    DECISION_PROMPT_VERSION,
     DECISION_TASK,
     FULL_HISTORY,
-    INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_STREAM_TASK,
     INTERVIEWER_TASK,
-    INTERVIEWER_V4_PROMPT_VERSION,
-    INTERVIEWER_V5_PROMPT_VERSION,
     MODULE_DIR,
-    PROMPTS_DIR,
-    SUMMARY_PROMPT_VERSION,
     SUMMARY_TASK,
     SUMMARY_THRESHOLD,
     WINDOW_LEDGER,
@@ -84,6 +78,15 @@ from ..constants.interviews_constants import (
     Level,
     QuestionCategory,
     QuestionKind,
+)
+from ..constants.interviews_prompt_registry import (
+    CATALOG,
+    DECISION_VERSION,
+    FULL_HISTORY_VERSION,
+    INTERVIEWER_JSON,
+    INTERVIEWER_STREAM,
+    SUMMARY_VERSION,
+    Data,
 )
 from ..utils.interviews_utils import QuestionTurn
 from .interviews_eval_runs import (
@@ -846,7 +849,8 @@ def main(
         return run_rag_task(args, provider, settings, tracer)
     context = CONTEXT_MANAGER
     if args.prompt:
-        versions = sorted(p.stem for p in PROMPTS_DIR.glob("*.md"))
+        # Every catalogued version, archived ones too: old comparisons stay repeatable.
+        versions = sorted(CATALOG)
         if args.prompt not in versions:
             parser.error(
                 f"unknown prompt version {args.prompt!r}; valid: {', '.join(versions)}"
@@ -925,13 +929,13 @@ def main(
 
 def interviewer_prompt_version(task: str, strategy: str | None, prompt: str | None) -> str:
     """The interviewer prompt a write or stream run actually used: `--prompt` for the chosen strategy, else the
-    strategy's default (window_ledger: v4, full_history: v1); the streamed turn always uses v5 (no reference notes in
-    the eval cases)."""
+    strategy's plain route (window_ledger: the JSON route, full_history: the baseline); the streamed turn always uses
+    the stream route's plain version (no reference notes or profile in the eval cases)."""
     if task == "stream":
-        return INTERVIEWER_V5_PROMPT_VERSION
+        return INTERVIEWER_STREAM[Data.plain]
     if prompt:
         return prompt
-    return INTERVIEWER_V4_PROMPT_VERSION if (strategy or WINDOW_LEDGER) == WINDOW_LEDGER else INTERVIEWER_PROMPT_VERSION
+    return INTERVIEWER_JSON[Data.plain] if (strategy or WINDOW_LEDGER) == WINDOW_LEDGER else FULL_HISTORY_VERSION
 
 
 def write_run_scores(results: Sequence[CaseResult]) -> list[tuple[str, float]]:
@@ -969,12 +973,12 @@ def _run_as_experiment(
     description = run_description(args.note)
     flags: dict[str, object] = {"reasoning_effort": args.reasoning_effort, "max_tokens": max_tokens}
     if args.task == "decide":
-        prompts: dict[str, str | None] = {"decision": DECISION_PROMPT_VERSION}
+        prompts: dict[str, str | None] = {"decision": DECISION_VERSION}
         run_scores_of = decide_run_scores
     else:
         prompts = {"interviewer": interviewer_prompt_version(args.task, args.strategy, args.prompt)}
         if args.summary == "on":
-            prompts["summary"] = SUMMARY_PROMPT_VERSION
+            prompts["summary"] = SUMMARY_VERSION
         flags |= {"notes": args.notes, "summary": args.summary}
         if args.task == "write":
             flags["strategy"] = args.strategy or WINDOW_LEDGER

@@ -26,6 +26,7 @@ from app.modules.interviews.repositories.interviews_knowledge_repository import 
 )
 from app.modules.interviews.tooling.interviews_rag_evals import (
     ALL_ARMS,
+    ARM_PROMPTS,
     DEFAULT_ARMS,
     GENERATION_PROFILES_PATH,
     SheetError,
@@ -41,6 +42,16 @@ from tests.modules.interviews.tooling.test_generation_eval import (
     lf,  # noqa: F401 (a fixture)
     quiet,
 )
+
+
+def test_the_arms_send_the_stream_routes_versions():  # prompt-registry AC5
+    assert ARM_PROMPTS == {
+        "A": "interviewer_v5",
+        "B": "interviewer_v7",
+        "C": "interviewer_v7",
+        "D": "interviewer_v8",
+        "E": "interviewer_v8",
+    }
 
 
 class RecordingWriter:

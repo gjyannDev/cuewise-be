@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from app.core.ai.json_reply import InvalidReplyError
+from app.core.ai.prompts import load_prompt
 from app.core.ai.provider import ChatMessage, LLMError, LLMProvider, LLMResult
 from app.core.ai.tracing import REDACT_LABEL
 
@@ -46,10 +47,6 @@ class Extraction(NamedTuple):
     results: list[LLMResult]  # one per attempt (tokens and latency are logged)
 
 
-def load_prompt(version: str = PROFILE_PROMPT_VERSION) -> str:
-    return (PROMPTS_DIR / f"{version}.md").read_text(encoding="utf-8")
-
-
 def build_messages(text: str) -> tuple[list[ChatMessage], str, bool]:
     """The messages, the fenced text, and whether it was cut to the cap (the first part is kept)."""
     text = _FENCE_MARKER.sub(" ", text)
@@ -59,7 +56,7 @@ def build_messages(text: str) -> tuple[list[ChatMessage], str, bool]:
         head = text[:PROFILE_INPUT_MAX_CHARS]
         text = re.sub(r"\s+\S*$", "", head) or head
     messages = [
-        ChatMessage(role="system", content=load_prompt()),
+        ChatMessage(role="system", content=load_prompt(PROMPTS_DIR, PROFILE_PROMPT_VERSION)),
         ChatMessage(role="user", content=f"<resume>\n{text}\n</resume>"),
     ]
     return messages, text, cut
