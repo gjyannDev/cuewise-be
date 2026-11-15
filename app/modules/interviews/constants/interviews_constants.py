@@ -2,6 +2,8 @@ from enum import StrEnum
 from fractions import Fraction
 from pathlib import Path
 
+from . import interviews_prompt_registry as _prompts
+
 
 class JobRole(StrEnum):
     frontend = "frontend"
@@ -450,32 +452,30 @@ ROLE_KEYTERMS: dict[JobRole, tuple[str, ...]] = {
 MODULE_DIR = Path(__file__).resolve().parents[1]
 QUESTION_BANK_PATH = MODULE_DIR / "data" / "questions.json"
 
-# The prompt file in use. Never edit a shipped version in place: stored replies name it.
-INTERVIEWER_PROMPT_VERSION = "interviewer_v1"
 PROMPTS_DIR = MODULE_DIR / "prompts"
+# Prompt versions, their history and which task sends which: interviews_prompt_registry.py. The *_PROMPT_VERSION names
+# below are kept as aliases of it so existing imports keep working; change versions there, never here.
+INTERVIEWER_PROMPT_VERSION = _prompts.FULL_HISTORY_VERSION
+INTERVIEWER_V2_PROMPT_VERSION = _prompts.INTERVIEWER_V2
+INTERVIEWER_V3_PROMPT_VERSION = _prompts.INTERVIEWER_V3
+INTERVIEWER_V4_PROMPT_VERSION = _prompts.INTERVIEWER_V4
+INTERVIEWER_V5_PROMPT_VERSION = _prompts.INTERVIEWER_V5
+INTERVIEWER_V7_PROMPT_VERSION = _prompts.INTERVIEWER_V7
+INTERVIEWER_V7_JSON_PROMPT_VERSION = _prompts.INTERVIEWER_V7_JSON
+INTERVIEWER_V8_PROMPT_VERSION = _prompts.INTERVIEWER_V8
+INTERVIEWER_V8_JSON_PROMPT_VERSION = _prompts.INTERVIEWER_V8_JSON
+DECISION_PROMPT_VERSION = _prompts.DECISION_VERSION
+SUMMARY_PROMPT_VERSION = _prompts.SUMMARY_VERSION
+FEEDBACK_SCORE_PROMPT_VERSION = _prompts.FEEDBACK_SCORE_VERSION
+FEEDBACK_WRITE_PROMPT_VERSION = _prompts.FEEDBACK_WRITE_VERSION
 
 # --- Context management: what each LLM call sends (see app/core/ai/context.py) ---
 INTERVIEWER_TASK = "interviewer_turn"
 SUMMARY_TASK = "job_description_summary"
 FULL_HISTORY = "full_history"
 WINDOW_LEDGER = "window_ledger"
-# Stable-prefix prompts: no question number in them, so the system prompt never changes during an interview.
-INTERVIEWER_V2_PROMPT_VERSION = "interviewer_v2"
-# v2's rules in about half the characters (v2's ~1,400 tokens were most of every call); window_ledger's default.
-# v2 stays for comparison: `interviews_evals --prompt interviewer_v2`.
-INTERVIEWER_V3_PROMPT_VERSION = "interviewer_v3"
-# v3 without the note (moved to the decide call) and with a follow-up mode; window_ledger's default since follow-ups.
-INTERVIEWER_V4_PROMPT_VERSION = "interviewer_v4"
-# v4's rules as plain text that can be shown while it streams: a `CATEGORY:` line (main questions only), then the
-# question. Used by the streamed turn only; the JSON turn keeps v4 until the evals compare them.
-INTERVIEWER_V5_PROMPT_VERSION = "interviewer_v5"
 INTERVIEWER_STREAM_TASK = "interviewer_stream"
 DECISION_TASK = "follow_up_decision"
-# v2 decides in two steps, completeness first, aimed at fewer needless follow-ups (over-probing). It is an experiment:
-# switch this to "follow_up_decision_v2" only after a v1 baseline run, then compare (docs/evaluation-guide.md §6a). This
-# constant is also what the live app uses.
-DECISION_PROMPT_VERSION = "follow_up_decision_v1"
-SUMMARY_PROMPT_VERSION = "job_description_summary_v2"
 # Starting values, tuned by the eval comparison (docs/features/context-management/learnings.md).
 WINDOW_TURNS = 3
 WINDOW_ANSWER_CAP = 600
@@ -645,10 +645,6 @@ FEEDBACK_CHECKS = {
     FEEDBACK_SCORE_TASK: "check-score-reply",
     FEEDBACK_WRITE_TASK: "check-write-reply",
 }
-# v2 (2026-11-06): one-sentence quotes, no evidence item when no single sentence shows a criterion (eval: a
-# whole-answer `structure` quote broke the 200-character limit on both attempts). v1 stays for comparison.
-FEEDBACK_SCORE_PROMPT_VERSION = "feedback_score_v2"
-FEEDBACK_WRITE_PROMPT_VERSION = "feedback_write_v1"
 # Ground truth for every score: never edit a shipped version in place, stored feedback names it.
 FEEDBACK_RUBRIC_VERSION = "feedback_rubric_v1"
 FEEDBACK_RUBRIC_PATH = MODULE_DIR / "data" / f"{FEEDBACK_RUBRIC_VERSION}.json"
@@ -743,14 +739,3 @@ KNOWLEDGE_SECTION_MAX_LENGTH = 600
 KNOWLEDGE_HEADING_MAX_LENGTH = 128
 # The vector column's size, fixed by the migration; EMBEDDING_DIMENSIONS must match it.
 KNOWLEDGE_VECTOR_SIZE = 768
-# v5 / v4 plus the reference-notes rule; used only when an interview has stored notes, so no-notes prompts are unchanged.
-# v7 replaces v6: in v6 the notes chose the topic and crowded out the job description's skills (skill_coverage
-# 0.83 -> 0.57 vs v5); in v7 the job description picks the topic and the notes only set depth. v6 files kept for history.
-INTERVIEWER_V7_PROMPT_VERSION = "interviewer_v7"
-INTERVIEWER_V7_JSON_PROMPT_VERSION = "interviewer_v7_json"
-# v7 plus the candidate profile (resume-aware-interview); used only for main-question writes of an interview that opted
-# in with a stored profile, with or without notes. A new version instead of editing v7, the v6/v7 lesson: a shipped
-# prompt is never changed in place, so every stored question stays explained by its version, and interviews without a
-# profile keep sending exactly today's prompts. v8 also drops "developer" from the role line (non-developer roles).
-INTERVIEWER_V8_PROMPT_VERSION = "interviewer_v8"
-INTERVIEWER_V8_JSON_PROMPT_VERSION = "interviewer_v8_json"
