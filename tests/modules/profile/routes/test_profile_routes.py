@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from app.core.ai.dependencies import get_llm_provider
+from app.core.ai.dependencies import get_chat_model
 from app.core.ai.provider import LLMServerError, LLMTimeoutError
 from app.core.ai.tracing import REDACTED
 from app.main import app
@@ -66,7 +66,7 @@ def test_the_stored_row_keeps_the_prompt_version_and_model_and_nothing_of_the_fi
 
     row = stored(db, user)
 
-    assert (row.prompt_version, row.model) == (PROFILE_PROMPT_VERSION, "fake-model")
+    assert (row.prompt_version, row.model) == (PROFILE_PROMPT_VERSION, "fake-chat")  # the model that answered
     columns = {c.name for c in CandidateProfileRow.__table__.columns}
     assert columns == {"id", "user_id", "profile", "prompt_version", "model", "created_at", "updated_at"}
 
@@ -247,12 +247,12 @@ def test_a_provider_error_or_timeout_is_a_502(make_user, upload, profile_llm, er
     assert f"extraction_failed:{type(error).__name__}" in app_logs.text
 
 
-def test_no_llm_configured_is_a_503(make_user, upload):  # EC22
-    app.dependency_overrides[get_llm_provider] = lambda: None
+def test_no_llm_configured_is_a_503(make_user, upload):  # EC22; U3a EC1
+    app.dependency_overrides[get_chat_model] = lambda: None
     try:
         response = upload(make_user(), resume_pdf())
     finally:
-        app.dependency_overrides.pop(get_llm_provider, None)
+        app.dependency_overrides.pop(get_chat_model, None)
 
     assert response.status_code == 503 and response.json()["error"]["code"] == "PROFILE_UNAVAILABLE"
 

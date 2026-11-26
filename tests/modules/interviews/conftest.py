@@ -5,6 +5,8 @@ from typing import NamedTuple
 import pytest
 from sqlalchemy import delete
 
+from app.core.ai.chat_fake import FakeChatModel
+from app.core.ai.dependencies import get_chat_model
 from app.core.ai.fake import FakeProvider, FakeSynthesizer, FakeTranscriber
 from app.core.rate_limit import RateLimiter
 from app.core.speech.limits import SPEECH_PER_MINUTE, TRANSCRIPTIONS_PER_MINUTE
@@ -203,6 +205,9 @@ def llm():
 
     Decide calls (follow-ups) go to their own fake, `llm.decide`, scripted with `llm.script_decide(...)`; by default
     every decision is "next_question", so tests that only script questions behave as before follow-ups existed.
+
+    The job-description summary runs on the LangChain chat model (U3a): `llm.summary` is a `FakeChatModel`, scripted
+    with `llm.script_summary(...)` (text, `fake_reply(...)` or an exception); unscripted, it replies "Fake reply.".
     """
     counter = iter(range(1, 1000))
 
@@ -215,6 +220,11 @@ def llm():
         # End-of-interview feedback: unscripted, both reply with text that breaks their contract.
         score = FakeProvider()
         write = FakeProvider()
+        summary = FakeChatModel()
+
+        def script_summary(self, *replies):
+            self.summary = FakeChatModel(replies)
+            return self.summary
 
         def script(self, *replies, on_call=None):
             self.fake = FakeProvider(replies, on_call=on_call, default=unique_question, stream_format=as_v5_text)
@@ -256,8 +266,10 @@ def llm():
 
     handle = _LLM()
     app.dependency_overrides[get_llm_provider] = lambda: handle
+    app.dependency_overrides[get_chat_model] = lambda: handle.summary
     yield handle
     app.dependency_overrides.pop(get_llm_provider, None)
+    app.dependency_overrides.pop(get_chat_model, None)
 
 
 # A phrase only the decide prompt has (its role line, before the first placeholder), read from the prompt file.

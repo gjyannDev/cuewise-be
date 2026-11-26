@@ -2,15 +2,15 @@
 the transcript. Answer turns are in interviews_answer_service.py, voice answers and speech in interviews_voice_service.py.
 """
 
-import logging
 import random
 import time
 import uuid
 from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMError, LLMProvider
+from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.errors import ProfileRequiredError
 from app.core.logging import bind_log_context
@@ -18,16 +18,13 @@ from app.core.pagination import PageParams
 from app.modules.auth.models.auth_model import User
 from app.modules.profile.services.profile_service import ProfileService
 
-from ..ai.interviews_context import CONTEXT_MANAGER, SummaryInputs
-from ..ai.interviews_reply import InvalidReplyError, validate_summary
+from ..ai.interviews_context import CONTEXT_MANAGER
+from ..ai.interviews_summary import summarize_job_description
 from ..ai.interviews_turn import Interviewer
-from ..ai.interviews_turn_log import log_llm_call, log_result
 from ..constants.interviews_constants import (
     FIRST_POSITION,
     PROFILE_REQUIRED_MESSAGE,
-    SUMMARY_TASK,
     SUMMARY_THRESHOLD,
-    SUMMARY_TIME_CAP_SECONDS,
     HistorySortColumn,
     SessionStatus,
     SortDirection,
@@ -85,12 +82,15 @@ class InterviewsService:
         tracer: Tracer | None = None,
         retrieval: RetrievalService | None = None,
         profiles: ProfileService | None = None,
+        # The LangChain chat model, for the job-description summary (U3a); None = LLM off, no summary.
+        chat_model: ChatModel | None = None,
     ):
         self.repo = repo
         self.bank = bank
         self.rng = rng
         # None = LLM off: every question comes from the bank.
         self.llm = llm
+        self.chat_model = chat_model
         # Picks the interview's reference notes at start (knowledge-base RAG); None = no notes (evals, older tests).
         self.retrieval = retrieval
         # The candidate profiles (8c), read through their service, never their repository. None = no profile exists.
@@ -200,44 +200,15 @@ class InterviewsService:
         return Transcript(questions, self.repo.list_messages(session.id))
 
     def _summarize(self, setup: InterviewSetup) -> str | None:
-        """Condense a long job description once, so later calls send less. One attempt with its own short time cap;
-        any failure keeps the original text and never blocks the interview. Usage is logged, not stored.
+        """Condense a long job description once, so later calls send less (ai/interviews_summary.py). Any failure
+        keeps the original text and never blocks the interview.
         """
         original = setup.job_description
-        if self.llm is None or not original or len(original) <= SUMMARY_THRESHOLD:
+        if self.chat_model is None or not original or len(original) <= SUMMARY_THRESHOLD:
             return None
-        built = self.context.build(SUMMARY_TASK, SummaryInputs(original))
-        try:
-            result = self.llm.complete(
-                built.messages,
-                max_tokens=self.llm_max_tokens,
-                budget_seconds=SUMMARY_TIME_CAP_SECONDS,
-                trace_labels={"task": SUMMARY_TASK, "prompt_version": built.prompt_version},
-            )
-        except LLMError as exc:
-            log_llm_call(
-                logging.WARNING,
-                f"summary_failed:{type(exc).__name__}",
-                task=SUMMARY_TASK,
-                prompt_version=built.prompt_version,
-                latency_ms=exc.latency_ms,
-                attempts=exc.attempts,
-                finish=exc.finish_reason,
-            )
-            return None
-        try:
-            summary = validate_summary(original, result.text)
-        except InvalidReplyError as exc:
-            log_result(
-                logging.WARNING,
-                f"summary_invalid:{exc.reason}",
-                result,
-                SUMMARY_TASK,
-                built.prompt_version,
-            )
-            return None
-        log_result(logging.INFO, "summary_ok", result, SUMMARY_TASK, built.prompt_version)
-        return summary
+        return summarize_job_description(
+            self.chat_model, original, max_tokens=self.llm_max_tokens, context=self.context
+        ).summary
 
     def _current_question(self, session: InterviewSession) -> InterviewQuestion | None:
         if session.status == SessionStatus.completed:

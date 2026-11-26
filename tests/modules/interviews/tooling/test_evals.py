@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.ai.chat_fake import FakeChatModel, fake_reply
 from app.core.ai.context import ContextManager, Task
 from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import LLMBadResponseError, LLMResult, LLMServerError
@@ -204,22 +205,16 @@ def test_the_reasoning_effort_reaches_the_provider(case):
 
 
 def test_summary_on_condenses_a_long_job_description_and_counts_its_tokens():
+    # The summary runs on the chat model (U3a), the question on the provider; both calls' tokens count for the case.
     jd = "We build payment APIs in Python and PostgreSQL for small shops. " * 15
-    summary_result = LLMResult(
-        text="Payments APIs in Python and PostgreSQL.",
-        model="m",
-        prompt_tokens=400,
-        completion_tokens=12,
-        latency_ms=1,
-        finish_reason="stop",
-        attempts=1,
-    )
-    provider = FakeProvider([summary_result, noted()])
+    chat_model = FakeChatModel([fake_reply("Payments APIs in Python and PostgreSQL.", input_tokens=400, output_tokens=12)])
+    provider = FakeProvider([noted()])
 
-    result = run_case(provider, long_case(jd=jd), max_tokens=800, summary=True)
+    result = run_case(provider, long_case(jd=jd), max_tokens=800, summary=True, chat_model=chat_model)
 
-    summary_call, question_call = provider.calls
-    assert "small shops" in summary_call[1].content
+    [(summary_messages, _)] = chat_model.calls
+    [question_call] = provider.calls
+    assert "small shops" in str(summary_messages[1].content)
     assert "Payments APIs in Python and PostgreSQL." in question_call[1].content
     assert "small shops" not in " ".join(m.content for m in question_call)
     assert result.prompt_tokens >= 400 + 1 and result.completion_tokens >= 12
@@ -235,11 +230,11 @@ def test_summary_off_makes_no_extra_call():
 
 def test_an_unusable_summary_falls_back_to_the_original():
     jd = "We build payment APIs in Python and PostgreSQL for small shops. " * 15
-    provider = FakeProvider(["", noted()])
+    provider = FakeProvider([noted()])
 
-    run_case(provider, long_case(jd=jd), max_tokens=800, summary=True)
+    run_case(provider, long_case(jd=jd), max_tokens=800, summary=True, chat_model=FakeChatModel([jd + " more"]))
 
-    assert "small shops" in provider.calls[1][1].content
+    assert "small shops" in provider.calls[0][1].content
 
 
 def test_a_v3_window_reply_must_carry_a_note_when_there_is_an_answer(case):

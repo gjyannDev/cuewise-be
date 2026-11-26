@@ -20,7 +20,8 @@ from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
-from app.core.ai.provider import LLMProvider, LLMResult
+from app.core.ai.chat import ChatModel
+from app.core.ai.provider import LLMResult
 from app.core.ai.tracing import ExperimentRun, Tracer
 
 # The experiment helpers every eval shares; dev tooling, not app code (lifting them to core is a later refactor).
@@ -94,13 +95,15 @@ def build_file(case: EvalCase) -> bytes:
     return make_pdf([items])
 
 
-def run_case(llm: LLMProvider, case: EvalCase, *, max_tokens: int, clock: Callable[[], float] = time.monotonic) -> CaseResult:
+def run_case(
+    chat_model: ChatModel, case: EvalCase, *, max_tokens: int, clock: Callable[[], float] = time.monotonic
+) -> CaseResult:
     try:
         resume = read_resume(build_file(case))
     except ResumeRefusal as exc:
         return CaseResult(f"refused:{exc.reason}", None, None, 0, 0, [])
     try:
-        extraction = extract_profile(llm, scrub_contacts(resume.text), max_tokens=max_tokens, clock=clock)
+        extraction = extract_profile(chat_model, scrub_contacts(resume.text), max_tokens=max_tokens, clock=clock)
         profile, ungrounded = ground_profile(extraction.profile, extraction.model_input)
     except ExtractionFailedError as exc:
         return CaseResult(f"extraction_failed:{exc.reason}", None, None, resume.hidden_chars, 0, exc.results)
@@ -166,21 +169,22 @@ def _parser() -> argparse.ArgumentParser:
 def main(
     argv: Sequence[str] | None = None,
     *,
-    provider: LLMProvider | None = None,
+    chat_model: ChatModel | None = None,
     tracer: Tracer | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     args = _parser().parse_args(argv)
-    from app.core.ai.factory import build_provider
+    from app.core.ai.factory import build_chat_model
     from app.core.ai.tracing import build_tracer
     from app.core.config import settings
 
     configs = settings.llm_provider_configs
     model = args.model or (configs[0].model if configs else None)
-    if provider is None:
+    if chat_model is None:
+        # The app's own chat model (U3a: extraction runs on LangChain), traced like the app's.
         tracer = tracer or build_tracer(settings, environment="eval")
-        provider = build_provider(settings, model=args.model, tracer=tracer)
-        if provider is None:
+        chat_model = build_chat_model(settings, model=args.model, tracer=tracer)
+        if chat_model is None:
             print("LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first.")
             return 1
     tracer = tracer or Tracer(None)
@@ -200,7 +204,7 @@ def main(
 
     def run_one(case: EvalCase) -> CaseResult:
         wait()
-        result = run_case(provider, case, max_tokens=settings.llm_max_tokens)
+        result = run_case(chat_model, case, max_tokens=settings.llm_max_tokens)
         _print_case(case, result)
         return result
 

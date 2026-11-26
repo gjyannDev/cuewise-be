@@ -1,9 +1,11 @@
 import uuid
 
 import pytest
+from google.api_core import exceptions as gx
 from sqlalchemy import select
 
-from app.core.ai.provider import LLMResult, LLMTimeoutError
+from app.core.ai.chat_fake import fake_reply
+from app.core.config import settings
 from app.modules.interviews.constants.interviews_constants import (
     SUMMARY_THRESHOLD,
     SUMMARY_TIME_CAP_SECONDS,
@@ -20,45 +22,49 @@ def stored_session(db, session_id):
 
 def test_a_long_job_description_is_summarised_once_and_used_in_every_call(
     start_interview, make_user, answer, llm, reply_json, db
-):  # AC8, EC9
+):  # AC8, EC9; U3a AC6: the summary runs on the chat model, the questions on the old provider
     assert len(LONG_JD) > SUMMARY_THRESHOLD
     owner = make_user()
-    llm.script(SUMMARY, reply_json("Opening question?", "behavioral"))
+    llm.script_summary(SUMMARY)
+    llm.script(reply_json("Opening question?", "behavioral"))
     created = start_interview(owner, job_description=LONG_JD, question_count=3).json()
 
     answer(owner, created["session"]["id"], created["current_question"]["id"])
 
-    summary_call, first_call, second_call = llm.fake.calls
-    assert "Python API." in summary_call[1].content
-    assert llm.fake.budgets[0] == SUMMARY_TIME_CAP_SECONDS
+    [(summary_messages, summary_kwargs)] = llm.summary.calls
+    assert "Python API." in str(summary_messages[1].content)
+    assert summary_kwargs["timeout"] <= SUMMARY_TIME_CAP_SECONDS
+    first_call, second_call = llm.fake.calls
     for call in (first_call, second_call):
         assert SUMMARY in call[1].content and LONG_JD not in " ".join(m.content for m in call)
     assert stored_session(db, created["session"]["id"]).job_description_summary == SUMMARY
 
 
 @pytest.mark.parametrize("jd", [None, "Build APIs with FastAPI.", "x" * SUMMARY_THRESHOLD])
-def test_a_short_or_missing_job_description_makes_no_extra_call(start_interview, make_user, llm, db, jd):  # EC8
+def test_a_short_or_missing_job_description_makes_no_extra_call(start_interview, make_user, llm, db, jd):  # EC8, EC2
     created = start_interview(make_user(), job_description=jd).json()
 
-    assert len(llm.fake.calls) == 1
+    assert len(llm.fake.calls) == 1 and llm.summary.calls == []
     assert stored_session(db, created["session"]["id"]).job_description_summary is None
 
 
 @pytest.mark.parametrize(
     "failure",
-    [LLMTimeoutError("slow"), "", LONG_JD + " more", "x" * 501],
+    [gx.DeadlineExceeded("slow"), "", LONG_JD + " more", "x" * 501],
     ids=["timeout", "empty", "not-shorter", "too-long"],
 )
 def test_an_unusable_summary_keeps_the_original_and_the_interview_starts(
-    start_interview, make_user, answer, llm, reply_json, db, app_logs, failure
-):  # AC9, EC10, EC11
+    start_interview, make_user, answer, llm, reply_json, db, app_logs, monkeypatch, failure
+):  # AC9, EC10, EC11; U3a EC3, EC4
+    monkeypatch.setattr(settings, "llm_max_retries", 0)  # the timeout case fails at once instead of backing off
     owner = make_user()
-    llm.script(failure, reply_json("Opening question?", "behavioral"))
+    llm.script_summary(failure)
+    llm.script(reply_json("Opening question?", "behavioral"))
 
     r = start_interview(owner, job_description=LONG_JD, question_count=3)
 
     assert r.status_code == 201 and r.json()["current_question"]["text"] == "Opening question?"
-    assert "fitness studios" in llm.fake.calls[1][1].content
+    assert "fitness studios" in llm.fake.calls[0][1].content
     assert stored_session(db, r.json()["session"]["id"]).job_description_summary is None
     assert any("outcome=summary" in rec.getMessage() for rec in app_logs.records if rec.name == "app.llm")
     assert all("fitness" not in rec.getMessage() for rec in app_logs.records)
@@ -68,7 +74,7 @@ def test_garbage_for_the_summary_still_completes_an_interview(
     start_interview, make_user, answer, llm, reply_json
 ):  # AC9
     owner = make_user()
-    llm.script("```not a summary```")
+    llm.script_summary("```not a summary```")
     created = start_interview(owner, job_description=LONG_JD, question_count=2).json()
 
     r = answer(owner, created["session"]["id"], created["current_question"]["id"])
@@ -81,7 +87,8 @@ def test_the_summary_is_never_returned_and_never_logged(
     start_interview, make_user, llm, reply_json, client, auth_header, app_logs
 ):  # AC10, AC11
     owner = make_user()
-    llm.script(SUMMARY, reply_json("Opening question?", "behavioral"))
+    llm.script_summary(SUMMARY)
+    llm.script(reply_json("Opening question?", "behavioral"))
 
     r = start_interview(owner, job_description=LONG_JD)
     current = client.get(f"/api/v1/interviews/{r.json()['session']['id']}", headers=auth_header(owner))
@@ -91,19 +98,17 @@ def test_the_summary_is_never_returned_and_never_logged(
 
 
 def test_summary_usage_is_logged_with_its_own_prompt_version(start_interview, make_user, llm, reply_json, app_logs):
-    usage = LLMResult(
-        text=SUMMARY, model="m", prompt_tokens=420, completion_tokens=30, latency_ms=7, finish_reason="stop", attempts=1
-    )
-    llm.script(usage, reply_json("Opening question?", "behavioral"))
+    llm.script_summary(fake_reply(SUMMARY, input_tokens=420, output_tokens=30))
+    llm.script(reply_json("Opening question?", "behavioral"))
 
     start_interview(make_user(), job_description=LONG_JD)
 
-    [line] = [r.getMessage() for r in app_logs.records if r.name == "app.llm" and "summary" in r.getMessage()]
+    [line] = [r.getMessage() for r in app_logs.records if r.name == "app.llm" and "outcome=summary" in r.getMessage()]
     assert "prompt_version=job_description_summary_v2" in line and "prompt_tokens=420" in line
     assert "outcome=summary_ok" in line
 
 
-def test_without_an_llm_no_summary_is_made(start_interview, make_user, db):  # EC16
+def test_without_an_llm_no_summary_is_made(start_interview, make_user, db):  # EC16; U3a EC1
     created = start_interview(make_user(), job_description=LONG_JD).json()
 
     assert stored_session(db, created["session"]["id"]).job_description_summary is None

@@ -32,7 +32,8 @@ class EmptyProfileError(Exception):
 
 
 # The raw shapes: types and known fields only. Lengths and counts are cut afterwards, not refused (spec EC19).
-class _RawRole(BaseModel):
+# Lenient on purpose: a text reply may leave fields out. The schema given to the model (`ModelProfile`) requires them.
+class RawRole(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     title: str = ""
@@ -41,7 +42,7 @@ class _RawRole(BaseModel):
     summary: str = ""
 
 
-class _RawProject(BaseModel):
+class RawProject(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str = ""
@@ -49,12 +50,39 @@ class _RawProject(BaseModel):
     technologies: list[str] = []
 
 
-class _RawProfile(BaseModel):
+class RawProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     skills: list[str] = []
-    roles: list[_RawRole] = []
-    projects: list[_RawProject] = []
+    roles: list[RawRole] = []
+    projects: list[RawProject] = []
+
+
+# What the model is asked to fill (U3a structured output). Same field names as `RawProfile`, but every field is
+# required: with defaults the JSON schema marks nothing required and the model may leave roles out or pad skills.
+class ModelRole(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str
+    organization: str
+    period: str
+    summary: str
+
+
+class ModelProject(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str
+    description: str
+    technologies: list[str]
+
+
+class ModelProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    skills: list[str]
+    roles: list[ModelRole]
+    projects: list[ModelProject]
 
 
 def fit(text: str, max_length: int) -> str:
@@ -79,11 +107,18 @@ def _unique(items: list[str], max_length: int, cap: int) -> list[str]:
 
 
 def parse_profile_reply(raw: str) -> CandidateProfile:
+    """A JSON-text reply, checked against `RawProfile`, then `clean_profile`. The live extraction uses structured output
+    instead (the model is given `RawProfile` as its schema, profile_extract.py); this stays for text replies."""
     try:
-        reply = _RawProfile.model_validate(load_object(raw))
+        reply = RawProfile.model_validate(load_object(raw))
     except ValidationError as exc:
         raise InvalidReplyError("schema") from exc
+    return clean_profile(reply)
 
+
+def clean_profile(reply: RawProfile | ModelProfile) -> CandidateProfile:
+    """A schema-valid reply made safe to store: trimmed and cut to the caps, blanks dropped, duplicates merged.
+    Raises EmptyProfileError when nothing usable is left (no skills and no roles)."""
     roles = [
         Role(
             title=title,

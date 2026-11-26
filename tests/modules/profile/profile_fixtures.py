@@ -3,8 +3,10 @@
 import json
 from contextlib import nullcontext
 
-from app.core.ai.fake import FakeProvider
-from app.core.ai.tracing import Tracer, TracingProvider
+from app.core.ai.chat_fake import FakeChatModel
+from app.core.ai.chat_tracing import TracerHandle
+from app.core.ai.provider import ChatMessage
+from app.core.ai.tracing import Tracer
 from tests.fake_langfuse import FakeLangfuse
 from tests.resume_files import Text, make_docx, make_pdf
 
@@ -46,8 +48,12 @@ def profile_json(**overrides) -> str:
     return json.dumps(PROFILE | overrides)
 
 
+_ROLES = {"system": "system", "human": "user", "ai": "assistant"}
+
+
 class ProfileLLM:
-    """The scripted model behind the real tracing wrapper, so traces are observed as Langfuse would get them."""
+    """The scripted chat model (U3a: extraction runs on LangChain) carrying the real tracer, so traces are observed as
+    Langfuse would get them. `script(...)` takes reply texts or exceptions; `calls` are the messages of each call."""
 
     def __init__(self):
         self.langfuse = FakeLangfuse()
@@ -55,13 +61,16 @@ class ProfileLLM:
         self.script()
 
     def script(self, *replies):
-        self.fake = FakeProvider(replies, default=profile_json())
-        self.provider = TracingProvider(self.fake, self.tracer)
-        return self.fake
+        self.model = FakeChatModel(replies, default=profile_json())
+        self.model.callbacks = [TracerHandle(self.tracer)]
+        return self.model
 
     @property
-    def calls(self):
-        return self.fake.calls
+    def calls(self) -> list[list[ChatMessage]]:
+        return [
+            [ChatMessage(role=_ROLES[m.type], content=str(m.content)) for m in messages]  # type: ignore[arg-type]
+            for messages, _ in self.model.calls
+        ]
 
     def model_input(self, call: int = 0) -> str:
-        return "\n".join(m.content for m in self.fake.calls[call])
+        return "\n".join(m.content for m in self.calls[call])

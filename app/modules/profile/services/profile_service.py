@@ -12,7 +12,8 @@ from datetime import datetime
 
 from pydantic import ValidationError
 
-from app.core.ai.provider import LLMProvider, LLMResult
+from app.core.ai.chat import ChatModel
+from app.core.ai.provider import LLMResult
 from app.core.errors import (
     ProfileExtractionFailedError,
     ProfileNotFoundError,
@@ -70,14 +71,15 @@ class ProfileService:
     def __init__(
         self,
         repo: ProfileRepository,
-        llm: LLMProvider | None,
+        # The LangChain chat model (U3a); None = LLM off, uploads are unavailable.
+        chat_model: ChatModel | None,
         *,
         max_tokens: int,
         clock: Callable[[], float],
         now: Callable[[], datetime],
     ):
         self.repo = repo
-        self.llm = llm
+        self.chat_model = chat_model
         self.max_tokens = max_tokens
         self.clock = clock
         self.now = now
@@ -116,7 +118,7 @@ class ProfileService:
             log["latency_ms"] = round((self.clock() - start) * 1000)
             profile_logger.log(level, "resume_upload", outcome=outcome, **log)
 
-        if self.llm is None:
+        if self.chat_model is None:
             done("unavailable", logging.WARNING)
             raise ProfileUnavailableError(PROFILE_UNAVAILABLE_MESSAGE)
 
@@ -134,7 +136,7 @@ class ProfileService:
         text = scrub_contacts(resume.text)
         self.repo.release()  # no idle transaction during the model call
         try:
-            extraction = extract_profile(self.llm, text, max_tokens=self.max_tokens, clock=self.clock)
+            extraction = extract_profile(self.chat_model, text, max_tokens=self.max_tokens, clock=self.clock)
             log |= {"cut": extraction.cut, **_usage(extraction.results)}
             profile, dropped = ground_profile(extraction.profile, extraction.model_input)
         except ExtractionFailedError as exc:

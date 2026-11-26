@@ -1,6 +1,7 @@
 import pytest
 
-from app.core.ai.dependencies import get_llm_provider
+from app.core.ai.dependencies import get_chat_model
+from app.core.config import settings
 from app.core.rate_limit import RateLimiter
 from app.main import app
 from app.modules.profile.constants.profile_constants import RESUME_UPLOADS_PER_MINUTE
@@ -9,11 +10,14 @@ from tests.modules.profile.profile_fixtures import ProfileLLM
 
 
 @pytest.fixture
-def profile_llm():
+def profile_llm(monkeypatch):
+    # Transport retries are RetryPolicy's (tests/core/ai): here a scripted error must end the extraction at once,
+    # not be retried into the fake's default (valid) reply.
+    monkeypatch.setattr(settings, "llm_max_retries", 0)
     handle = ProfileLLM()
-    app.dependency_overrides[get_llm_provider] = lambda: handle.provider
+    app.dependency_overrides[get_chat_model] = lambda: handle.model
     yield handle
-    app.dependency_overrides.pop(get_llm_provider, None)
+    app.dependency_overrides.pop(get_chat_model, None)
 
 
 @pytest.fixture(autouse=True)

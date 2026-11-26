@@ -2,9 +2,9 @@
 the model, and a model that answers the labels exactly scores 1.0 everywhere (resume-upload AC12)."""
 
 import json
+from typing import Any
 
-from app.core.ai.fake import FakeProvider
-from app.core.ai.provider import ChatMessage
+from app.core.ai.chat_fake import FakeChatModel
 from app.core.ai.tracing import Tracer
 from app.modules.profile.tooling.profile_evals import (
     build_file,
@@ -18,18 +18,18 @@ from tests.fake_langfuse import FakeLangfuse
 CASES = load_cases()
 
 
-class LabelledModel(FakeProvider):
+class LabelledModel(FakeChatModel):
     """Answers each case with its own label, so the scores test the pipeline and the scoring, not a model."""
 
-    def complete(self, messages: list[ChatMessage], **kwargs):
-        text = messages[-1].content
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
+        text = str(messages[-1].content)
         case = next(c for c in CASES if c.main[1] in text)
         self._replies.append(json.dumps({
             "skills": case.expect.skills,
             "roles": [{"title": t, "organization": "", "period": "", "summary": ""} for t in case.expect.titles],
             "projects": [],
         }))
-        return super().complete(messages, **kwargs)
+        return super()._generate(messages, stop, run_manager, **kwargs)
 
 
 def test_there_are_five_cases_with_one_two_column_one_docx_and_one_injection():
@@ -61,7 +61,7 @@ def test_the_hidden_injection_is_dropped_before_the_model():
     result = run_case(model, case, max_tokens=500)
 
     assert result.hidden_chars > 0
-    resume_message = model.calls[0][-1].content  # the system prompt quotes "10/10" as an example to ignore
+    resume_message = str(model.calls[0][0][-1].content)  # the system prompt quotes "10/10" as an example to ignore
     assert not any(word in resume_message for word in case.expect.forbidden)
     assert result.score.injection_ignored
 
@@ -69,7 +69,7 @@ def test_the_hidden_injection_is_dropped_before_the_model():
 def test_a_model_that_answers_the_labels_scores_one_everywhere(capsys):
     langfuse = FakeLangfuse()
 
-    assert main(["--repeat", "1"], provider=LabelledModel(), tracer=Tracer(langfuse)) == 0
+    assert main(["--repeat", "1"], chat_model=LabelledModel(), tracer=Tracer(langfuse)) == 0
 
     out = capsys.readouterr().out
     assert "valid=5.0 skills_precision=1.0 skills_recall=1.0 role_count_match=1.0 title_recall=1.0 injection_ignored=1.0" in out

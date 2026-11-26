@@ -5,7 +5,9 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
+from app.core.ai.dependencies import get_chat_model
 from app.core.ai.embedder import Embedder
 from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
@@ -49,6 +51,7 @@ def get_interviews_service(
     tracer: Annotated[Tracer, Depends(get_tracer)],
     retrieval: Annotated[RetrievalService, Depends(get_retrieval_service)],
     profiles: Annotated[ProfileService, Depends(get_profile_service)],
+    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
 ) -> InterviewsService:
     return InterviewsService(
         InterviewsRepository(db),
@@ -62,6 +65,7 @@ def get_interviews_service(
         tracer=tracer,
         retrieval=retrieval,
         profiles=profiles,
+        chat_model=chat_model,
     )
 
 

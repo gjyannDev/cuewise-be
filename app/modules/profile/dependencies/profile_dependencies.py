@@ -6,8 +6,8 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.core.ai.dependencies import get_llm_provider
-from app.core.ai.provider import LLMProvider
+from app.core.ai.chat import ChatModel
+from app.core.ai.dependencies import get_chat_model
 from app.core.config import settings
 from app.core.errors import RateLimitedError
 from app.core.rate_limit import RateLimiter
@@ -56,11 +56,11 @@ def limit_resume_uploads(user: ProfileUser, limiter: Annotated[RateLimiter, Depe
 
 def get_profile_service(
     db: Annotated[Session, Depends(get_db)],
-    llm: Annotated[LLMProvider | None, Depends(get_llm_provider)],
+    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_profile_clock)],
     now: Annotated[Callable[[], datetime], Depends(get_profile_now)],
 ) -> ProfileService:
-    return ProfileService(ProfileRepository(db), llm, max_tokens=settings.llm_max_tokens, clock=clock, now=now)
+    return ProfileService(ProfileRepository(db), chat_model, max_tokens=settings.llm_max_tokens, clock=clock, now=now)
 
 
 def get_profile_controller(service: Annotated[ProfileService, Depends(get_profile_service)]) -> ProfileController:
