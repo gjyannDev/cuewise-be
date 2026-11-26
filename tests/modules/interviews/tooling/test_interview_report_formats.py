@@ -10,8 +10,11 @@ import logging
 import uuid
 from pathlib import Path
 
+import pytest
 import structlog
 
+from app.core.ai.provider import LLMServerError
+from app.core.ai.retry import RetryPolicy
 from app.core.logging import bind_log_context, get_logger
 from app.modules.interviews.ai.interviews_turn_log import (
     log_llm_call,
@@ -166,4 +169,24 @@ def test_a_call_logged_without_a_session_still_reports(log_lines):  # EC10
     log_llm_call(logging.INFO, "ok", task=INTERVIEWER_TASK, model="test-model", latency_ms=5, attempts=1)
 
     lines = log_lines.path.read_text(encoding="utf-8").splitlines()
+    assert report_of(lines) == LEGACY_REPORT.read_text(encoding="utf-8")
+
+
+def test_retry_events_in_the_log_leave_the_report_unchanged(log_lines):  # U2 AC15, EC20
+    emit_golden_interview()
+    bind_log_context(request_id="req-2", session=str(S))
+    clock = iter(range(100))
+    policy = RetryPolicy(
+        max_retries=1, task=INTERVIEWER_TASK, logger=get_logger("app.llm"), clock=lambda: next(clock), sleep=lambda s: None
+    )
+
+    def always_down(_left):
+        raise LLMServerError("down")
+
+    with pytest.raises(LLMServerError):
+        policy.call(always_down, budget=BUDGET)
+    structlog.contextvars.clear_contextvars()
+
+    lines = log_lines.path.read_text(encoding="utf-8").splitlines()
+    assert any('"retry_wait"' in line for line in lines) and any('"retry_giveup"' in line for line in lines)
     assert report_of(lines) == LEGACY_REPORT.read_text(encoding="utf-8")

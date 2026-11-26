@@ -183,7 +183,7 @@ async def test_a_503_is_retried_after_backoff_then_succeeds(
 
     assert len(requests) == 2
     assert result.attempts == 2
-    assert len(clock.sleeps) == 1 and 0.5 <= clock.sleeps[0] <= 0.75
+    assert len(clock.sleeps) == 1 and 0 <= clock.sleeps[0] <= 0.5  # full jitter: 0 up to the first cap
 
 
 async def test_a_429_is_retried(
@@ -209,7 +209,8 @@ async def test_gives_up_after_max_retries(make_transcriber):  # AC8
 
 
 async def test_does_not_start_a_retry_past_the_budget(make_transcriber, clock):  # AC8
-    transcriber, requests = make_transcriber(httpx.Response(503), ok(), budget=0.4)
+    # Retry-After makes the wait certain: full jitter alone could draw a wait short enough to fit.
+    transcriber, requests = make_transcriber(httpx.Response(503, headers={"retry-after": "1"}), ok(), budget=0.4)
 
     with pytest.raises(LLMServerError):
         await transcriber.transcribe(AUDIO, content_type="audio/webm")

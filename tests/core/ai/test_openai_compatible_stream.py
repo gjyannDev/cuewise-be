@@ -250,3 +250,89 @@ async def test_malformed_chunk_json_is_a_bad_response(make_provider):  # AC11
 
     with pytest.raises(LLMBadResponseError):
         [item async for item in provider.stream(MESSAGES, max_tokens=150)]
+
+
+# --- U2: the stream retries through the provider's RetryPolicy, only for the open + first-chunk step ---
+
+
+class Tracked(httpx.AsyncByteStream):
+    """A body that records whether the provider closed it."""
+
+    def __init__(self, body: bytes):
+        self.body, self.closed = body, False
+
+    async def __aiter__(self):
+        yield self.body
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def test_a_failure_before_the_first_chunk_logs_a_retry_wait(make_provider, log_lines):  # EC2
+    provider, _ = make_provider(httpx.Response(503), ok(chunk("Why?"), chunk(finish="stop")))
+
+    await drain(provider)
+
+    [wait] = log_lines.events("retry_wait")
+    assert (wait["logger"], wait["attempt"], wait["error_class"]) == ("app.llm", 1, "LLMServerError")
+    assert log_lines.events("retry_giveup") == []
+
+
+async def test_a_failure_after_output_waits_for_nothing_and_logs_a_not_retryable_give_up(
+    make_provider, clock, log_lines
+):  # AC5, EC1
+    body = Interrupted([sse_body(chunk("How would "), done=False)], httpx.ReadError("connection reset"))
+    provider, requests = make_provider(httpx.Response(200, stream=body))
+
+    with pytest.raises(LLMServerError) as exc:
+        [item async for item in provider.stream(MESSAGES, max_tokens=150)]
+
+    assert (exc.value.after_output, exc.value.attempts, len(requests)) == (True, 1, 1)
+    assert clock.sleeps == []
+    assert log_lines.events("retry_wait") == []
+    [giveup] = log_lines.events("retry_giveup")
+    assert (giveup["reason"], giveup["attempts"], giveup["error_class"]) == ("not_retryable", 1, "LLMServerError")
+
+
+async def test_the_result_after_a_retry_carries_the_attempts_and_the_whole_latency(make_provider, clock):  # AC6
+    provider, _ = make_provider(httpx.Response(429, headers={"Retry-After": "2"}), ok(chunk("Why?"), chunk(finish="stop")))
+
+    _, result = await drain(provider)
+
+    assert result.attempts == 2
+    assert result.latency_ms == round(clock.now * 1000) == 2000
+
+
+async def test_a_stream_left_after_the_first_chunk_closes_its_response(make_provider):  # inferred: no leaked stream
+    body = Tracked(sse_body(chunk("One "), chunk("two"), chunk(finish="stop")))
+    provider, _ = make_provider(httpx.Response(200, stream=body))
+
+    stream = provider.stream(MESSAGES, max_tokens=150)
+    assert await anext(stream) == "One "
+    await stream.aclose()
+
+    assert body.closed is True
+
+
+async def test_the_retry_events_carry_the_task_from_the_trace_labels(make_provider, log_lines):  # U2 review R2
+    provider, _ = make_provider(httpx.Response(503), ok(chunk("Why?"), chunk(finish="stop")))
+
+    await drain(provider, trace_labels={"task": "interviewer_stream"})
+
+    [wait] = log_lines.events("retry_wait")
+    assert wait["task"] == "interviewer_stream"
+
+
+async def test_the_tracing_wrapper_passes_the_trace_labels_on(make_provider, log_lines):  # U2 review R2
+    from contextlib import nullcontext
+
+    from app.core.ai.tracing import Tracer, TracingProvider
+    from tests.fake_langfuse import FakeLangfuse
+
+    inner, _ = make_provider(httpx.Response(503), ok(chunk("Why?"), chunk(finish="stop")))
+    provider = TracingProvider(inner, Tracer(FakeLangfuse(), propagate=lambda **_: nullcontext()))
+
+    await drain(provider, trace_labels={"task": "interviewer_stream"})
+
+    [wait] = log_lines.events("retry_wait")
+    assert wait["task"] == "interviewer_stream"

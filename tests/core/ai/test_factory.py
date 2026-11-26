@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import nullcontext
 
 import pytest
 
@@ -162,7 +163,7 @@ def test_fake_records_the_reasoning_effort():  # context-management AC18
 def test_enabled_tracer_wraps_the_provider_and_a_disabled_one_does_not(settings_with):  # AC1, AC8
     from app.core.ai.tracing import Tracer, TracingProvider
 
-    wrapped = build_provider(settings_with(**GOOGLE), tracer=Tracer(object(), propagate=lambda **_: None))
+    wrapped = build_provider(settings_with(**GOOGLE), tracer=Tracer(object(), propagate=lambda **_: nullcontext()))
     plain = build_provider(settings_with(**GOOGLE), tracer=Tracer(None))
 
     assert isinstance(wrapped, TracingProvider)
@@ -187,6 +188,15 @@ def test_the_google_key_builds_a_google_embedder_with_the_configured_model_and_s
     assert not [r for r in app_logs.records if r.name == "app.rag"]
     assert all("embed-secret-123" not in r.getMessage() for r in app_logs.records)
     embedder.close()
+
+
+def test_the_embedder_gets_its_retry_count_from_settings(settings_with, monkeypatch):  # U2 AC8
+    built = {}
+    monkeypatch.setattr("app.core.ai.factory.GoogleEmbedder", lambda **kwargs: built.update(kwargs))
+
+    build_embedder(settings_with(LLM_GOOGLE_API_KEY="embed-secret-123", EMBEDDING_MAX_RETRIES="3"))
+
+    assert built["max_retries"] == 3
 
 
 def test_fake_embedder_is_deterministic_and_records_texts_kinds_and_budgets():  # AC9, AC10

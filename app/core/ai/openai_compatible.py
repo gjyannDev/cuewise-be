@@ -4,13 +4,14 @@ Deliberately no SDK: the request body and the response shape are all visible her
 """
 
 import json
-import random
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 import anyio
 import httpx
+
+from app.core.logging import get_logger
 
 from .provider import (
     ChatMessage,
@@ -21,7 +22,7 @@ from .provider import (
     LLMTimeoutError,
     ReasoningEffort,
 )
-from .retry import raise_for_status, retry_delay
+from .retry import RetryPolicy, raise_for_status
 
 # The SSE line prefix of a streamed chunk, and the sentinel that ends the stream.
 _DATA = "data:"
@@ -44,16 +45,19 @@ class OpenAICompatibleProvider:
         sleep: Callable[[float], None] = time.sleep,
         async_sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
         clock: Callable[[], float] = time.perf_counter,
-        rng: random.Random | None = None,
     ):
         self._model = model
         self._timeout = timeout_seconds
-        self._max_retries = max_retries
         self._budget = total_budget_seconds
-        self._sleep = sleep
-        self._async_sleep = async_sleep
         self._clock = clock
-        self._rng = rng or random.Random()
+        self._retry = RetryPolicy(
+            max_retries=max_retries,
+            task="chat",
+            logger=get_logger("app.llm"),
+            clock=clock,
+            sleep=sleep,
+            async_sleep=async_sleep,
+        )
         base = base_url.rstrip("/") + "/"
         headers = {"Authorization": f"Bearer {api_key}"}
         self._client = httpx.Client(base_url=base, headers=headers, transport=transport)
@@ -82,22 +86,12 @@ class OpenAICompatibleProvider:
         trace_labels: Mapping[str, str | int | None] | None = None,
     ) -> LLMResult:
         body = self._body(messages, max_tokens, temperature, reasoning_effort)
-        budget = self._budget_for(budget_seconds)
-
-        start = self._clock()
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                result = self._attempt(body, remaining=budget - (self._clock() - start))
-            except LLMError as exc:
-                exc.attempts, exc.latency_ms = attempt, self._elapsed_ms(start)
-                delay = self._retry_delay(exc, attempt, start, budget)
-                if delay is None:
-                    raise
-                self._sleep(delay)
-                continue
-            return result.model_copy(update={"attempts": attempt, "latency_ms": self._elapsed_ms(start)})
+        done = self._retry.call(
+            lambda remaining: self._attempt(body, remaining=remaining),
+            budget=self._budget_for(budget_seconds),
+            task=_task_label(trace_labels),
+        )
+        return done.value.model_copy(update={"attempts": done.attempts, "latency_ms": done.latency_ms})
 
     async def stream(
         self,
@@ -119,25 +113,29 @@ class OpenAICompatibleProvider:
             "stream_options": {"include_usage": True},
         }
         budget = self._budget_for(budget_seconds)
-
+        task = _task_label(trace_labels)
         start = self._clock()
-        attempt = 0
-        while True:
-            attempt += 1
-            yielded = False
-            try:
-                async for item in self._stream_attempt(body, start=start, budget=budget):
-                    if isinstance(item, LLMResult):
-                        yield item.model_copy(update={"attempts": attempt, "latency_ms": self._elapsed_ms(start)})
-                        return
-                    yielded = True
-                    yield item
-            except LLMError as exc:
-                exc.attempts, exc.latency_ms, exc.after_output = attempt, self._elapsed_ms(start), yielded
-                delay = None if yielded else self._retry_delay(exc, attempt, start, budget)
-                if delay is None:
-                    raise
-                await self._async_sleep(delay)
+
+        async def open_stream(remaining: float) -> tuple[AsyncGenerator[str | LLMResult], str | LLMResult]:
+            # The retried step: open the stream and read its first chunk. A failed open has already ended its
+            # generator (the exception closed it), so nothing is left open.
+            chunks = self._stream_attempt(body, end=self._clock() + remaining)
+            return chunks, await anext(chunks)
+
+        opened = await self._retry.acall(open_stream, budget=budget, task=task)
+        chunks, item = opened.value
+        try:
+            while not isinstance(item, LLMResult):
+                yield item
+                item = await anext(chunks)
+        except LLMError as exc:
+            # After output: never retried, the caller may already have shown the text.
+            exc.attempts, exc.latency_ms, exc.after_output = opened.attempts, self._elapsed_ms(start), True
+            self._retry.log_giveup(exc, task=task)
+            raise
+        finally:
+            await chunks.aclose()  # also when the caller stops reading early: release the HTTP stream
+        yield item.model_copy(update={"attempts": opened.attempts, "latency_ms": self._elapsed_ms(start)})
 
     def _body(
         self,
@@ -161,17 +159,6 @@ class OpenAICompatibleProvider:
     def _budget_for(self, budget_seconds: float | None) -> float:
         return self._budget if budget_seconds is None else min(self._budget, budget_seconds)
 
-    def _retry_delay(self, exc: LLMError, attempt: int, start: float, budget: float) -> float | None:
-        """How long to wait before retrying, or None to give up."""
-        return retry_delay(
-            exc,
-            attempt=attempt,
-            max_retries=self._max_retries,
-            elapsed=self._clock() - start,
-            budget=budget,
-            rng=self._rng,
-        )
-
     def _attempt(self, body: dict[str, Any], *, remaining: float) -> LLMResult:
         try:
             # Never wait past the total budget, even on the last attempt.
@@ -183,16 +170,15 @@ class OpenAICompatibleProvider:
         raise_for_status(response.status_code, response.headers.get("retry-after"))
         return self._parse(response)
 
-    async def _stream_attempt(
-        self, body: dict[str, Any], *, start: float, budget: float
-    ) -> AsyncGenerator[str | LLMResult]:
-        """One streamed request: its text chunks, then an LLMResult (attempts and latency set by the caller)."""
+    async def _stream_attempt(self, body: dict[str, Any], *, end: float) -> AsyncGenerator[str | LLMResult]:
+        """One streamed request, ending by `end` on the clock: its text chunks, then an LLMResult (attempts and
+        latency set by the caller)."""
         parts: list[str] = []
         usage: dict[str, Any] = {}
         model, finish = None, None
         try:
-            # httpx's timeout bounds each read; the elapsed check below bounds the whole stream.
-            timeout = min(self._timeout, budget - (self._clock() - start))
+            # httpx's timeout bounds each read; the clock check below bounds the whole stream.
+            timeout = min(self._timeout, end - self._clock())
             async with self._async_client.stream("POST", "chat/completions", json=body, timeout=timeout) as response:
                 if response.status_code != 200:
                     await response.aread()
@@ -218,7 +204,7 @@ class OpenAICompatibleProvider:
                         if text:
                             parts.append(text)
                             yield text
-                    if self._clock() - start > budget:
+                    if self._clock() > end:
                         raise LLMTimeoutError("LLM stream ran past its time budget")
         except httpx.TimeoutException as exc:
             raise LLMTimeoutError("LLM request timed out") from exc
@@ -253,6 +239,12 @@ class OpenAICompatibleProvider:
 
     def _elapsed_ms(self, start: float) -> int:
         return round((self._clock() - start) * 1000)
+
+
+def _task_label(trace_labels: Mapping[str, str | int | None] | None) -> str | None:
+    """The caller's task (e.g. `follow_up_decision`) for the retry events, so they name the same task as `llm_call`."""
+    task = (trace_labels or {}).get("task")
+    return task if isinstance(task, str) else None
 
 
 def _usage(usage: dict[str, Any]) -> dict[str, int | None]:

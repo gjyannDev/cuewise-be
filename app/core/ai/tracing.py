@@ -432,6 +432,7 @@ class TracingProvider:
                 temperature=temperature,
                 budget_seconds=budget_seconds,
                 reasoning_effort=reasoning_effort,
+                trace_labels=trace_labels,  # the adapter labels its retry events with the task
             )
         except LLMError as exc:
             generation.fail(exc)
@@ -462,6 +463,7 @@ class TracingProvider:
             temperature=temperature,
             budget_seconds=budget_seconds,
             reasoning_effort=reasoning_effort,
+            trace_labels=trace_labels,
         )
         try:
             async with aclosing(inner) as items:

@@ -174,7 +174,8 @@ def test_only_one_retry_then_the_typed_error(make_embedder, status, error):
 
 
 def test_no_retry_starts_past_the_budget(make_embedder, clock):  # AC19: the start-time cap holds
-    embedder, requests, _ = make_embedder(httpx.Response(503), ok(V1))
+    # Retry-After makes the wait certain: full jitter alone could draw a wait short enough to fit.
+    embedder, requests, _ = make_embedder(httpx.Response(503, headers={"retry-after": "1"}), ok(V1))
 
     with pytest.raises(LLMServerError):
         embedder.embed(["a"], kind=EmbeddingKind.query, budget_seconds=0.4)
@@ -228,3 +229,23 @@ def test_errors_never_carry_the_key_or_the_text(make_embedder):  # AC20
 
     for exc in (rejected.value, wrong_size.value):
         assert API_KEY not in str(exc) and "private" not in str(exc)
+
+
+def test_the_retry_count_is_an_argument_and_retries_log_on_the_rag_logger(clock, log_lines):  # U2 AC2, AC8
+    responses = [httpx.Response(503)] * 3 + [ok(V1)]
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return responses.pop(0)
+
+    embedder = GoogleEmbedder(
+        api_key=API_KEY, model="gemini-embedding-001", dimensions=DIMS, base_url="https://google.test/v1beta",
+        timeout_seconds=10.0, max_retries=3, transport=httpx.MockTransport(handler), sleep=clock.sleep, clock=clock,
+    )  # fmt: skip
+
+    result = embedder.embed(["a"], kind=EmbeddingKind.query, budget_seconds=100)
+
+    assert (len(requests), result.attempts) == (4, 4)
+    waits = log_lines.events("retry_wait")
+    assert len(waits) == 3 and {w["logger"] for w in waits} == {"app.rag"}

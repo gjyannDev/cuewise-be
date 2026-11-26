@@ -94,6 +94,11 @@ def make_provider(clock):
     return _make
 
 
+def busy() -> httpx.Response:
+    # A 503 with a fixed Retry-After: full jitter alone would make the number of waits that fit a budget random.
+    return httpx.Response(503, headers={"Retry-After": "0.6"})
+
+
 def test_success_returns_text_model_usage_and_finish_reason(make_provider):  # AC12 (happy path), concept 1
     provider, _ = make_provider(httpx.Response(200, json=completion()))
 
@@ -179,7 +184,7 @@ def test_rate_limit_then_success_retries_once_with_backoff(make_provider, clock)
     assert result.attempts == 2
     assert len(requests) == 2
     [delay] = clock.sleeps
-    assert 0.5 <= delay <= 0.75  # 0.5s base plus up to 50% jitter
+    assert 0 <= delay <= 0.5  # full jitter: 0 up to the first cap
 
 
 def test_retry_after_sets_the_wait_instead_of_the_short_backoff(make_provider, clock):
@@ -224,7 +229,7 @@ def test_transient_failure_on_every_attempt_gives_up_after_max_retries(make_prov
     assert len(requests) == 3  # first try + 2 retries
     assert exc.value.attempts == 3
     assert len(clock.sleeps) == 2
-    assert clock.sleeps[1] > clock.sleeps[0]  # exponential: ~0.5s then ~1s
+    assert all(0 <= wait <= 0.5 * 2**n for n, wait in enumerate(clock.sleeps))  # each within its doubling cap
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
@@ -240,12 +245,12 @@ def test_client_errors_are_never_retried(make_provider, clock, status):  # EC12
 
 
 def test_retries_stop_when_the_total_budget_would_be_exceeded(make_provider, clock):  # EC14
-    provider, requests = make_provider(*[httpx.Response(503)] * 6, max_retries=5, budget=1.0)
+    provider, requests = make_provider(*[busy()] * 6, max_retries=5, budget=1.0)
 
     with pytest.raises(LLMServerError):
         provider.complete(MESSAGES, max_tokens=150)
 
-    # ~0.5s wait fits in the 1s budget, the next ~1s wait does not: 2 attempts, not 6.
+    # The 0.6s wait fits in the 1s budget, a second one does not: 2 attempts, not 6.
     assert len(requests) == 2
     assert clock.now < 1.0
 
@@ -299,7 +304,7 @@ def test_empty_reply_error_carries_the_finish_reason(make_provider):  # llm-inte
 
 
 def test_a_smaller_budget_argument_caps_retries(make_provider, clock):  # llm-interviewer AC7
-    provider, requests = make_provider(*[httpx.Response(503)] * 6, max_retries=5, budget=30.0)
+    provider, requests = make_provider(*[busy()] * 6, max_retries=5, budget=30.0)
 
     with pytest.raises(LLMServerError):
         provider.complete(MESSAGES, max_tokens=150, budget_seconds=1.0)
@@ -309,7 +314,7 @@ def test_a_smaller_budget_argument_caps_retries(make_provider, clock):  # llm-in
 
 
 def test_a_larger_budget_argument_never_raises_the_configured_budget(make_provider, clock):  # llm-interviewer AC7
-    provider, requests = make_provider(*[httpx.Response(503)] * 6, max_retries=5, budget=1.0)
+    provider, requests = make_provider(*[busy()] * 6, max_retries=5, budget=1.0)
 
     with pytest.raises(LLMServerError):
         provider.complete(MESSAGES, max_tokens=150, budget_seconds=100.0)

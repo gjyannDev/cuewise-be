@@ -61,6 +61,24 @@ def test_env_example_lists_every_jwt_setting():  # AC12
     } <= keys
 
 
+def test_embedding_retries_default_to_one_and_are_listed_in_env_example(monkeypatch):  # U2 AC8
+    monkeypatch.delenv("EMBEDDING_MAX_RETRIES", raising=False)
+    with open(".env.example", encoding="utf-8") as f:
+        keys = {line.split("=", 1)[0] for line in f if "=" in line and not line.startswith("#")}
+
+    assert _settings().embedding_max_retries == 1
+    assert "EMBEDDING_MAX_RETRIES" in keys
+
+
+def test_negative_embedding_retries_are_rejected(monkeypatch):  # U2 EC13
+    monkeypatch.setenv("EMBEDDING_MAX_RETRIES", "-1")
+
+    with pytest.raises(ValidationError) as exc:
+        _settings()
+
+    assert "embedding_max_retries" in str(exc.value)
+
+
 def test_llm_settings_default_to_off_with_documented_limits(no_llm_env):  # interviewer-reaction AC16, EC18
     s = _settings()
 

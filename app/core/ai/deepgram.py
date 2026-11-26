@@ -3,11 +3,10 @@
 
 Deliberately no SDK, like `openai_compatible.py`: the requests and the response fields read here are all visible. For
 speech-to-text the audio is sent exactly as recorded; Deepgram detects the container (WebM, OGG, MP4, WAV), so no
-`encoding` is passed. Both adapters only build their request and parse their response; the attempt loop is the shared
-`run_with_retries`.
+`encoding` is passed. Both adapters only build their request and parse their response; the attempt loop is the
+adapter's `RetryPolicy`.
 """
 
-import random
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -16,9 +15,10 @@ import anyio
 import httpx
 
 from app.core.config import SpeechEncoding
+from app.core.logging import get_logger
 
 from .provider import LLMBadResponseError, LLMServerError, LLMTimeoutError
-from .retry import Attempted, raise_for_status, run_with_retries
+from .retry import Attempted, RetryPolicy, raise_for_status
 from .synthesizer import SynthesisResult
 from .transcriber import TranscriptionResult
 
@@ -36,12 +36,16 @@ SPEAK_CONTENT_TYPES: dict[SpeechEncoding, str] = {
 
 
 class _DeepgramAdapter:
-    """What both Deepgram adapters share: one authenticated client, the retry knobs, the shared retry loop and the
-    mapping of request failures to `LLMError`s. Each adapter only builds its request and parses its response.
+    """What both Deepgram adapters share: one authenticated client, the retry policy and the mapping of request
+    failures to `LLMError`s. Each adapter only builds its request and parses its response.
 
     Each adapter keeps its own client (connection pool): they are built, closed and timed out independently, and a
     second pool to the same host costs a couple of idle connections at most.
     """
+
+    # The retry events' task label and logger; each adapter sets its own.
+    _task: str
+    _logger_name: str
 
     def __init__(
         self,
@@ -56,15 +60,13 @@ class _DeepgramAdapter:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
         clock: Callable[[], float] = time.perf_counter,
-        rng: random.Random | None = None,
     ):
         self._model = model
         self._timeout = timeout_seconds
-        self._max_retries = max_retries
         self._budget = total_budget_seconds
-        self._sleep = sleep
-        self._clock = clock
-        self._rng = rng or random.Random()
+        self._retry = RetryPolicy(
+            max_retries=max_retries, task=self._task, logger=get_logger(self._logger_name), clock=clock, async_sleep=sleep
+        )
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/") + "/",
             headers={"Authorization": f"Token {api_key}"},
@@ -79,14 +81,7 @@ class _DeepgramAdapter:
         await self._client.aclose()
 
     async def _with_retries[T](self, attempt: Callable[[float], Awaitable[T]]) -> Attempted[T]:
-        return await run_with_retries(
-            attempt,
-            max_retries=self._max_retries,
-            budget=self._budget,
-            clock=self._clock,
-            sleep=self._sleep,
-            rng=self._rng,
-        )
+        return await self._retry.acall(attempt, budget=self._budget)
 
     async def _post(self, path: str, what: str, *, remaining: float, **request: Any) -> httpx.Response:
         """One POST that never waits past the total budget; a non-2xx or failed request becomes a typed `LLMError`."""
@@ -103,6 +98,8 @@ class _DeepgramAdapter:
 
 
 class DeepgramTranscriber(_DeepgramAdapter):
+    _task, _logger_name = "transcribe", "app.stt"
+
     def __init__(self, *, model: str, **adapter: Any):
         super().__init__(model=model, **adapter)
         # `mip_opt_out` is not sent: v1 stays in Deepgram's Model Improvement Program (opting out costs more).
@@ -159,6 +156,8 @@ class DeepgramSynthesizer(_DeepgramAdapter):
     """Aura text-to-speech: the text goes in a JSON body, the voice (`model`) and `encoding` on the URL, and the
     whole clip comes back as the response body (buffered: the caller needs it whole for its replay cache)."""
 
+    _task, _logger_name = "synthesize", "app.tts"
+
     def __init__(self, *, model: str, encoding: SpeechEncoding, **adapter: Any):
         super().__init__(model=model, **adapter)
         self._fallback_type = SPEAK_CONTENT_TYPES[encoding]
@@ -184,5 +183,3 @@ class DeepgramSynthesizer(_DeepgramAdapter):
             latency_ms=done.latency_ms,
             attempts=done.attempts,
         )
-
-

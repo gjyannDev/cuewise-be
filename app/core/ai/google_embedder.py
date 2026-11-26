@@ -9,20 +9,19 @@ The key goes in the `x-goog-api-key` header, never the URL (httpx logs request U
 the result's metadata, never the input text.
 """
 
-import random
 import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
 
+from app.core.logging import get_logger
+
 from .embedder import EmbeddingKind, EmbeddingResult, EmbeddingSizeError
-from .provider import LLMBadResponseError, LLMError, LLMServerError, LLMTimeoutError
-from .retry import raise_for_status, retry_delay
+from .provider import LLMBadResponseError, LLMServerError, LLMTimeoutError
+from .retry import RetryPolicy, raise_for_status
 
 TASK_TYPES = {EmbeddingKind.query: "RETRIEVAL_QUERY", EmbeddingKind.document: "RETRIEVAL_DOCUMENT"}
-# One retry, for a 429 or 5xx: at interview start the whole call has a 5-second cap, so more would rarely fit.
-MAX_RETRIES = 1
 
 
 class GoogleEmbedder:
@@ -34,18 +33,19 @@ class GoogleEmbedder:
         dimensions: int,
         base_url: str,
         timeout_seconds: float,
+        # The settings' `embedding_max_retries` in the app; 1 is its default.
+        max_retries: int = 1,
         # Injected so tests can script responses and run retries without real waiting.
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.perf_counter,
-        rng: random.Random | None = None,
     ):
         self._model = model
         self._dimensions = dimensions
         self._timeout = timeout_seconds
-        self._sleep = sleep
-        self._clock = clock
-        self._rng = rng or random.Random()
+        self._retry = RetryPolicy(
+            max_retries=max_retries, task="embed", logger=get_logger("app.rag"), clock=clock, sleep=sleep
+        )
         self._path = f"models/{model}:batchEmbedContents"
         self._client = httpx.Client(
             base_url=base_url.rstrip("/") + "/", headers={"x-goog-api-key": api_key}, transport=transport
@@ -77,33 +77,14 @@ class GoogleEmbedder:
             ]
         }
         budget = self._timeout if budget_seconds is None else budget_seconds
-        start = self._clock()
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                vectors = self._attempt(body, len(texts), remaining=budget - (self._clock() - start))
-            except LLMError as exc:
-                exc.attempts, exc.latency_ms = attempt, self._elapsed_ms(start)
-                delay = retry_delay(
-                    exc,
-                    attempt=attempt,
-                    max_retries=MAX_RETRIES,
-                    elapsed=self._clock() - start,
-                    budget=budget,
-                    rng=self._rng,
-                )
-                if delay is None:
-                    raise
-                self._sleep(delay)
-                continue
-            return EmbeddingResult(
-                vectors=vectors,
-                model=self._model,
-                input_tokens=None,
-                latency_ms=self._elapsed_ms(start),
-                attempts=attempt,
-            )
+        done = self._retry.call(lambda remaining: self._attempt(body, len(texts), remaining=remaining), budget=budget)
+        return EmbeddingResult(
+            vectors=done.value,
+            model=self._model,
+            input_tokens=None,
+            latency_ms=done.latency_ms,
+            attempts=done.attempts,
+        )
 
     def _attempt(self, body: dict[str, Any], count: int, *, remaining: float) -> list[list[float]]:
         try:
@@ -129,6 +110,3 @@ class GoogleEmbedder:
         if any(len(v) != self._dimensions for v in vectors):
             raise EmbeddingSizeError("Embedding has a different size than configured")
         return [[float(x) for x in v] for v in vectors]
-
-    def _elapsed_ms(self, start: float) -> int:
-        return round((self._clock() - start) * 1000)

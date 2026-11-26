@@ -87,4 +87,5 @@ def build_embedder(settings: Settings) -> GoogleEmbedder | None:
         dimensions=settings.embedding_dimensions,
         base_url=settings.embedding_base_url,
         timeout_seconds=settings.embedding_timeout_seconds,
+        max_retries=settings.embedding_max_retries,
     )

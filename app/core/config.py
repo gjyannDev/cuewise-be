@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     embedding_base_url: str = "https://generativelanguage.googleapis.com/v1beta/"
     # Per attempt. At interview start the whole embedding step is also capped (RETRIEVAL_TIME_CAP_SECONDS).
     embedding_timeout_seconds: float = Field(default=10, gt=0)
+    # One retry, for a 429 or 5xx: at interview start the whole call has a 5-second cap, so more would rarely fit.
+    embedding_max_retries: int = Field(default=1, ge=0)
 
     # Speech-to-text for voice answers (Deepgram). No key = voice answers off; everything else still works.
     deepgram_api_key: SecretStr | None = None
