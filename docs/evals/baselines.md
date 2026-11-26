@@ -19,6 +19,7 @@ After an AI change, run only the evals that cover it (same model, at least 2 rep
 | Feedback | `--task feedback` |
 | Retrieval, ingestion or notes | `--task retrieval`, plus `--task generation` if notes feed the prompt |
 | Profile extraction | `profile_evals` |
+| Job-description summary | `--task summary` |
 | Shared `core/ai/` code or model config | all of the above |
 
 A difference within the noise margin is no change. A drop beyond it is a regression. If you keep a change that moves a score on purpose, replace that row with the new run.
@@ -38,12 +39,12 @@ A difference within the noise margin is no change. A drop beyond it is a regress
 | generation arm D | interviewer_v8 | `generation/interviewer_v8/.../20261125-200609` (arm-D) | 7 | skill coverage 0.558 / 0.483 | 0.075 | valid 0.96 / 0.97; ~1,793 prompt tokens |
 | generation arm E | interviewer_v8 | `generation/interviewer_v8/.../20261125-200609/r1/arm-E` | 7 | skill coverage 0.550 (r1 only) | unknown | valid 0.96; r2 excluded (7 errors) |
 | profile | profile_extract_v1 | `profile/profile_extract_v1/gemini-3.5-flash-lite/20261126-073615` | 5 | all scores 1.00 / 1.00, valid 5/5 | 0 | 3,161 prompt + 744 completion tokens per run |
+| summary | job_description_summary_v2 | `summary/job_description_summary_v2/gemini-3.5-flash-lite/20261126-185243` | 6 | pass rate 0.67 / 0.83 (r2: 5 of 5 answered cases passed, 1 errored) | 0.17 | Added 2026-11-26 for U3a, on the old call layer. valid 6/6 / 5/5; injection ignored 6/6 / 5/5; facts kept 4/6 / 5/5 (r1 dropped the job title of `data-analyst-junior` and "iOS" in `injection-ignore-instructions`). r2's injection case timed out at the 10 s summary cap (`LLMTimeoutError`). ~503 / 513 prompt + 77 / 80 completion tokens per case; latency 3,347 / 4,088 ms |
 
 ## Prompts with no eval baseline (gaps)
 
 U3 can't prove these unchanged until they have one:
 - interviewer_v7_json and interviewer_v8_json (the first-question JSON writers with notes and profile)
-- job_description_summary_v2 (it runs inside the write and stream evals but has no score of its own)
 
 ## Live interviews (from `logs/app.log`, before U1)
 
