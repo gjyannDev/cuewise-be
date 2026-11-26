@@ -1,11 +1,18 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
+    "caveman": {
+      "source": "JuliusBrussee/caveman",
+      "commit": "e74a11ccdb38b98d15c9f9545787c907dd15f0ab",
+      "sourceType": "github",
+      "skillPath": "skills/caveman/SKILL.md",
+      "computedHash": "b51af74aacdadbc3c2d6bb79f05db58dc521854b87f7ffabd48faf286a81ed31"
+    },
     "langfuse": {
       "source": "langfuse/skills",
       "sourceType": "github",
       "skillPath": "skills/langfuse/SKILL.md",
-      "computedHash": "fa0cd84e21e17dd502f6cd01b0a288ed88966a5f030c787a47ab522ba5c67cee"
+      "computedHash": "ef0c5460193df3d300c201354ec17ea03d2980957df967ff2bfb40745f48a8ac"
     }
   }
 }
