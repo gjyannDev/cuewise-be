@@ -7,6 +7,8 @@ import ast
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+import pytest
+
 # Modules already in layer folders; each joins once it is migrated (see docs/features/layered-modules/plan.md).
 MIGRATED: tuple[str, ...] = ("auth", "users", "interviews", "profile")
 
@@ -69,6 +71,14 @@ _FORBIDDEN = {
     "repositories": {"services", "controllers", "routes"},
 }
 
+# LangChain and the vendor SDKs belong in app/core/ai and the feature ai/ folders only (CLAUDE.md, "Provider
+# abstraction"): the four layers reach a model through the feature's ai/ functions and the core `ChatModel` alias.
+_VENDOR_SDKS = ("google.api_core", "google.ai", "google.genai", "google.generativeai")
+
+
+def _is_llm_library(module: str) -> bool:
+    return module.split(".")[0].startswith("langchain") or module.startswith(_VENDOR_SDKS)
+
 
 def _violation(feature: str, layer: str | None, module: str, names: list[str]) -> str | None:
     kind = {"routes": "route", "controllers": "controller", "services": "service", "repositories": "repository"}
@@ -77,6 +87,8 @@ def _violation(feature: str, layer: str | None, module: str, names: list[str]) -
     target_folder = target[3] if target_feature else None
     if layer in _FORBIDDEN and target_folder in _FORBIDDEN[layer]:
         return f"{kind[layer]} imports {module}"
+    if layer in _FORBIDDEN and _is_llm_library(module):
+        return f"{kind[layer]} imports {module} (LangChain or a vendor SDK: use the feature's ai/ functions)"
     if layer == "controllers" and module.startswith(("app.core.ai", "app.db.session")):
         return f"controller imports {module}"
     if layer == "services" and target_folder == "schemas":
@@ -173,6 +185,36 @@ def test_a_layer_file_left_at_a_module_root_is_reported():
     assert _one(f"{AUTH}/auth_controller.py", "") == [
         f"{AUTH}/auth_controller.py: file at the module root; move it into a layer folder"
     ]
+
+
+@pytest.mark.parametrize(
+    ("folder", "kind"),
+    [("routes", "route"), ("controllers", "controller"), ("services", "service"), ("repositories", "repository")],
+)
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "from langchain_core.prompts import ChatPromptTemplate\n",
+        "import langchain_google_genai\n",
+        "from langchain.chat_models import init_chat_model\n",
+        "from google.api_core import exceptions\n",
+        "from google.ai import generativelanguage\n",
+    ],
+)
+def test_a_layer_importing_langchain_or_a_vendor_sdk_is_reported(folder, kind, statement):  # U3a AC11
+    path = f"{AUTH}/{folder}/auth_{folder}.py"
+    [violation] = _one(path, statement)
+    assert violation.startswith(f"{path}: {kind} imports ") and "LangChain or a vendor SDK" in violation
+
+
+def test_a_feature_ai_folder_may_import_langchain():  # U3a: chains live in the feature's ai/ folder
+    path = "app/modules/interviews/ai/interviews_summary.py"
+    assert _one(path, "from langchain_core.prompts import ChatPromptTemplate\n") == []
+
+
+def test_a_service_may_use_the_core_chat_model_alias():  # the alias keeps services free of langchain imports
+    path = f"{AUTH}/services/auth_service.py"
+    assert _one(path, "from app.core.ai.chat import ChatModel\n") == []
 
 
 def test_a_core_file_importing_only_core_and_libraries_is_clean():

@@ -1,6 +1,8 @@
-from app.core.config import Settings
+from app.core.config import ProviderConfig, Settings
 from app.core.logging import get_logger
 
+from .chat import ChatModel
+from .chat_tracing import TracerHandle
 from .deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from .google_embedder import GoogleEmbedder
 from .openai_compatible import OpenAICompatibleProvider
@@ -34,6 +36,45 @@ def build_provider(settings: Settings, *, model: str | None = None, tracer: Trac
         total_budget_seconds=settings.llm_total_budget_seconds,
     )
     return TracingProvider(provider, tracer) if tracer is not None and tracer.enabled else provider
+
+
+def build_chat_model(
+    settings: Settings, *, model: str | None = None, tracer: Tracer | None = None
+) -> ChatModel | None:
+    """The LangChain chat model for the primary provider (the tasks migrated in U3a use it); None when LLM is off.
+
+    Retries belong to `RetryPolicy` in the call helper (`chat.py`), so the vendor SDK's own are off. With an enabled
+    `tracer`, the model carries it (`TracerHandle`) and the helper records one generation per call. `model` overrides
+    the primary's model (the eval runner's --model).
+    """
+    configs = settings.llm_provider_configs
+    if not configs:
+        logger.warning("LLM disabled (LLM_PROVIDERS is empty): the LangChain chat model is not built")
+        return None
+    primary = configs[0]
+    chat_model = _CHAT_MODELS[primary.name](primary, settings, model or primary.model)
+    if tracer is not None and tracer.enabled:
+        chat_model.callbacks = [TracerHandle(tracer)]
+    return chat_model
+
+
+def _google_chat_model(config: ProviderConfig, settings: Settings, model: str) -> ChatModel:
+    # Imported here: the vendor SDK (gRPC and all) loads only when Gemini is the configured provider.
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    return ChatGoogleGenerativeAI(
+        model=model,
+        google_api_key=config.api_key,
+        timeout=settings.llm_timeout_seconds,
+        # The SDK counts attempts, so 1 is a single call: RetryPolicy is the only retry owner.
+        max_retries=1,
+        # `config.base_url` is the OpenAI-compatible endpoint of the old provider; the native client uses its own.
+        **settings.llm_chat_params(config.name),  # pyright: ignore[reportArgumentType]
+    )
+
+
+# One builder per vendor in LLM_VENDORS; a vendor without one fails loudly at startup instead of running without LLM.
+_CHAT_MODELS = {"google": _google_chat_model}
 
 
 

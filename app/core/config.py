@@ -14,6 +14,11 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 # chat completions. Adding one = its name here plus its three fields.
 LLM_VENDORS = ("google",)
 _VENDOR_FIELDS = ("api_key", "model", "base_url")
+# Per vendor, the chat-model settings LangChain doesn't unify across vendors (reasoning/thinking), each read from
+# `llm_<vendor>_<param>` when set. The LangChain factory passes them to that vendor's chat model; unset = the vendor's
+# default, as the OpenAI-compatible calls get today. Google: only `thinking_budget` (the bundled SDK has no
+# `thinking_level` yet; test_langchain_behaviour.py).
+LLM_VENDOR_CHAT_PARAMS: dict[str, tuple[str, ...]] = {"google": ("thinking_budget",)}
 # Replaced by LLM_PROVIDERS + the vendor blocks; still read only so a stale .env fails loudly instead of running
 # without the LLM.
 _REMOVED_LLM_SETTINGS = ("OPENROUTER_API_KEY", "LLM_MODEL", "LLM_BASE_URL")
@@ -82,6 +87,8 @@ class Settings(BaseSettings):
     llm_google_api_key: SecretStr | None = None
     llm_google_model: str | None = None
     llm_google_base_url: str | None = None
+    # Gemini's thinking token budget for the LangChain chat model (0 = off, -1 = dynamic); unset = the model default.
+    llm_google_thinking_budget: int | None = Field(default=None, ge=-1)
     llm_timeout_seconds: float = Field(default=15, gt=0)
     llm_max_retries: int = Field(default=2, ge=0)
     llm_total_budget_seconds: float = Field(default=30, gt=0)
@@ -147,6 +154,7 @@ class Settings(BaseSettings):
         "llm_google_api_key",
         "llm_google_model",
         "llm_google_base_url",
+        "llm_google_thinking_budget",
         "deepgram_api_key",
         "langfuse_public_key",
         "langfuse_secret_key",
@@ -199,6 +207,11 @@ class Settings(BaseSettings):
             ProviderConfig(name=name, **{field: getattr(self, f"llm_{name}_{field}") for field in _VENDOR_FIELDS})
             for name in self.llm_providers
         ]
+
+    def llm_chat_params(self, vendor: str) -> dict[str, object]:
+        """The vendor's chat-model settings from `LLM_VENDOR_CHAT_PARAMS` that are set (unset ones are left out)."""
+        params = {name: getattr(self, f"llm_{vendor}_{name}") for name in LLM_VENDOR_CHAT_PARAMS.get(vendor, ())}
+        return {name: value for name, value in params.items() if value is not None}
 
     @property
     def langfuse_enabled(self) -> bool:

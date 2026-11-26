@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 
 from app.core.ai.factory import (
+    build_chat_model,
     build_embedder,
     build_provider,
     build_synthesizer,
@@ -30,11 +31,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # One LLM client for the whole app (connection reuse); None when no key is configured.
     tracer = build_tracer(settings)
     provider = build_provider(settings, tracer=tracer)
+    # The LangChain chat model, for the tasks already migrated off `provider` (U3a: JD summary, profile extraction).
+    chat_model = build_chat_model(settings, tracer=tracer)
     transcriber = build_transcriber(settings)
     synthesizer = build_synthesizer(settings)
     embedder = build_embedder(settings)
     app.state.tracer = tracer
     app.state.llm_provider = provider
+    app.state.chat_model = chat_model
     app.state.transcriber = transcriber
     app.state.synthesizer = synthesizer
     app.state.embedder = embedder
