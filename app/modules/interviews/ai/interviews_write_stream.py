@@ -16,13 +16,12 @@ from app.core.ai.provider import (
 
 from ..ai.interviews_context import InterviewerInputs, write_trace_labels
 from ..ai.interviews_reply import InvalidReplyError, parse_streamed_reply, split_header
+from ..ai.interviews_reply_attempts import ReplyAttempts
 from ..ai.interviews_turn_limits import Deadline
 from ..ai.interviews_turn_log import log_llm_call, log_llm_error, log_result
 from ..ai.interviews_turn_types import Delta, Draft, Reset, Written
 from ..constants.interviews_constants import (
     INTERVIEWER_STREAM_TASK,
-    MAX_REPLY_ATTEMPTS,
-    MIN_SECONDS_FOR_RETRY,
     QuestionCategory,
 )
 
@@ -53,10 +52,7 @@ async def stream_write(
     version = built.prompt_version
     earlier = [turn.question for turn in inputs.turns]
     results: list[LLMResult] = []
-    for attempt in range(1, MAX_REPLY_ATTEMPTS + 1):
-        remaining = deadline.remaining()
-        if attempt > 1 and remaining < MIN_SECONDS_FOR_RETRY:
-            break
+    for attempt, remaining in ReplyAttempts(deadline.remaining):
         budget_left_ms = round(remaining * 1000)
         shown = False
         attempt_start = clock()

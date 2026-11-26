@@ -9,13 +9,12 @@ from app.core.ai.provider import LLMError, LLMProvider, LLMResult
 
 from ..ai.interviews_context import InterviewerInputs
 from ..ai.interviews_reply import Decision, InvalidReplyError, parse_decision_reply
+from ..ai.interviews_reply_attempts import ReplyAttempts
 from ..ai.interviews_turn_limits import Deadline
 from ..ai.interviews_turn_log import llm_logger, log_llm_call, log_llm_error, log_result
 from ..constants.interviews_constants import (
     DECIDE_MAX_SECONDS,
     DECISION_TASK,
-    MAX_REPLY_ATTEMPTS,
-    MIN_SECONDS_FOR_RETRY,
     WRITE_RESERVE_SECONDS,
 )
 
@@ -48,10 +47,7 @@ def decide(
         DECIDE_MAX_SECONDS, deadline.remaining() - WRITE_RESERVE_SECONDS
     )
     results: list[LLMResult] = []
-    for attempt in range(1, MAX_REPLY_ATTEMPTS + 1):
-        left = end - clock()
-        if left <= 0 or (attempt > 1 and left < MIN_SECONDS_FOR_RETRY):
-            break
+    for _, left in ReplyAttempts(lambda: end - clock()):
         budget_left_ms = round(deadline.remaining() * 1000)
         try:
             result = llm.complete(

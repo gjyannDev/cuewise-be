@@ -8,13 +8,12 @@ from app.core.ai.provider import LLMError, LLMProvider, LLMResult
 
 from ..ai.interviews_context import InterviewerInputs, write_trace_labels
 from ..ai.interviews_reply import InvalidReplyError, parse_interviewer_reply
+from ..ai.interviews_reply_attempts import ReplyAttempts
 from ..ai.interviews_turn_limits import Deadline
 from ..ai.interviews_turn_log import llm_logger, log_llm_call, log_llm_error, log_result
 from ..ai.interviews_turn_types import Written
 from ..constants.interviews_constants import (
     INTERVIEWER_TASK,
-    MAX_REPLY_ATTEMPTS,
-    MIN_SECONDS_FOR_RETRY,
     QuestionCategory,
 )
 
@@ -48,10 +47,7 @@ def write(
     # The code-side repeat check always sees every earlier question, whatever the strategy sent.
     earlier = [turn.question for turn in inputs.turns]
     results: list[LLMResult] = []
-    for attempt in range(1, MAX_REPLY_ATTEMPTS + 1):
-        remaining = deadline.remaining()
-        if attempt > 1 and remaining < MIN_SECONDS_FOR_RETRY:
-            break
+    for _, remaining in ReplyAttempts(deadline.remaining):
         budget_left_ms = round(remaining * 1000)
         try:
             result = llm.complete(

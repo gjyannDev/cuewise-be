@@ -23,6 +23,7 @@ from ..ai.interviews_feedback import (
     parse_write_reply,
 )
 from ..ai.interviews_reply import InvalidReplyError
+from ..ai.interviews_reply_attempts import ReplyAttempts
 from ..ai.interviews_turn_limits import Deadline
 from ..ai.interviews_turn_log import (
     llm_logger,
@@ -38,8 +39,6 @@ from ..constants.interviews_constants import (
     FEEDBACK_SCORE_TASK,
     FEEDBACK_WRITE_STEP,
     FEEDBACK_WRITE_TASK,
-    MAX_REPLY_ATTEMPTS,
-    MIN_SECONDS_FOR_RETRY,
     TextSource,
 )
 
@@ -278,11 +277,8 @@ class FeedbackGenerator:
         reasons: list[str] = []
         outcomes: list[str] = []
         failure = "no_time"
-        for attempt in range(1, MAX_REPLY_ATTEMPTS + 1):
-            remaining = deadline.remaining()
-            if remaining <= 0 or (attempt > 1 and remaining < MIN_SECONDS_FOR_RETRY):
-                outcomes.append("retry_skipped:no_time" if attempt > 1 else "no_time")
-                break
+        attempts = ReplyAttempts(deadline.remaining)
+        for attempt, remaining in attempts:
             budget_left_ms = round(remaining * 1000)
             try:
                 result = self.llm.complete(
@@ -333,6 +329,8 @@ class FeedbackGenerator:
             outcomes.append("ok")
             self.tracer.check(check, passed=True, verdict="ok", metadata={"attempt": attempt})
             return _Attempts(parsed, results, None, reasons, outcomes)
+        if attempts.stopped_at is not None:
+            outcomes.append("retry_skipped:no_time" if attempts.stopped_at > 1 else "no_time")
         return _Attempts(None, results, failure, reasons, outcomes)
 
 
