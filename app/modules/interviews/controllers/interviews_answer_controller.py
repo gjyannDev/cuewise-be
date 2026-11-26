@@ -7,7 +7,7 @@ from contextlib import aclosing
 
 from pydantic import BaseModel
 
-from app.core.logging import request_id_ctx
+from app.core.logging import current_request_id
 from app.modules.auth.models.auth_model import User
 
 from ..ai.interviews_turn_types import Delta, PhaseChanged, Reset
@@ -43,13 +43,19 @@ class AnswerController:
     def answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> AnswerOut:
         return answer_out(self.service.answer(user, session_id, data))
 
-    def prepare_answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> TurnContext:
+    def prepare_answer(
+        self, user: User, session_id: uuid.UUID, data: AnswerIn
+    ) -> TurnContext:
         """The checks and reads before the stream opens (sync DB work: the route runs it in the threadpool)."""
         return self.service.prepare_answer(user, session_id, data)
 
-    async def stream_answer(self, ctx: TurnContext, *, started_at: float) -> AsyncGenerator[StreamEventOut]:
+    async def stream_answer(
+        self, ctx: TurnContext, *, started_at: float
+    ) -> AsyncGenerator[StreamEventOut]:
         # A client that leaves closes the service's stream at once, so its summary log is written.
-        async with aclosing(self.service.stream_answer(ctx, started_at=started_at)) as events:
+        async with aclosing(
+            self.service.stream_answer(ctx, started_at=started_at)
+        ) as events:
             async for event in events:
                 yield _frame(event)
 
@@ -71,7 +77,9 @@ def _frame(event: AnswerEvent) -> StreamEventOut:
         case PhaseChanged(phase=phase):
             return _event(StreamEvent.status, StatusEventOut(phase=phase))
         case ReactionChosen(reaction=reaction):
-            return _event(StreamEvent.reaction, ReactionOut(id=reaction.id, text=reaction.text))
+            return _event(
+                StreamEvent.reaction, ReactionOut(id=reaction.id, text=reaction.text)
+            )
         case Delta(text=text):
             return _event(StreamEvent.question_delta, QuestionDeltaOut(text=text))
         case Reset():
@@ -88,8 +96,8 @@ def _event(name: StreamEvent, data: BaseModel) -> StreamEventOut:
 
 
 def _error_event(code: str, message: str) -> StreamEventOut:
-    request_id = request_id_ctx.get()
+    request_id = current_request_id()
     return _event(
         StreamEvent.error,
-        StreamErrorOut(code=code, message=message, request_id=None if request_id == "-" else request_id),
+        StreamErrorOut(code=code, message=message, request_id=request_id),
     )

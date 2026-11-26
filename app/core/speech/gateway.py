@@ -5,7 +5,6 @@ business (keyterms, a text cap) and the fields to log. This module never names a
 new speech feature reuses it instead of copying it. Plain functions: there is no state to hold (vendors are passed in).
 """
 
-import logging
 from collections.abc import Sequence
 
 from app.core.ai.provider import LLMError
@@ -20,12 +19,14 @@ from app.core.errors import (
     TranscriptionUnavailableError,
     UnsupportedAudioError,
 )
+from app.core.logging import Logger, get_logger
 
 from .audio import TRANSCRIPTION_MAX_BYTES, TRANSCRIPTION_MAX_SECONDS, audio_container
 
-# One metadata line per call. Never the audio or the text (both are the user's personal data).
-stt_logger = logging.getLogger("app.stt")
-tts_logger = logging.getLogger("app.tts")
+# One metadata line per call. Never the audio or the text (both are the user's personal data). The request's
+# `user` and `session` come from its log context; `log_fields` adds what only the caller knows (a line id, its kind).
+stt_logger = get_logger("app.stt")
+tts_logger = get_logger("app.tts")
 
 LogFields = Sequence[tuple[str, object]]
 
@@ -41,7 +42,7 @@ async def transcribe(
     content_type: str,
     keyterms: Sequence[str],
     max_chars: int,
-    log_fields: LogFields,
+    log_fields: LogFields = (),
 ) -> str:
     """What was said in `audio`, cut to `max_chars` and trimmed.
 
@@ -78,16 +79,18 @@ async def transcribe(
             log_fields,
             bytes=len(audio),
             content_type=content_type.split(";", 1)[0].strip() or "-",
-            duration_s="-" if result is None or result.duration_seconds is None else result.duration_seconds,
-            model="-" if result is None else result.model,
-            latency_ms="-" if result is None else result.latency_ms,
-            attempts="-" if result is None else result.attempts,
+            duration_s=None if result is None else result.duration_seconds,
+            model=None if result is None else result.model,
+            latency_ms=None if result is None else result.latency_ms,
+            attempts=None if result is None else result.attempts,
             cause=cause,
             outcome=outcome,
         )
 
 
-async def synthesize(synthesizer: SpeechSynthesizer | None, text: str, *, log_fields: LogFields) -> SynthesisResult:
+async def synthesize(
+    synthesizer: SpeechSynthesizer | None, text: str, *, log_fields: LogFields = ()
+) -> SynthesisResult:
     """`text` spoken by the configured voice, as one whole clip. The caller decides what may be spoken (the text must
     come from its own stored data, never from the request); this only speaks it, maps failures and logs metadata."""
     result: SynthesisResult | None = None
@@ -114,9 +117,9 @@ async def synthesize(synthesizer: SpeechSynthesizer | None, text: str, *, log_fi
             "speech",
             log_fields,
             characters=len(text),
-            model="-" if result is None else result.model,
-            latency_ms="-" if result is None else result.latency_ms,
-            attempts="-" if result is None else result.attempts,
+            model=None if result is None else result.model,
+            latency_ms=None if result is None else result.latency_ms,
+            attempts=None if result is None else result.attempts,
             cause=cause,
             outcome=outcome,
         )
@@ -135,8 +138,5 @@ def _cause(exc: LLMError) -> str:
     return f"{type(exc).__name__}:{exc.status_code or '-'}:attempts={exc.attempts}"
 
 
-def _log(logger: logging.Logger, event: str, log_fields: LogFields, **metrics: object) -> None:
-    """`<event> <caller's fields> <metrics>` as key=value pairs, in that order. Values go through %-formatting, so a
-    value can't inject format codes."""
-    pairs = [*log_fields, *metrics.items()]
-    logger.info(" ".join([event, *(f"{key}=%s" for key, _ in pairs)]), *(value for _, value in pairs))
+def _log(logger: Logger, event: str, log_fields: LogFields, **metrics: object) -> None:
+    logger.info(event, **dict(log_fields), **metrics)

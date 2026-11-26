@@ -46,7 +46,7 @@ async def stream_write(
         built = context.build(INTERVIEWER_STREAM_TASK, inputs)
     except ContextTooLargeError:
         log_llm_call(
-            logging.WARNING, session_id, "context_too_large", task=INTERVIEWER_STREAM_TASK, latency_ms=0, attempts=0
+            logging.WARNING, "context_too_large", task=INTERVIEWER_STREAM_TASK, latency_ms=0, attempts=0
         )
         yield Written(None, [], None)
         return
@@ -74,7 +74,7 @@ async def stream_write(
                         shown = True
                         yield Delta(item)
         except LLMError as exc:
-            log_llm_error(session_id, exc, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
+            log_llm_error(exc, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
             if shown:
                 yield Reset()
             if exc.after_output:
@@ -85,7 +85,6 @@ async def stream_write(
             # A missing or broken CATEGORY line: nothing of it was shown.
             log_llm_call(
                 logging.WARNING,
-                session_id,
                 f"invalid_reply:{exc.reason}",
                 task=INTERVIEWER_STREAM_TASK,
                 prompt_version=version,
@@ -101,7 +100,6 @@ async def stream_write(
             # usage is unknown (it comes at the end of a stream), so the line records that it was cut off.
             log_llm_call(
                 logging.INFO,
-                session_id,
                 "cancelled",
                 task=INTERVIEWER_STREAM_TASK,
                 prompt_version=version,
@@ -124,7 +122,6 @@ async def stream_write(
         except InvalidReplyError as exc:
             log_result(
                 logging.WARNING,
-                session_id,
                 f"invalid_reply:{exc.reason}",
                 result,
                 INTERVIEWER_STREAM_TASK,
@@ -134,7 +131,7 @@ async def stream_write(
             if shown:
                 yield Reset()
             continue
-        log_result(logging.INFO, session_id, "ok", result, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
+        log_result(logging.INFO, "ok", result, INTERVIEWER_STREAM_TASK, version, budget_left_ms)
         yield Written(reply, results, version)
         return
     yield Written(None, results, version)

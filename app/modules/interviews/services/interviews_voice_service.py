@@ -12,6 +12,7 @@ from typing import Literal, NamedTuple
 from app.core.ai.synthesizer import SpeechSynthesizer
 from app.core.ai.transcriber import Transcriber
 from app.core.errors import NotFoundError, SessionNotInProgressError
+from app.core.logging import bind_log_context
 from app.core.speech import gateway
 from app.modules.auth.models.auth_model import User
 
@@ -63,6 +64,7 @@ class VoiceService:
         """Only the owner of an interview in progress may transcribe for it; returns the interview's role (it picks
         the keyterms). Sync DB read, run before the upload is looked at (the route calls it in the threadpool, like
         `prepare_answer`). The read transaction ends here, so no connection waits on the upload or on Deepgram."""
+        bind_log_context(session=str(session_id))
         session = owned_session(self.repo, user, session_id)
         if session.status != SessionStatus.in_progress:
             raise SessionNotInProgressError("This interview is not in progress")
@@ -80,13 +82,13 @@ class VoiceService:
             content_type=content_type,
             keyterms=ROLE_KEYTERMS[role],
             max_chars=MAX_ANSWER_LENGTH,
-            log_fields=(("user", user.id), ("session", session_id)),
         )
 
     def prepare_question_speech(self, user: User, session_id: uuid.UUID, question_id: uuid.UUID) -> SpeakableLine:
         """A question (main or follow-up) the owner has already been shown. No status check: a finished interview can
         still be replayed. Sync DB read (the route runs it in the threadpool); the connection is released before the
         slow synthesis."""
+        bind_log_context(session=str(session_id))
         session = owned_session(self.repo, user, session_id)
         question = self.repo.get_shown_question(session.id, question_id, session.current_position)
         if question is None:
@@ -98,6 +100,7 @@ class VoiceService:
     def prepare_reaction_speech(self, user: User, session_id: uuid.UUID, message_id: uuid.UUID) -> SpeakableLine:
         """An interviewer reaction of the owner's interview; a candidate answer is never spoken. Same flow as
         `prepare_question_speech`."""
+        bind_log_context(session=str(session_id))
         session = owned_session(self.repo, user, session_id)
         reaction = self.repo.get_interviewer_reaction(session.id, message_id)
         if reaction is None:
@@ -111,6 +114,6 @@ class VoiceService:
         result = await gateway.synthesize(
             self.synthesizer,
             line.text,
-            log_fields=(("user", user.id), ("session", line.session_id), ("id", line.line_id), ("kind", line.kind)),
+            log_fields=(("id", line.line_id), ("kind", line.kind)),
         )
         return SpokenLine(audio=result.audio, content_type=result.content_type)

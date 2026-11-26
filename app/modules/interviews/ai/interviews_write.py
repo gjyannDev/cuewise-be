@@ -38,7 +38,6 @@ def write(
         # Even trimmed, the input is over the limit: the bank asks this one (the manager logged the sizes).
         log_llm_call(
             logging.WARNING,
-            session_id,
             "context_too_large",
             task=INTERVIEWER_TASK,
             latency_ms=0,
@@ -62,13 +61,12 @@ def write(
                 trace_labels=write_trace_labels(INTERVIEWER_TASK, built, budget_left_ms),
             )
         except LLMError as exc:
-            log_llm_error(session_id, exc, INTERVIEWER_TASK, version, budget_left_ms)
+            log_llm_error(exc, INTERVIEWER_TASK, version, budget_left_ms)
             break
         results.append(result)
         if not result.text.strip():
             log_result(
                 logging.WARNING,
-                session_id,
                 "empty_reply",
                 result,
                 INTERVIEWER_TASK,
@@ -86,7 +84,6 @@ def write(
         except InvalidReplyError as exc:
             log_result(
                 logging.WARNING,
-                session_id,
                 f"invalid_reply:{exc.reason}",
                 result,
                 INTERVIEWER_TASK,
@@ -96,7 +93,6 @@ def write(
             continue
         log_result(
             logging.INFO,
-            session_id,
             "ok",
             result,
             INTERVIEWER_TASK,
@@ -104,8 +100,6 @@ def write(
             budget_left_ms,
         )
         if reply.note_dropped:
-            llm_logger.warning(
-                "note_dropped session=%s reason=%s", session_id, reply.note_dropped
-            )
+            llm_logger.warning("note_dropped", reason=reply.note_dropped)
         return Written(reply, results, version)
     return Written(None, results, version)

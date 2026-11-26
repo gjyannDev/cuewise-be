@@ -1,4 +1,3 @@
-import logging
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -11,9 +10,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.logging import request_id_ctx
+from app.core.logging import get_logger, request_log_context
 
-logger = logging.getLogger("app.errors")
+logger = get_logger("app.errors")
 
 _HTTP_CODES = {
     400: "BAD_REQUEST",
@@ -41,10 +40,10 @@ def _error_response(
 
 
 def _raise_location(exc: BaseException) -> str:
-    """'(path/to/file.py:42 func)' of the innermost frame, i.e. where the error was raised."""
+    """'path/to/file.py:42 func' of the innermost frame, i.e. where the error was raised."""
     tb = exc.__traceback__
     if tb is None:
-        return ""
+        return "-"
     while tb.tb_next:
         tb = tb.tb_next
     code = tb.tb_frame.f_code
@@ -53,12 +52,12 @@ def _raise_location(exc: BaseException) -> str:
         shown = filename.resolve().relative_to(Path.cwd()).as_posix()
     except ValueError:  # outside the project (or on another drive)
         shown = filename.name
-    return f" ({shown}:{tb.tb_lineno} {code.co_name})"
+    return f"{shown}:{tb.tb_lineno} {code.co_name}"
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     log = logger.error if exc.status_code >= 500 else logger.info
-    log("%s: %s%s", exc.code, exc.message, _raise_location(exc))
+    log("app_error", code=exc.code, message=exc.message, raised_at=_raise_location(exc))
     return _error_response(request, exc.status_code, exc.code, exc.message, exc.details, exc.response_headers)
 
 
@@ -68,7 +67,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         {"field": ".".join(str(part) for part in err["loc"]), "issue": err["msg"], "type": err["type"]}
         for err in exc.errors()
     ]
-    logger.info("VALIDATION_ERROR: %s", details)
+    logger.info("validation_error", details=details)
     return _error_response(request, 422, "VALIDATION_ERROR", "Request validation failed", details)
 
 
@@ -79,24 +78,22 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 
 async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
     # DB text names tables/constraints, so it goes to logs only.
-    logger.warning("IntegrityError: %s", exc.orig)
+    logger.warning("integrity_error", error=str(exc.orig))
     return _error_response(request, 409, "CONFLICT", "Resource conflicts with existing data")
 
 
 async def operational_error_handler(request: Request, exc: OperationalError) -> JSONResponse:
-    logger.error("DATABASE_UNAVAILABLE: %s", exc.orig)
+    logger.error("database_unavailable", error=str(exc.orig))
     return _error_response(request, 503, "DATABASE_UNAVAILABLE", "Database is unavailable")
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    # Runs in ServerErrorMiddleware, outside RequestContextMiddleware, after it reset the
-    # context var, so restore the request id from scope state while logging.
+    # Runs in ServerErrorMiddleware, outside RequestContextMiddleware, after it left the request's log context, so
+    # re-enter it from scope state: the crash line keeps the request's id (and user/session, when known).
     request_id = getattr(request.state, "request_id", None)
-    token = request_id_ctx.set(request_id or "-")
-    try:
-        logger.exception("Unhandled %s: %s", type(exc).__name__, exc, exc_info=exc)
-    finally:
-        request_id_ctx.reset(token)
+    log_fields = getattr(request.state, "log_fields", None) or {"request_id": request_id or "-"}
+    with request_log_context(log_fields):
+        logger.error("unhandled_exception", error_type=type(exc).__name__, error=str(exc), exc_info=exc)
     details = {"type": type(exc).__name__, "message": str(exc)} if settings.debug else None
     return _error_response(request, 500, "INTERNAL_ERROR", "An unexpected error occurred", details)
 

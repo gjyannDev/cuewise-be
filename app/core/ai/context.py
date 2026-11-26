@@ -11,12 +11,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Protocol
 
+from app.core.logging import get_logger
+
 from .provider import ChatMessage
 
 # Rough rule of thumb (~4 characters per token for English); real counts come from the provider's `usage`.
 CHARS_PER_TOKEN = 4
 
-logger = logging.getLogger("app.llm.context")
+logger = get_logger("app.llm.context")
 
 
 def estimate_tokens(messages: Sequence[ChatMessage]) -> int:
@@ -110,15 +112,15 @@ class ContextManager:
 
 
 def _log(level: int, report: ContextReport, outcome: str) -> None:
-    counts = " ".join(f"{key}={value}" for key, value in sorted(report.counts.items()))
     logger.log(
         level,
-        "context_build task=%s strategy=%s est_tokens=%s system_tokens=%s dropped=%s outcome=%s %s",
-        report.task,
-        report.strategy,
-        report.estimated_tokens,
-        report.system_tokens,
-        report.dropped,
-        outcome,
-        counts,
+        "context_build",
+        task=report.task,
+        strategy=report.strategy,
+        est_tokens=report.estimated_tokens,
+        system_tokens=report.system_tokens,
+        dropped=report.dropped,
+        outcome=outcome,
+        # How many of each part made it in (ledger, notes, summary, turns_full, ...): counts only, never content.
+        **dict(sorted(report.counts.items())),
     )

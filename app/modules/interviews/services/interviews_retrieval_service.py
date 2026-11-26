@@ -24,6 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.ai.embedder import Embedder, EmbeddingKind, EmbeddingSizeError
 from app.core.ai.provider import LLMError, LLMRateLimitError, LLMTimeoutError
 from app.core.ai.tracing import Step, Tracer
+from app.core.logging import bind_log_context
 
 from ..ai.interviews_turn_log import log_embedding_call, log_retrieval
 from ..constants.interviews_constants import (
@@ -100,19 +101,20 @@ class RetrievalService:
     ) -> Retrieval:
         """`profile_query` is the candidate profile's short items (only for an interview that opted in): a second
         query, embedded in the same call, that may add up to `profile_slots` notes the job description didn't pick."""
+        # Already bound by a start request; the RAG evals call this directly, so bind it here as well.
+        bind_log_context(session=str(session_id))
         start = self.clock()
         if not self.llm_on:
             # Nothing is read or embedded, so there is nothing to trace; the log line still says why there are no notes.
-            return self._finish(session_id, _skipped(RetrievalSkip.llm_off), start, None)
+            return self._finish(_skipped(RetrievalSkip.llm_off), start, None)
         with self.tracer.step(RETRIEVAL_PURPOSE, metadata={"role": role, "level": level}) as step:
             query = query_text(summary, job_description)
-            return self._finish(session_id, self._retrieve(session_id, role, level, query, profile_query), start, step)
+            return self._finish(self._retrieve(session_id, role, level, query, profile_query), start, step)
 
-    def _finish(self, session_id: uuid.UUID, result: Retrieval, start: float, step: Step | None) -> Retrieval:
+    def _finish(self, result: Retrieval, start: float, step: Step | None) -> Retrieval:
         scores = [note.score for note in result.notes]
         log_retrieval(
             _log_level(result.outcome),
-            session_id,
             mode=result.mode,
             scores=scores,
             outcome=result.outcome,
@@ -149,7 +151,7 @@ class RetrievalService:
         if not queries:
             return self._filter(eligible, session_id, OK)
         # One call for both queries: the embedder batches them into one request, so start latency doesn't double.
-        vectors, degraded = self._embed(session_id, queries)
+        vectors, degraded = self._embed(queries)
         if degraded is not None:
             return self._filter(eligible, session_id, f"retrieval_degraded:{degraded}")
         assert vectors is not None and self.embedder is not None
@@ -180,7 +182,7 @@ class RetrievalService:
         ]
 
     def _embed(
-        self, session_id: uuid.UUID, queries: list[str]
+        self, queries: list[str]
     ) -> tuple[list[list[float]] | None, RetrievalDegrade | None]:
         if self.embedder is None:
             return None, RetrievalDegrade.not_configured
@@ -197,7 +199,6 @@ class RetrievalService:
                 outcome=type(exc).__name__,
                 latency_ms=exc.latency_ms,
                 attempts=exc.attempts,
-                session_id=session_id,
             )
             return None, _degrade_reason(exc)
         log_embedding_call(
@@ -209,7 +210,6 @@ class RetrievalService:
             latency_ms=result.latency_ms,
             attempts=result.attempts,
             input_tokens=result.input_tokens,
-            session_id=session_id,
         )
         if any(len(vector) != self.vector_size for vector in result.vectors):
             return None, RetrievalDegrade.size_mismatch

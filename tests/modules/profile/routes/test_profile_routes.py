@@ -192,7 +192,8 @@ def test_an_invented_item_from_the_model_is_dropped_and_counted_in_the_log(make_
     response = upload(make_user(), resume_pdf())
 
     assert response.json()["skills"] == ["Python", "Kubernetes"]
-    assert "ungrounded=1" in app_logs.text
+    [upload] = [r.fields for r in app_logs.records if r.line["event"] == "resume_upload"]
+    assert upload["ungrounded"] == 1
 
 
 def test_a_long_resume_is_cut_at_the_cap_and_the_log_says_so(make_user, upload, profile_llm, app_logs):  # EC24
@@ -204,7 +205,8 @@ def test_a_long_resume_is_cut_at_the_cap_and_the_log_says_so(make_user, upload, 
     assert response.status_code == 200, response.text
     fenced = profile_llm.calls[0][1].content
     assert len(fenced) <= PROFILE_INPUT_MAX_CHARS + len("<resume>\n\n</resume>")
-    assert "cut=True" in app_logs.text
+    [upload] = [r.fields for r in app_logs.records if r.line["event"] == "resume_upload"]
+    assert upload["cut"] is True
 
 
 # --- the model call (AC7) --------------------------------------------------------------------------------------------

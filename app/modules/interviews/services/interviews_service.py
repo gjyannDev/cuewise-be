@@ -13,6 +13,7 @@ from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMError, LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.errors import ProfileRequiredError
+from app.core.logging import bind_log_context
 from app.core.pagination import PageParams
 from app.modules.auth.models.auth_model import User
 from app.modules.profile.services.profile_service import ProfileService
@@ -121,6 +122,8 @@ class InterviewsService:
         session = InterviewSession(
             id=uuid.uuid7(), user_id=user.id, **data.model_dump()
         )
+        # Every later log line of this request (summary, retrieval, first question) names the new interview.
+        bind_log_context(session=str(session.id))
         # Read live, before any trace, model or embedding call: a refused start costs nothing and creates nothing.
         profile = self.profiles.find_for_interview(user.id) if data.use_profile and self.profiles else None
         if data.use_profile and profile is None:
@@ -214,7 +217,6 @@ class InterviewsService:
         except LLMError as exc:
             log_llm_call(
                 logging.WARNING,
-                setup.session_id,
                 f"summary_failed:{type(exc).__name__}",
                 task=SUMMARY_TASK,
                 prompt_version=built.prompt_version,
@@ -228,14 +230,13 @@ class InterviewsService:
         except InvalidReplyError as exc:
             log_result(
                 logging.WARNING,
-                setup.session_id,
                 f"summary_invalid:{exc.reason}",
                 result,
                 SUMMARY_TASK,
                 built.prompt_version,
             )
             return None
-        log_result(logging.INFO, setup.session_id, "summary_ok", result, SUMMARY_TASK, built.prompt_version)
+        log_result(logging.INFO, "summary_ok", result, SUMMARY_TASK, built.prompt_version)
         return summary
 
     def _current_question(self, session: InterviewSession) -> InterviewQuestion | None:

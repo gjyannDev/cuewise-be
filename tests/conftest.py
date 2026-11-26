@@ -1,5 +1,9 @@
+import io
+import json
 import logging
 import os
+import tempfile
+from pathlib import Path
 
 # Tests must not depend on a developer's .env; engine creation doesn't connect.
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@localhost:5432/test")
@@ -18,6 +22,7 @@ if os.getenv("SPEECH_LIVE_TEST") != "1":
     os.environ["DEEPGRAM_API_KEY"] = ""
 
 import pytest
+import structlog
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -25,8 +30,9 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.errors import ConflictError, TokenExpiredError
-from app.core.logging import RequestIdFilter
+from app.core.logging import RECORD_KEYS, setup_logging
 from app.core.security import hash_password
 from app.core.tokens import create_token
 from app.db import models  # noqa: F401  (registers every model on Base.metadata)
@@ -64,6 +70,10 @@ def raise_crash():
 
 
 app.include_router(test_router)
+
+# Tests never write the developer's real logs/app.log: a busy suite would rotate it and delete old log files.
+TEST_LOG_FILE = Path(tempfile.mkdtemp(prefix="cuewise-test-logs-")) / "app.log"
+setup_logging(settings.debug, log_file=TEST_LOG_FILE)
 
 
 @pytest.fixture
@@ -111,14 +121,86 @@ def auth_header():
     return _header
 
 
+class LogCapture:
+    """What the real logging pipeline wrote during a test: the file's JSON lines and the console text."""
+
+    def __init__(self, path: Path, console: io.StringIO):
+        self.path = path
+        self._console = console
+
+    def lines(self) -> list[dict]:
+        if not self.path.exists():
+            return []
+        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+
+    def events(self, event: str) -> list[dict]:
+        return [line for line in self.lines() if line["event"] == event]
+
+    def console(self) -> str:
+        return self._console.getvalue()
+
+
 @pytest.fixture
-def app_logs(caplog):
-    """Capture records from the non-propagating 'app' logger, with request_id like production handlers."""
-    logger = logging.getLogger("app")
-    request_id_filter = RequestIdFilter()
-    caplog.handler.addFilter(request_id_filter)
-    logger.addHandler(caplog.handler)
-    caplog.set_level(logging.DEBUG, logger="app")
-    yield caplog
-    logger.removeHandler(caplog.handler)
-    caplog.handler.removeFilter(request_id_filter)
+def capture_logs(tmp_path):
+    """Start the real logging pipeline into a temp file and an in-memory console: `capture_logs(debug=True)`."""
+
+    def _start(debug: bool = False, log_file: Path | None = None) -> LogCapture:
+        console = io.StringIO()
+        path = log_file or tmp_path / "logs" / "app.log"
+        setup_logging(debug, log_file=path, stream=console)
+        return LogCapture(path, console)
+
+    yield _start
+    structlog.contextvars.clear_contextvars()
+    setup_logging(settings.debug, log_file=TEST_LOG_FILE)
+
+
+@pytest.fixture
+def log_lines(capture_logs) -> LogCapture:
+    return capture_logs()
+
+
+def _shown(value: object) -> str:
+    if value is None:
+        return "-"
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+class LoggedLine:
+    """One JSON line of the log file, read the way older tests read a log record: `name`, `levelno`, `request_id`,
+    `fields`, and `getMessage()` as `event key=value ...` (null shown as `-`)."""
+
+    def __init__(self, line: dict):
+        self.line = line
+        self.name: str = line["logger"]
+        self.levelno: int = logging.getLevelNamesMapping()[line["level"].upper()]
+        self.levelname: str = line["level"].upper()
+        self.request_id: str = line["request_id"]
+        # The formatted traceback, when the line logged an exception.
+        self.exc_info: str | None = line.get("exception")
+        self.fields = {key: value for key, value in line.items() if key not in (*RECORD_KEYS, "exception")}
+
+    def getMessage(self) -> str:
+        return " ".join([str(self.line["event"]), *(f"{key}={_shown(value)}" for key, value in self.fields.items())])
+
+
+class AppLogs:
+    def __init__(self, capture: LogCapture):
+        self._capture = capture
+
+    @property
+    def records(self) -> list[LoggedLine]:
+        return [LoggedLine(line) for line in self._capture.lines()]
+
+    @property
+    def text(self) -> str:
+        return self._capture.path.read_text(encoding="utf-8") if self._capture.path.exists() else ""
+
+    def json_lines(self) -> list[str]:
+        return self.text.splitlines()
+
+
+@pytest.fixture
+def app_logs(capture_logs) -> AppLogs:
+    """Every line the real pipeline wrote (after redaction), at DEBUG for the app's loggers."""
+    return AppLogs(capture_logs(debug=True))

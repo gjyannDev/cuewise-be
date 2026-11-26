@@ -21,6 +21,7 @@ from app.core.errors import (
     ResumeUnreadableError,
     ResumeUnsupportedError,
 )
+from app.core.logging import get_logger
 from app.modules.auth.models.auth_model import User
 
 from ..ai.profile_extract import ExtractionFailedError, extract_profile
@@ -46,7 +47,8 @@ from ..utils.profile_resume_utils import (
 )
 from ..utils.profile_utils import ground_profile, scrub_contacts
 
-profile_logger = logging.getLogger("app.profile")
+# `user` comes from the request's log context (bound by the auth dependency).
+profile_logger = get_logger("app.profile")
 
 _REFUSALS = {
     ResumeTooLargeRefusal: (ResumeTooLargeError, RESUME_TOO_LARGE_MESSAGE),
@@ -88,7 +90,7 @@ class ProfileService:
 
     def delete(self, user: User) -> None:
         self.repo.delete(user.id)
-        profile_logger.info("profile_deleted user=%s", user.id)
+        profile_logger.info("profile_deleted")
 
     def find_for_interview(self, user_id: uuid.UUID) -> CandidateProfile | None:
         """The user's stored profile for an interview prompt, read live (never copied onto the interview), or None.
@@ -102,7 +104,7 @@ class ProfileService:
         try:
             return CandidateProfile.model_validate(row.profile)
         except ValidationError:
-            profile_logger.warning("profile_unusable user=%s outcome=ignored", user_id)
+            profile_logger.warning("profile_unusable", outcome="ignored")
             return None
 
     def upload(self, user: User, data: bytes) -> CandidateProfileRow:
@@ -112,8 +114,7 @@ class ProfileService:
 
         def done(outcome: str, level: int = logging.INFO) -> None:
             log["latency_ms"] = round((self.clock() - start) * 1000)
-            fields = " ".join(f"{key}={value}" for key, value in log.items())
-            profile_logger.log(level, "resume_upload user=%s outcome=%s %s", user.id, outcome, fields)
+            profile_logger.log(level, "resume_upload", outcome=outcome, **log)
 
         if self.llm is None:
             done("unavailable", logging.WARNING)

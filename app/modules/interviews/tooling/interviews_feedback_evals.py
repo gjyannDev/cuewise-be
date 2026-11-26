@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMProvider, LLMResult
 from app.core.ai.tracing import ExperimentRun, Tracer
+from app.core.logging import bind_log_context
 
 from ..ai.interviews_context import (
     CONTEXT_MANAGER,
@@ -302,6 +303,8 @@ def run_feedback_case(
         tracer=tracer,
     )
     session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"feedback-eval:{case.id}")
+    # Outside any request: the case's log lines name its made-up interview, as a live request's would.
+    bind_log_context(session=str(session_id))
     deadline = generator.deadline(budget_seconds)
     setup = case.setup
     scored = generator.score(

@@ -1,13 +1,13 @@
-import logging
 import re
 import time
+from typing import Any
 from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.logging import request_id_ctx
+from app.core.logging import get_logger, request_log_context
 
-logger = logging.getLogger("app.request")
+logger = get_logger("app.request")
 
 # A client-supplied id ends up in logs and headers, so only accept a safe shape.
 _SAFE_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -29,9 +29,12 @@ class RequestContextMiddleware:
 
         incoming = dict(scope["headers"]).get(b"x-request-id", b"").decode("latin-1")
         request_id = incoming if _SAFE_REQUEST_ID.fullmatch(incoming) else uuid4().hex
-        # Context var for log lines; scope state for the 500 handler, which runs after this exits.
-        scope.setdefault("state", {})["request_id"] = request_id
-        token = request_id_ctx.set(request_id)
+        # The request's log fields (request_id now; user and session once known), shared by every log line of the
+        # request. Kept in scope state too, for the 500 handler, which runs after this middleware has exited.
+        log_fields: dict[str, Any] = {"request_id": request_id}
+        state = scope.setdefault("state", {})
+        state["request_id"] = request_id
+        state["log_fields"] = log_fields
         status_code = 500  # stays 500 if the app raises before sending a response
         start = time.perf_counter()
 
@@ -46,10 +49,16 @@ class RequestContextMiddleware:
                 message["headers"] = headers
             await send(message)
 
-        try:
-            await self.app(scope, receive, send_with_request_id)
-        finally:
-            duration_ms = (time.perf_counter() - start) * 1000
-            log = logger.warning if status_code >= 500 else logger.info
-            log("%s %s -> %s (%.1fms)", scope["method"], scope["path"], status_code, duration_ms)
-            request_id_ctx.reset(token)
+        with request_log_context(log_fields):
+            try:
+                await self.app(scope, receive, send_with_request_id)
+            finally:
+                duration_ms = (time.perf_counter() - start) * 1000
+                log = logger.warning if status_code >= 500 else logger.info
+                log(
+                    "http_request",
+                    method=scope["method"],
+                    path=scope["path"],
+                    status=status_code,
+                    duration_ms=round(duration_ms, 1),
+                )

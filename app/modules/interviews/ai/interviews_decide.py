@@ -36,7 +36,6 @@ def decide(
     except ContextTooLargeError:
         log_llm_call(
             logging.WARNING,
-            session_id,
             "context_too_large",
             task=DECISION_TASK,
             latency_ms=0,
@@ -62,13 +61,12 @@ def decide(
                 trace_labels={"task": DECISION_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
             )
         except LLMError as exc:
-            log_llm_error(session_id, exc, DECISION_TASK, version, budget_left_ms)
+            log_llm_error(exc, DECISION_TASK, version, budget_left_ms)
             break
         results.append(result)
         if not result.text.strip():
             log_result(
                 logging.WARNING,
-                session_id,
                 "empty_reply",
                 result,
                 DECISION_TASK,
@@ -81,7 +79,6 @@ def decide(
         except InvalidReplyError as exc:
             log_result(
                 logging.WARNING,
-                session_id,
                 f"invalid_reply:{exc.reason}",
                 result,
                 DECISION_TASK,
@@ -91,7 +88,6 @@ def decide(
             continue
         log_result(
             logging.INFO,
-            session_id,
             "ok",
             result,
             DECISION_TASK,
@@ -101,10 +97,6 @@ def decide(
             gap=decision.gap or "-",
         )
         if decision.note_dropped:
-            llm_logger.warning(
-                "note_dropped session=%s reason=%s",
-                session_id,
-                decision.note_dropped,
-            )
+            llm_logger.warning("note_dropped", reason=decision.note_dropped)
         return decision, results, version
     return None, results, version

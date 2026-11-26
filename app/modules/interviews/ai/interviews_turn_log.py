@@ -1,16 +1,19 @@
-"""The interviewer's log lines: one per LLM call, one per answer turn and one per streamed turn."""
+"""The interviewer's log events: one per LLM call, one per answer turn and one per streamed turn.
+
+Metadata only (ids, model, tokens, timing, reason codes), never question, answer, note or job-description text.
+`session` (and `user`) are not passed here: the service binds them once per request (`bind_log_context`), and every
+line of that request carries them. A value the provider didn't report is logged as null.
+"""
 
 import logging
-import uuid
 from collections.abc import Sequence
 
 from app.core.ai.provider import LLMError, LLMResult
+from app.core.logging import get_logger
 
-# One line per LLM call and one per answer turn: metadata only (ids, model, tokens, timing, reason codes), never
-# question, answer, note or job-description text.
-llm_logger = logging.getLogger("app.llm")
+llm_logger = get_logger("app.llm")
 # Embedding calls and retrieval (knowledge-base RAG), apart from the chat calls above; the same metadata-only rule.
-rag_logger = logging.getLogger("app.rag")
+rag_logger = get_logger("app.rag")
 
 
 def sum_known(values: Sequence[int | None]) -> int | None:
@@ -23,7 +26,6 @@ def sum_known(values: Sequence[int | None]) -> int | None:
 
 def log_llm_call(
     level: int,
-    session_id: uuid.UUID,
     outcome: str,
     *,
     task: str,
@@ -32,7 +34,7 @@ def log_llm_call(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     # Part of prompt_tokens served from the provider's prompt cache / part of completion_tokens spent on hidden
-    # reasoning. "-" when the provider doesn't report them.
+    # reasoning. Null when the provider doesn't report them.
     cached_tokens: int | None = None,
     reasoning_tokens: int | None = None,
     latency_ms: int,
@@ -44,31 +46,28 @@ def log_llm_call(
     action: str | None = None,
     gap: str | None = None,
 ) -> None:
-    decided = "" if action is None else f" action={action} gap={gap or '-'}"
+    decided = {} if action is None else {"action": action, "gap": gap or "-"}
     llm_logger.log(
         level,
-        "llm_call session=%s task=%s model=%s prompt_version=%s prompt_tokens=%s cached_tokens=%s "
-        "completion_tokens=%s reasoning_tokens=%s latency_ms=%s attempts=%s finish=%s budget_left_ms=%s%s outcome=%s",
-        session_id,
-        task,
-        model,
-        prompt_version or "-",
-        _shown(prompt_tokens),
-        _shown(cached_tokens),
-        _shown(completion_tokens),
-        _shown(reasoning_tokens),
-        latency_ms,
-        attempts,
-        finish or "-",
-        _shown(budget_left_ms),
-        decided,
-        outcome,
+        "llm_call",
+        task=task,
+        model=model,
+        prompt_version=prompt_version or "-",
+        prompt_tokens=prompt_tokens,
+        cached_tokens=cached_tokens,
+        completion_tokens=completion_tokens,
+        reasoning_tokens=reasoning_tokens,
+        latency_ms=latency_ms,
+        attempts=attempts,
+        finish=finish or "-",
+        budget_left_ms=budget_left_ms,
+        **decided,
+        outcome=outcome,
     )
 
 
 def log_result(
     level: int,
-    session_id: uuid.UUID,
     outcome: str,
     result: LLMResult,
     task: str,
@@ -78,7 +77,6 @@ def log_result(
 ) -> None:
     log_llm_call(
         level,
-        session_id,
         outcome,
         task=task,
         prompt_version=prompt_version,
@@ -95,13 +93,10 @@ def log_result(
     )
 
 
-def log_llm_error(
-    session_id: uuid.UUID, exc: LLMError, task: str, version: str, budget_left_ms: int
-) -> None:
+def log_llm_error(exc: LLMError, task: str, version: str, budget_left_ms: int) -> None:
     # Transient faults are expected now and then; a bad key or broken reply needs someone to look.
     log_llm_call(
         logging.WARNING if exc.retryable else logging.ERROR,
-        session_id,
         type(exc).__name__,
         task=task,
         prompt_version=version,
@@ -113,7 +108,6 @@ def log_llm_error(
 
 
 def log_turn_summary(
-    session_id: uuid.UUID,
     *,
     decision: str,
     action: str,
@@ -124,14 +118,13 @@ def log_turn_summary(
 ) -> None:
     """Why the turn ended as it did: the only place an overridden follow-up or a bank fallback is explained."""
     llm_logger.info(
-        "turn_summary session=%s decision=%s action=%s override=%s source=%s fallback=%s llm_ms=%s",
-        session_id,
-        decision,
-        action,
-        override or "-",
-        source,
-        fallback or "-",
-        llm_ms,
+        "turn_summary",
+        decision=decision,
+        action=action,
+        override=override or "-",
+        source=source,
+        fallback=fallback or "-",
+        llm_ms=llm_ms,
     )
 
 
@@ -145,27 +138,24 @@ def log_embedding_call(
     latency_ms: int,
     attempts: int,
     input_tokens: int | None = None,
-    # The interview it was for (retrieval at start); None for ingestion.
-    session_id: uuid.UUID | None = None,
 ) -> None:
-    """One line per embedding call (ingest or retrieval): metadata only, never the embedded text."""
+    """One line per embedding call (ingest or retrieval): metadata only, never the embedded text. At retrieval the
+    interview's `session` comes from the request; ingestion has none."""
     rag_logger.log(
         level,
-        "embedding_call session=%s purpose=%s kind=%s model=%s input_tokens=%s latency_ms=%s attempts=%s outcome=%s",
-        session_id or "-",
-        purpose,
-        kind,
-        model,
-        _shown(input_tokens),
-        latency_ms,
-        attempts,
-        outcome,
+        "embedding_call",
+        purpose=purpose,
+        kind=kind,
+        model=model,
+        input_tokens=input_tokens,
+        latency_ms=latency_ms,
+        attempts=attempts,
+        outcome=outcome,
     )
 
 
 def log_retrieval(
     level: int,
-    session_id: uuid.UUID,
     *,
     mode: str | None,
     scores: Sequence[float | None],
@@ -177,19 +167,18 @@ def log_retrieval(
     added, and the reason code. Never the query, the profile or note text."""
     rag_logger.log(
         level,
-        "retrieval session=%s mode=%s count=%s scores=%s latency_ms=%s outcome=%s profile_notes=%s",
-        session_id,
-        mode or "-",
-        len(scores),
-        ",".join("-" if s is None else f"{s:.3f}" for s in scores) or "-",
-        latency_ms,
-        outcome,
-        profile_notes,
+        "retrieval",
+        mode=mode or "-",
+        count=len(scores),
+        # The same 3-decimal, comma-joined text as the old log line, so reports read both alike.
+        scores=",".join("-" if s is None else f"{s:.3f}" for s in scores) or "-",
+        latency_ms=latency_ms,
+        outcome=outcome,
+        profile_notes=profile_notes,
     )
 
 
 def log_stream_summary(
-    session_id: uuid.UUID,
     *,
     terminal: str,
     first_event_ms: int | None,
@@ -201,17 +190,11 @@ def log_stream_summary(
     """How a streamed turn felt and ended: time to the first event and to the first question token (from the write
     call's start), total time, drafts taken back, and whether the client left. Metadata only, never text."""
     llm_logger.info(
-        "stream_turn_summary session=%s terminal=%s first_event_ms=%s first_token_ms=%s total_ms=%s resets=%s "
-        "cancelled=%s",
-        session_id,
-        terminal,
-        _shown(first_event_ms),
-        _shown(first_token_ms),
-        total_ms,
-        resets,
-        str(cancelled).lower(),
+        "stream_turn_summary",
+        terminal=terminal,
+        first_event_ms=first_event_ms,
+        first_token_ms=first_token_ms,
+        total_ms=total_ms,
+        resets=resets,
+        cancelled=cancelled,
     )
-
-
-def _shown(value: int | None) -> str:
-    return "-" if value is None else str(value)

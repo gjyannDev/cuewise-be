@@ -5,7 +5,6 @@ controller turns them into SSE frames. Errors, the trace and the stream summary 
 same however it is presented.
 """
 
-import logging
 import random
 import time
 import uuid
@@ -19,6 +18,7 @@ from app.core.ai.context import ContextManager
 from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.errors import QuestionNotCurrentError, SessionNotInProgressError
+from app.core.logging import bind_log_context, get_logger
 from app.modules.auth.models.auth_model import User
 from app.modules.profile.services.profile_service import ProfileService
 
@@ -62,7 +62,7 @@ from ..utils.interviews_session_utils import (
 from ..utils.interviews_utils import QuestionTurn, interviewer_history, pick_reaction
 
 # Streamed turns that fail after their stream opened: the client gets a generic `error` event, the details land here.
-stream_logger = logging.getLogger("app.errors")
+stream_logger = get_logger("app.errors")
 
 
 class TurnContext(NamedTuple):
@@ -176,6 +176,8 @@ class AnswerService:
     def prepare_answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> TurnContext:
         """Every check and read of an answer turn, before any LLM call. Raises the usual errors (404, 409), so a
         streamed turn fails as plain HTTP before its stream opens. The read transaction is released on return."""
+        # Bound here, the one entry of both the plain and the streamed turn: the SSE stream's lines carry it too.
+        bind_log_context(session=str(session_id))
         session = owned_session(self.repo, user, session_id)
         if session.status != SessionStatus.in_progress:
             raise SessionNotInProgressError("This interview is not in progress")
@@ -273,13 +275,12 @@ class AnswerService:
         new_question: InterviewQuestion | None = None
         if ctx.stored_next is not None:
             completes = False
-            log_turn_summary(setup.session_id, decision="skipped", action=TurnAction.next_question, source="stored")
+            log_turn_summary(decision="skipped", action=TurnAction.next_question, source="stored")
         elif outcome is None:
             completes = ctx.last_main
             if not completes:
                 new_question = self._bank_question(setup, position + 1, thread.main_number + 1, ctx.used_bank_ids)
             log_turn_summary(
-                setup.session_id,
                 decision="skipped",
                 action=TurnAction.complete if completes else TurnAction.next_question,
                 source="-" if completes else "bank",
@@ -387,7 +388,7 @@ class AnswerService:
                 terminal = exc.code
                 yield TurnFailed(exc.code, exc.message)
             except Exception:
-                stream_logger.exception("stream_turn_failed session=%s", ctx.setup.session_id)
+                stream_logger.exception("stream_turn_failed")
                 terminal = "INTERNAL_ERROR"
                 yield TurnFailed("INTERNAL_ERROR", "An unexpected error occurred")
             except BaseException:
@@ -396,7 +397,6 @@ class AnswerService:
                 raise
             finally:
                 log_stream_summary(
-                    ctx.setup.session_id,
                     terminal=terminal,
                     first_event_ms=first_event_ms,
                     first_token_ms=first_token_ms,

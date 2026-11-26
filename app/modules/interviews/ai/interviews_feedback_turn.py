@@ -182,7 +182,7 @@ class FeedbackGenerator:
                 built = self.context.build(FEEDBACK_SCORE_TASK, inputs)
             except ContextTooLargeError:
                 log_llm_call(
-                    logging.WARNING, session_id, "context_too_large", task=FEEDBACK_SCORE_TASK, latency_ms=0, attempts=0
+                    logging.WARNING, "context_too_large", task=FEEDBACK_SCORE_TASK, latency_ms=0, attempts=0
                 )
                 step.finish(
                     output={"outcome": "context_too_large", "hint": hint_for("context_too_large")},
@@ -300,13 +300,13 @@ class FeedbackGenerator:
             except LLMError as exc:
                 # Already retried inside the provider where that makes sense (timeouts, 429, 5xx); the generation
                 # itself is marked ERROR, so no check is needed.
-                log_llm_error(session_id, exc, task, version, budget_left_ms)
+                log_llm_error(exc, task, version, budget_left_ms)
                 failure = type(exc).__name__
                 outcomes.append(failure)
                 break
             results.append(result)
             if not result.text.strip():
-                log_result(logging.WARNING, session_id, "empty_reply", result, task, version, budget_left_ms)
+                log_result(logging.WARNING, "empty_reply", result, task, version, budget_left_ms)
                 failure = "empty_reply"
                 outcomes.append(failure)
                 self.tracer.check(
@@ -320,7 +320,7 @@ class FeedbackGenerator:
                 parsed = parse(result.text)
             except InvalidReplyError as exc:
                 log_result(
-                    logging.WARNING, session_id, f"invalid_reply:{exc.reason}", result, task, version, budget_left_ms
+                    logging.WARNING, f"invalid_reply:{exc.reason}", result, task, version, budget_left_ms
                 )
                 reasons.append(exc.reason)
                 failure = f"invalid_reply:{exc.reason}"
@@ -329,7 +329,7 @@ class FeedbackGenerator:
                     check, passed=False, verdict=failure, metadata={"attempt": attempt}, hint=hint_for(failure)
                 )
                 continue
-            log_result(logging.INFO, session_id, "ok", result, task, version, budget_left_ms)
+            log_result(logging.INFO, "ok", result, task, version, budget_left_ms)
             outcomes.append("ok")
             self.tracer.check(check, passed=True, verdict="ok", metadata={"attempt": attempt})
             return _Attempts(parsed, results, None, reasons, outcomes)
@@ -337,7 +337,6 @@ class FeedbackGenerator:
 
 
 def log_feedback_summary(
-    session_id: uuid.UUID,
     *,
     outcome: str,
     overall: float | None = None,
@@ -350,25 +349,18 @@ def log_feedback_summary(
 ) -> None:
     """How one generation ended (generated, insufficient, failed) and what it cost. Metadata only, never text."""
     score_usage, write_usage = CallUsage.of(score), CallUsage.of(write)
-
-    def tokens(usage: CallUsage) -> str:
-        total = sum_known([usage.prompt_tokens, usage.completion_tokens])
-        return "-" if total is None else str(total)
-
     llm_logger.info(
-        "feedback_summary session=%s outcome=%s overall=%s text_source=%s score_retries=%s write_retries=%s "
-        "score_tokens=%s write_tokens=%s score_ms=%s write_ms=%s quotes_rejected=%s truncated=%s failure=%s",
-        session_id,
-        outcome,
-        "-" if overall is None else overall,
-        text_source or "-",
-        max(len(score) - 1, 0),
-        max(len(write) - 1, 0),
-        tokens(score_usage),
-        tokens(write_usage),
-        score_usage.latency_ms,
-        write_usage.latency_ms,
-        quotes_rejected,
-        truncated,
-        failure or "-",
+        "feedback_summary",
+        outcome=outcome,
+        overall=overall,
+        text_source=text_source or "-",
+        score_retries=max(len(score) - 1, 0),
+        write_retries=max(len(write) - 1, 0),
+        score_tokens=sum_known([score_usage.prompt_tokens, score_usage.completion_tokens]),
+        write_tokens=sum_known([write_usage.prompt_tokens, write_usage.completion_tokens]),
+        score_ms=score_usage.latency_ms,
+        write_ms=write_usage.latency_ms,
+        quotes_rejected=quotes_rejected,
+        truncated=truncated,
+        failure=failure or "-",
     )

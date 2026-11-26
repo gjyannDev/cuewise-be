@@ -5,17 +5,18 @@ This turns them into `Turn`s: the start of an interview, then one per answer. Th
 reason codes only, never question, answer or job-description text, so nothing read here can leak any.
 """
 
+import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from app.core.logging import split_fields
-
 from ..constants.interviews_constants import FEEDBACK_SCORE_TASK, FEEDBACK_WRITE_TASK
 
-# One record of logs/app.log: `<date> <time> <LEVEL> [<request id>] <logger>: <message>`.
+# One record of the old text log (before U1 structlog): `<date> <time> <LEVEL> [<request id>] <logger>: <message>`,
+# with the message `event key=value ...`. Rotated and archived logs still hold these lines.
 _LINE = re.compile(r"^\S+ \S+ \w+\s+\[(?P<request>[^\]]*)\] (?P<logger>[\w.]+): (?P<message>.*)$")
+_FIELD = re.compile(r"\w+=\S*")
 _HTTP = re.compile(r"^(?P<method>[A-Z]+) (?P<path>\S+) -> (?P<status>\d+) \((?P<ms>[\d.]+)ms\)$")
 _FEEDBACK_TASKS = {FEEDBACK_SCORE_TASK, FEEDBACK_WRITE_TASK}
 
@@ -76,13 +77,57 @@ class Turn:
 
 
 def parse_log(lines: Iterable[str]) -> list[LogEvent]:
-    """Lines that aren't a log record (the continuation lines of a traceback) are skipped."""
+    """Reads both log formats, so a log that rotated mid-change (`app.log.1` text, `app.log` JSON) reports as one.
+
+    Lines that aren't a log record (the continuation lines of a traceback) are skipped.
+    """
     events: list[LogEvent] = []
     for line in lines:
-        if match := _LINE.match(line.rstrip("\n")):
-            event, fields = split_fields(match["message"])
+        line = line.rstrip("\n")
+        if line.startswith("{"):
+            if event := _json_event(line):
+                events.append(event)
+        elif match := _LINE.match(line):
+            event, fields = _split_fields(match["message"])
             events.append(LogEvent(match["request"], match["logger"], event, dict(fields)))
     return events
+
+
+# The JSON line contract (what U1's structlog config must write): these keys are the record, every other key is a field.
+_JSON_RECORD_KEYS = {"event", "logger", "request_id", "level", "timestamp"}
+
+
+def _json_event(line: str) -> LogEvent | None:
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or "event" not in record:
+        return None
+    # Fields come back as the text format gave them: strings, "-" for a missing value, "true"/"false" for booleans.
+    fields = {k: _text(v) for k, v in record.items() if k not in _JSON_RECORD_KEYS}
+    logger = str(record.get("logger", "-"))
+    event = str(record["event"])
+    if logger == "app.request" and {"method", "path", "status", "duration_ms"} <= fields.keys():
+        # The access line is one message in the text format; rebuild it so `_HTTP` reads both.
+        event = f"{fields['method']} {fields['path']} -> {fields['status']} ({float(fields['duration_ms']):.1f}ms)"
+        fields = {}
+    return LogEvent(str(record.get("request_id", "-")), logger, event, fields)
+
+
+def _split_fields(message: str) -> tuple[str, list[tuple[str, str]]]:
+    """Old text lines: `llm_call a=1 b=2` -> ("llm_call", [("a", "1"), ("b", "2")]). Any other message comes back
+    whole, with no fields."""
+    event, *tokens = message.split() or [""]
+    if not tokens or not all(_FIELD.fullmatch(token) for token in tokens):
+        return message, []
+    return event, [(key, value) for key, _, value in (token.partition("=") for token in tokens)]
+
+
+def _text(value: object) -> str:
+    if value is None:
+        return "-"
+    return str(value).lower() if isinstance(value, bool) else str(value)
 
 
 def group_requests(events: Iterable[LogEvent]) -> dict[str, list[LogEvent]]:

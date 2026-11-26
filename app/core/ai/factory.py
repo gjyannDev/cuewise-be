@@ -1,6 +1,5 @@
-import logging
-
 from app.core.config import Settings
+from app.core.logging import get_logger
 
 from .deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from .google_embedder import GoogleEmbedder
@@ -8,10 +7,10 @@ from .openai_compatible import OpenAICompatibleProvider
 from .provider import LLMProvider
 from .tracing import Tracer, TracingProvider
 
-logger = logging.getLogger("app.llm")
-stt_logger = logging.getLogger("app.stt")
-tts_logger = logging.getLogger("app.tts")
-rag_logger = logging.getLogger("app.rag")
+logger = get_logger("app.llm")
+stt_logger = get_logger("app.stt")
+tts_logger = get_logger("app.tts")
+rag_logger = get_logger("app.rag")
 
 
 def build_provider(settings: Settings, *, model: str | None = None, tracer: Tracer | None = None) -> LLMProvider | None:

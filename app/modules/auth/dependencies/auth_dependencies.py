@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError, TokenMissingError
+from app.core.logging import bind_log_context
 from app.db.session import get_db
 
 from ..constants.auth_constants import Permission, Role, permissions_for
@@ -38,7 +39,10 @@ def get_current_user(
     token = credentials.credentials.strip() if credentials else ""
     if not token:
         raise TokenMissingError("Authentication required")
-    return service.authenticate_token(token)
+    user = service.authenticate_token(token)
+    # Every later log line of this request names the user (an id only, never the email).
+    bind_log_context(user=str(user.id))
+    return user
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]

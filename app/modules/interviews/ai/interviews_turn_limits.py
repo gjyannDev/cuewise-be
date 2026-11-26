@@ -101,7 +101,6 @@ def settle(
         "-" if action == TurnAction.complete else ("bank" if fallback else "llm")
     )
     log_turn_summary(
-        session_id,
         decision="none" if decision is None else _decision_label(decision),
         action=action,
         override=plan.override,

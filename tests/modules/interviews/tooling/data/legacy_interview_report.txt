@@ -1,0 +1,80 @@
+interview 00000000-0000-0000-0000-00000000000a
+  role=backend level=mid type=mixed main_questions=5 status=in_progress stored_questions=3 follow_ups=1 models=test-model log_turns=2 of 2 reference_notes=hybrid, 3 notes, scores 0.812,0.700,-, ok, 45 ms
+
+questions (database; usage is the whole turn that produced the question)
+  pos  kind       main  category   source  write_prompt    decide_prompt          tokens_in/out  llm_ms  answer_chars
+  1    main       1     technical  llm     interviewer_v4  -                      824/38         1000    120
+  2    follow_up  1     technical  llm     interviewer_v4  follow_up_decision_v1  1720/78        1000    300
+  3    main       3     technical  llm     interviewer_v4  follow_up_decision_v1  1530/60        1000    -
+
+turns (log; llm_ms = LLM time, http_ms = what the browser waited, request = id to search the log for)
+  turn     answered        asked           decision              action         override     source  fallback  llm_ms  http_ms  http  request
+  start    -               q1 main#1       -                     -              -            -       -         16255   16300    201   req-start
+  1        q1 main#1       q2 follow_up#1  follow_up:no_example  follow_up      -            llm     -         22536   22556    201   req-1
+  2        q2 follow_up#1  q3 main#3       next_question         next_question  cap_reached  llm     no_time   5000    5120     200   req-2
+  partial  -               -               -                     -              -            -       -         100     150      500   req-crashed
+
+calls (log; every LLM call, in order)
+  turn     call        prompt_version              in   out  ms     budget_left  est_in  attempts  finish  outcome
+  start    jd_summary  job_description_summary_v2  444  60   9669   -            542     1         stop    summary_ok
+  start    write       interviewer_v4              824  38   6586   30000        926     1         stop    ok
+  1        decide      follow_up_decision_v1       777  42   9735   30000        1000    1         stop    ok follow_up/no_example
+  1        write       interviewer_v4              943  36   12800  20265        1000    1         stop    ok
+  2        decide      follow_up_decision_v1       700  30   2000   30000        800     1         stop    ok next_question/-
+  2        write       interviewer_v4              800  30   3000   28000        800     2         length  ok
+  partial  decide      follow_up_decision_v1       700  30   100    30000        700     1         stop    ok next_question/-
+
+cost (tokens, from the log)
+  total                5,454 tokens  (in 5,188 + out 266; 5,454 per interview, 2,727 per main question)
+  follow-up feature    2,528 tokens = 46% of all  (decide calls on move-on turns 730, decide calls on follow-up turns 819, follow-up question writes 979)
+  per answer turn      follow-up turns avg 1,798 (n=1); move-on turns avg 1,560 (n=1)
+
+tokens by purpose (from the log)
+  purpose     calls  in     out  total  share
+  write       3      2,567  104  2,671  49%
+  decide      3      2,177  102  2,279  42%
+  jd_summary  1      444    60   504    9%
+
+effectiveness (does the follow-up feature do its job)
+  follow-ups           1 asked over 2 main questions  (0.50 per main question; main questions with at least one: 1)
+  decisions            follow_up:no_example=1 next_question=1
+  how threads ended    cap=1  (model = it decided to move on; cap / time = the code stopped it; failed = a call failed)
+  overrides            cap_reached=1
+  fallbacks            no_time=1
+  sources              llm=2
+  reliability          1 of 2 answer turns (50%)  (ran without a failed decide call or a fallback)
+  answer length        2.5x the characters of the answer they followed  (median over 1 follow-up answers; a proxy, not a quality score)
+  decision quality     not measurable from live logs  (run the eval runner with --task decide for accuracy, over- and under-probing)
+
+efficiency (time, deadline, repeated and wasted tokens)
+  decide time          43%  (of the LLM time of an answer turn)
+  busiest turn         75%  (22,536 of 30,000 ms turn deadline)
+  slowest decide call  97%  (9,735 of 10,000 ms decide cap)
+  lowest budget left   20,265 ms  (at the start of a call)
+  fixed system prompt  85%  (of the estimated input is the same system prompt every call repeats)
+  provider cache hit   50%  (share of input tokens served from the provider's prompt cache)
+  waste                0 calls without a usable reply (0 tokens)  (1 provider retries; 1 cut off (finish is not stop))
+  estimate             write +6%, decide +14%, jd_summary +22%  (context estimate vs provider input tokens, est/actual-1)
+
+latency (milliseconds, from the log)
+  call        n  p50   p95    max
+  write       3  6586  12800  12800
+  decide      3  2000  9735   9735
+  jd_summary  1  9669  9669   9669
+  turn llm    2  5000  22536  22536
+  request     4  5120  22556  22556
+
+watch
+  turn 1: decide call used 97% of its 10s cap (9735 ms)
+  turn 2: write call needed 2 provider attempts, so its latency hides a retry
+  turn 2: write call finish=length (the reply may be cut off)
+  turn 2: override=cap_reached fallback=no_time source=llm
+
+checks (database, and log vs database)
+  ok   positions run 1..N without gaps
+  FAIL main questions are numbered 1..K: found [1, 3]
+  ok   at most 2 follow-ups per main question
+  ok   every follow-up has a main parent with the same main number and category
+  ok   log action matches the stored question kind
+  ok   log source matches the stored question source
+  FAIL the turn's call tokens add up to the stored usage (the jd summary is not part of a question): turn 2: log 1500/60, stored 1530/60

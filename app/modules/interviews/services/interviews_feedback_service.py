@@ -21,6 +21,7 @@ from app.core.errors import (
     FeedbackUnavailableError,
     InterviewNotCompletedError,
 )
+from app.core.logging import bind_log_context
 from app.modules.auth.models.auth_model import User
 
 from ..ai.interviews_context import FeedbackScoreInputs, FeedbackWriteInputs
@@ -136,6 +137,7 @@ class FeedbackService:
     def generate(self, user: User, session_id: uuid.UUID) -> tuple[InterviewFeedback, bool]:
         """The feedback, generated now (True) or already stored (False). Checks run in this order so a stored result
         is returned even when the LLM is off, and nothing is claimed for a request that can't run."""
+        bind_log_context(session=str(session_id))
         session = owned_session(self.repo, user, session_id)
         if session.status != SessionStatus.completed:
             raise InterviewNotCompletedError("Feedback is available once the interview is completed")
@@ -237,7 +239,6 @@ class FeedbackService:
             if scored.result is None:
                 self._write(claim, status=FeedbackStatus.failed, failure_reason=scored.failure, finished_at=self.now(), **usage)
                 log_feedback_summary(
-                    session_id,
                     outcome="failed",
                     score=score_results,
                     quotes_rejected=quotes_rejected,
@@ -277,7 +278,6 @@ class FeedbackService:
             **_usage("write", written.results),
         )
         log_feedback_summary(
-            session_id,
             outcome="generated",
             overall=overall,
             text_source=source,
@@ -301,7 +301,7 @@ class FeedbackService:
             finished_at=self.now(),
             **({"rubric_version": FEEDBACK_RUBRIC_VERSION} | usage),
         )
-        log_feedback_summary(session_id, outcome="insufficient", score=score_results or [])
+        log_feedback_summary(outcome="insufficient", score=score_results or [])
         return _Outcome(FeedbackStatus.generated, outcome="insufficient")
 
     def _write(self, claim: _Claim, **values: Any) -> None:

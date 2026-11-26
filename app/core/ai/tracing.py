@@ -11,14 +11,15 @@ future provider (or fallback chain) without touching its code.
 Full prompt and reply text is sent on purpose (owner's decision, see docs/features/langfuse-tracing/spec.md).
 """
 
-import logging
 from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, ExitStack, aclosing, contextmanager
 from typing import Any, NamedTuple
 
+from app.core.logging import get_logger
+
 from .provider import ChatMessage, LLMError, LLMProvider, LLMResult, ReasoningEffort
 
-logger = logging.getLogger("app.llm")
+logger = get_logger("app.llm")
 
 # What the interviews code tells us about a call (task, prompt_version, budget_left_ms); recorded as metadata.
 TraceLabels = Mapping[str, str | int | None]
@@ -49,7 +50,7 @@ def _safe(action: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
             try:
                 return fn(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001  fail-open: any SDK error is logged and the call carries on
-                logger.warning("langfuse %s failed (%s)", action, type(exc).__name__)
+                logger.warning("langfuse_failed", action=action, error=type(exc).__name__)
                 return None
 
         return guarded
@@ -198,14 +199,14 @@ class Tracer:
                 trace_id = getattr(span, "trace_id", None)
                 stack.enter_context(self._propagate(**attrs))  # type: ignore[misc]
             except Exception as exc:  # noqa: BLE001  fail-open: a trace that can't start must not stop the request
-                logger.warning("langfuse trace start failed (%s)", type(exc).__name__)
+                logger.warning("langfuse_failed", action="trace start", error=type(exc).__name__)
         try:
             yield trace_id
         finally:
             try:
                 stack.close()
             except Exception as exc:  # noqa: BLE001  fail-open: a trace that can't close must not stop the request
-                logger.warning("langfuse trace end failed (%s)", type(exc).__name__)
+                logger.warning("langfuse_failed", action="trace end", error=type(exc).__name__)
 
     @_safe("trace output")
     def set_trace_output(self, output: Any) -> None:
@@ -249,7 +250,7 @@ class Tracer:
             for item in items:
                 self._client.create_dataset_item(dataset_name=name, **item)
         except Exception as exc:  # noqa: BLE001  fail-open: a dataset upload failure is reported as False
-            logger.warning("langfuse dataset upsert failed (%s)", type(exc).__name__)
+            logger.warning("langfuse_failed", action="dataset upsert", error=type(exc).__name__)
             return False
         return True
 
@@ -276,7 +277,7 @@ class Tracer:
             fetched = {item.id: item for item in self._client.get_dataset(dataset).items}
             data = [fetched.get(item["id"]) for item in items]
             if any(item is None for item in data):
-                logger.warning("langfuse experiment skipped (dataset items missing after the sync)")
+                logger.warning("langfuse_failed", action="experiment", outcome="skipped:dataset_items_missing")
                 return None
             result = self._client.run_experiment(
                 name=name,
@@ -293,7 +294,7 @@ class Tracer:
             trace_ids = {r.item.id: r.trace_id for r in result.item_results}
             return ExperimentRun(result.run_name, result.experiment_id, result.experiment_url, trace_ids)
         except Exception as exc:  # noqa: BLE001  fail-open like every Tracer call: Langfuse must not stop an eval
-            logger.warning("langfuse experiment failed (%s)", type(exc).__name__)
+            logger.warning("langfuse_failed", action="experiment", error=type(exc).__name__)
             return None
 
     def start_generation(
@@ -313,7 +314,7 @@ class Tracer:
                 model_parameters=dict(model_parameters or {}),
             )
         except Exception as exc:  # noqa: BLE001  fail-open: the call runs untraced if the generation can't start
-            logger.warning("langfuse generation start failed (%s)", type(exc).__name__)
+            logger.warning("langfuse_failed", action="generation start", error=type(exc).__name__)
             return Generation(None, labels)
         return Generation(observation, labels)
 
@@ -334,14 +335,14 @@ class Tracer:
                     )
                 )
             except Exception as exc:  # noqa: BLE001  fail-open: a step that can't start must not stop the request
-                logger.warning("langfuse step start failed (%s)", type(exc).__name__)
+                logger.warning("langfuse_failed", action="step start", error=type(exc).__name__)
         try:
             yield Step(observation)
         finally:
             try:
                 stack.close()
             except Exception as exc:  # noqa: BLE001  fail-open: a step that can't close must not stop the request
-                logger.warning("langfuse step end failed (%s)", type(exc).__name__)
+                logger.warning("langfuse_failed", action="step end", error=type(exc).__name__)
 
     @_safe("check")
     def check(
@@ -379,7 +380,7 @@ class Tracer:
             try:
                 action()
             except Exception as exc:  # noqa: BLE001  fail-open: shutdown tries every step even if one fails
-                logger.warning("langfuse shutdown step failed (%s)", type(exc).__name__)
+                logger.warning("langfuse_failed", action="shutdown step", error=type(exc).__name__)
 
 
 def build_tracer(settings: Any, *, environment: str | None = None) -> Tracer:
@@ -389,9 +390,7 @@ def build_tracer(settings: Any, *, environment: str | None = None) -> Tracer:
             settings.langfuse_public_key is not None
             or settings.langfuse_secret_key is not None
         ):
-            logger.warning(
-                "Langfuse tracing is off: set both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY"
-            )
+            logger.warning("Langfuse tracing is off: set both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY")
         return Tracer(None)
     try:
         from langfuse import Langfuse
@@ -403,9 +402,7 @@ def build_tracer(settings: Any, *, environment: str | None = None) -> Tracer:
             environment=environment or settings.app_env,
         )
     except Exception as exc:  # noqa: BLE001  fail-open: tracing turns off instead of stopping startup
-        logger.warning(
-            "Langfuse tracing is off: client setup failed (%s)", type(exc).__name__
-        )
+        logger.warning("langfuse_failed", action="client setup", error=type(exc).__name__, outcome="tracing_off")
         return Tracer(None)
     return Tracer(client)
 

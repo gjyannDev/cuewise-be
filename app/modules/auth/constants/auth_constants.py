@@ -1,7 +1,8 @@
-import logging
 from enum import StrEnum
 
-logger = logging.getLogger("app.auth")
+from app.core.logging import get_logger
+
+logger = get_logger("app.auth")
 
 
 class Role(StrEnum):
@@ -47,5 +48,5 @@ def permissions_for(role: str) -> frozenset[Permission]:
         return ROLE_PERMISSIONS[Role(role)]
     except (ValueError, KeyError):
         # Default-deny: an unmapped role gets nothing rather than crashing the request.
-        logger.warning("Role %r has no permission mapping; denying all permissions", role)
+        logger.warning("role_without_permissions", role=role, outcome="denied_all")
         return frozenset()

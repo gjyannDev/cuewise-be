@@ -289,7 +289,7 @@ def test_one_log_line_with_host_and_outcome_but_not_the_url_or_text(web, import_
     [line] = [r.getMessage() for r in app_logs.records if r.name == "app.job_url"]
     assert "host=jobs.example.com" in line
     assert "outcome=ok" in line
-    assert "chars=" in line and "truncated=False" in line
+    assert "chars=" in line and "truncated=false" in line
     everything = " ".join(r.getMessage() for r in app_logs.records)
     assert "s3cr3t-token" not in everything
     assert "/postings/42" not in everything

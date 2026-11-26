@@ -2,8 +2,9 @@ import logging
 import uuid
 
 import pytest
+import structlog
 
-from app.core.logging import LOG_FORMAT, request_id_ctx
+from app.core.logging import bind_log_context, get_logger
 from app.modules.interviews.ai.interviews_turn_log import (
     log_llm_call,
     log_retrieval,
@@ -40,7 +41,7 @@ BUDGET = 30.0
 @pytest.fixture(autouse=True)
 def _reset_request_id():
     yield
-    request_id_ctx.set("-")
+    structlog.contextvars.clear_contextvars()
 
 
 def session(status="in_progress", count=5, id_=S):
@@ -79,23 +80,24 @@ def emit_call(
     session_id, task, version, *, prompt, completion, ms, left, est, system=700, outcome="ok", action=None, gap=None,
     attempts=1, finish="stop", cached=None,
 ):  # fmt: skip
-    logging.getLogger("app.llm.context").info(
-        "context_build task=%s strategy=%s est_tokens=%s system_tokens=%s dropped=%s outcome=%s %s",
-        task, "window_ledger", est, system, 0, "ok", "ledger=0 notes=0 summary=1 turns_full=1",
+    bind_log_context(session=str(session_id))
+    get_logger("app.llm.context").info(
+        "context_build", task=task, strategy="window_ledger", est_tokens=est, system_tokens=system, dropped=0,
+        outcome="ok", ledger=0, notes=0, summary=1, turns_full=1,
     )  # fmt: skip
     log_llm_call(
-        logging.INFO, session_id, outcome, task=task, prompt_version=version, model="test-model", prompt_tokens=prompt,
+        logging.INFO, outcome, task=task, prompt_version=version, model="test-model", prompt_tokens=prompt,
         completion_tokens=completion, cached_tokens=cached, latency_ms=ms, attempts=attempts, finish=finish,
         budget_left_ms=left, action=action, gap=gap,
     )  # fmt: skip
 
 
 def emit_http(method, path, status, ms):
-    logging.getLogger("app.request").info("%s %s -> %s (%.1fms)", method, path, status, ms)
+    get_logger("app.request").info("http_request", method=method, path=path, status=status, duration_ms=ms)
 
 
 def emit_start(session_id=S, request="req-start"):
-    request_id_ctx.set(request)
+    bind_log_context(request_id=request)
     emit_call(session_id, SUMMARY_TASK, "job_description_summary_v2", prompt=444, completion=60, ms=9669, left=None, est=542, outcome="summary_ok")
     emit_call(session_id, INTERVIEWER_TASK, "interviewer_v4", prompt=824, completion=38, ms=6586, left=30000, est=926)
     emit_http("POST", "/api/v1/interviews", 201, 16300.1)
@@ -105,11 +107,12 @@ def emit_answer_turn(
     session_id=S, request="req-1", *, decision="next_question", action="next_question", override=None, source="llm",
     fallback=None, llm_ms=5000, decide=(700, 30, 2000), write=(800, 30, 3000), est=800, **write_extra,
 ):  # fmt: skip
-    request_id_ctx.set(request)
+    bind_log_context(request_id=request)
     chosen, _, gap = decision.partition(":")
     emit_call(session_id, DECISION_TASK, "follow_up_decision_v1", prompt=decide[0], completion=decide[1], ms=decide[2], left=30000, est=est, action=chosen, gap=gap or None)
     emit_call(session_id, INTERVIEWER_TASK, "interviewer_v4", prompt=write[0], completion=write[1], ms=write[2], left=30000 - decide[2], est=est, **write_extra)
-    log_turn_summary(session_id, decision=decision, action=action, override=override, source=source, fallback=fallback, llm_ms=llm_ms)
+    bind_log_context(session=str(session_id))
+    log_turn_summary(decision=decision, action=action, override=override, source=source, fallback=fallback, llm_ms=llm_ms)
     emit_http("POST", f"/api/v1/interviews/{session_id}/messages", 201, llm_ms + 20)
 
 
@@ -122,8 +125,8 @@ def emit_follow_up_turn(session_id=S, request="req-1"):
 
 
 def lines_of(app_logs):
-    formatter = logging.Formatter(LOG_FORMAT)
-    return [formatter.format(record) for record in app_logs.records]
+    """The log file the real pipeline wrote: JSON lines, as `interview_report` reads them."""
+    return app_logs.json_lines()
 
 
 def squash(report):
@@ -170,7 +173,7 @@ def test_parse_log_reads_the_apps_own_lines_and_skips_traceback_lines(app_logs):
 def test_the_start_the_answers_and_a_request_that_failed_half_way_are_told_apart(app_logs):
     emit_start()
     emit_answer_turn(request="req-1")
-    request_id_ctx.set("req-crashed")
+    bind_log_context(request_id="req-crashed")
     emit_call(S, DECISION_TASK, "follow_up_decision_v1", prompt=700, completion=30, ms=100, left=30000, est=700, action="next_question")
     emit_http("POST", f"/api/v1/interviews/{S}/messages", 500, 150)
 
@@ -184,7 +187,7 @@ def test_the_start_the_answers_and_a_request_that_failed_half_way_are_told_apart
 def test_a_feedback_request_is_not_a_turn(app_logs):  # interview-feedback plan step 5
     emit_start()
     emit_answer_turn(request="req-1")
-    request_id_ctx.set("req-feedback")
+    bind_log_context(request_id="req-feedback")
     emit_call(S, FEEDBACK_SCORE_TASK, "feedback_score_v1", prompt=3000, completion=900, ms=8000, left=60000, est=3000)
     emit_call(S, FEEDBACK_WRITE_TASK, "feedback_write_v1", prompt=1500, completion=300, ms=3000, left=52000, est=1500)
     emit_http("POST", f"/api/v1/interviews/{S}/feedback", 201, 11100)
@@ -315,9 +318,10 @@ def test_efficiency_reports_time_deadline_and_repeated_prompt(app_logs):
 
 
 def test_the_provider_cache_hit_rate_is_shown_when_reported(app_logs):
-    request_id_ctx.set("req-1")
+    bind_log_context(request_id="req-1")
     emit_call(S, INTERVIEWER_TASK, "interviewer_v4", prompt=1000, completion=30, ms=900, left=30000, est=1000, cached=500)
-    log_turn_summary(S, decision="next_question", action="next_question", source="llm", llm_ms=900)
+    bind_log_context(session=str(S))
+    log_turn_summary(decision="next_question", action="next_question", source="llm", llm_ms=900)
 
     assert "provider cache hit 50%" in report_for(app_logs, [question(1), question(2)])
 
@@ -361,8 +365,9 @@ def test_watch_explains_an_override_a_fallback_and_a_turn_near_the_deadline(app_
 
 
 def test_a_failed_decide_call_is_called_out(app_logs):
-    request_id_ctx.set("req-1")
-    log_turn_summary(S, decision="none", action="next_question", source="llm", llm_ms=100)
+    bind_log_context(request_id="req-1")
+    bind_log_context(session=str(S))
+    log_turn_summary(decision="none", action="next_question", source="llm", llm_ms=100)
 
     assert "turn 1: the decide call failed, so no follow-up was possible" in report_for(app_logs, [question(1), question(2)])
 
@@ -711,8 +716,9 @@ def test_a_pooled_report_is_named_after_its_size_and_the_newest_interview(db, tm
 
 
 def test_the_retrieval_at_start_is_one_fact_with_mode_count_scores_and_outcome(app_logs):  # knowledge-base-rag AC20
-    request_id_ctx.set("req-start")
-    log_retrieval(logging.INFO, S, mode="vector", scores=[0.91, 0.84], outcome="ok", latency_ms=412)
+    bind_log_context(request_id="req-start")
+    bind_log_context(session=str(S))
+    log_retrieval(logging.INFO, mode="vector", scores=[0.91, 0.84], outcome="ok", latency_ms=412)
     emit_start()
 
     facts = dict(analysis(app_logs, [question(1)]).facts)

@@ -10,7 +10,6 @@ Every failure becomes a generic error; the real cause is logged. One line per re
 never the URL (a query string can carry tokens), never the page or pasted text.
 """
 
-import logging
 import time
 from typing import NamedTuple
 from urllib.parse import urlsplit
@@ -20,6 +19,7 @@ from app.core.errors import (
     JobUrlUnreachableError,
     JobUrlUnreadableError,
 )
+from app.core.logging import get_logger
 from app.core.safe_fetch import (
     ResponseUnreadableError,
     SafeFetcher,
@@ -41,7 +41,8 @@ from ..utils.interviews_job_url_utils import (
     truncate_on_word,
 )
 
-job_url_logger = logging.getLogger("app.job_url")
+# `user` comes from the request's log context (bound by the auth dependency).
+job_url_logger = get_logger("app.job_url")
 
 
 class JobText(NamedTuple):
@@ -59,8 +60,8 @@ def _fit(text: str | None) -> JobText:
     return JobText(*truncate_on_word(text, JOB_DESCRIPTION_MAX_LENGTH))
 
 
-def _sizes(result: JobText | None) -> tuple[object, object]:
-    return ("-", "-") if result is None else (len(result.text), result.truncated)
+def _sizes(result: JobText | None) -> dict[str, object]:
+    return {"chars": None, "truncated": None} if result is None else {"chars": len(result.text), "truncated": result.truncated}
 
 
 class JobUrlService:
@@ -83,13 +84,13 @@ class JobUrlService:
             raise JobUrlUnreadableError(JOB_URL_UNREADABLE_MESSAGE) from exc
         finally:
             job_url_logger.info(
-                "job_url source=url user=%s host=%s bytes=%s chars=%s truncated=%s latency_ms=%s outcome=%s",
-                user.id,
-                urlsplit(url).hostname or "-",
-                "-" if size is None else size,
-                *_sizes(result),
-                round((time.perf_counter() - started) * 1000),
-                outcome,
+                "job_url",
+                source="url",
+                host=urlsplit(url).hostname or "-",
+                bytes=size,
+                **_sizes(result),
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                outcome=outcome,
             )
 
     def import_pasted_text(self, user: User, content: str, content_format: JobTextFormat) -> JobText:
@@ -103,11 +104,11 @@ class JobUrlService:
             raise JobTextUnreadableError(JOB_TEXT_UNREADABLE_MESSAGE) from exc
         finally:
             job_url_logger.info(
-                "job_url source=paste user=%s format=%s in_chars=%s chars=%s truncated=%s latency_ms=%s outcome=%s",
-                user.id,
-                content_format,
-                len(content),
-                *_sizes(result),
-                round((time.perf_counter() - started) * 1000),
-                outcome,
+                "job_url",
+                source="paste",
+                format=content_format,
+                in_chars=len(content),
+                **_sizes(result),
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                outcome=outcome,
             )
