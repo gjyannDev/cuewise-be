@@ -1,0 +1,46 @@
+last 3 interviews, newest first; the numbers below are pooled over all of them
+
+interviews (newest first)
+  interview                             status     main  follow_ups  log_turns  tokens  feature  turn_p95_ms  reliable  failed_checks  watch_notes
+  01a2152c-d27c-756f-a6cc-614ee97f2615  completed  3     0           3/3        7623    38%      12527        100%      ok             0
+  01a21525-5502-7563-a943-aed3def96e14  completed  3     0           3/3        8010    38%      9246         100%      ok             0
+  01a1f8ef-8a37-72e9-ad2e-fb9b9615d60b  abandoned  1     0           0/-        1433    0%       -            n/a       ok             0
+
+cost (tokens, from the log)
+  total                17,066 tokens  (in 16,544 + out 522; 5,689 per interview, 2,438 per main question)
+  follow-up feature    5,925 tokens = 35% of all  (decide calls on move-on turns 5,925, decide calls on follow-up turns 0, follow-up question writes 0)
+  per answer turn      follow-up turns avg - (n=0); move-on turns avg 2,132 (n=6)
+
+tokens by purpose (from the log)
+  purpose  calls  in     out  total  share
+  write    3      4,162  111  4,273  25%
+  decide   6      5,682  243  5,925  35%
+  other    4      6,700  168  6,868  40%
+
+effectiveness (does the follow-up feature do its job)
+  follow-ups           0 asked over 7 main questions  (0.00 per main question; main questions with at least one: 0)
+  decisions            next_question=6
+  how threads ended    none  (model = it decided to move on; cap / time = the code stopped it; failed = a call failed)
+  overrides            none
+  fallbacks            none
+  sources              llm=4
+  reliability          6 of 6 answer turns (100%)  (ran without a failed decide call or a fallback)
+  answer length        n/a  (no answered follow-up yet)
+  decision quality     not measurable from live logs  (run the eval runner with --task decide for accuracy, over- and under-probing)
+
+efficiency (time, deadline, repeated and wasted tokens)
+  decide time          56%  (of the LLM time of an answer turn)
+  busiest turn         42%  (12,527 of 30,000 ms turn deadline)
+  slowest decide call  63%  (6,275 of 10,000 ms decide cap)
+  lowest budget left   24,301 ms  (at the start of a call)
+  fixed system prompt  64%  (of the estimated input is the same system prompt every call repeats)
+  provider cache hit   not reported  (share of input tokens served from the provider's prompt cache)
+  waste                0 calls without a usable reply (0 tokens)  (0 provider retries; 0 cut off (finish is not stop))
+  estimate             write +13%, decide +5%  (context estimate vs provider input tokens, est/actual-1)
+
+latency (milliseconds, from the log)
+  call      n   p50   p95    max
+  write     3   1502  7351   7351
+  decide    6   2005  6275   6275
+  turn llm  6   4666  12527  12527
+  request   30  1358  9277   12558

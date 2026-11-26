@@ -76,8 +76,8 @@ The first path (`docs/ai-engineering-learning-path.md`) built the fundamentals b
 
 **What you build:**
 - **structlog configured in `app/core/logging.py`**: JSON lines to `logs/app.log`, the pretty console renderer in dev. The standard library's `logging` is routed through structlog, so existing `logger.info(...)` calls keep working during the move.
-- **Context binding with `structlog.contextvars`**: `request_id` (replaces `request_id_ctx` and `RequestIdFilter`), and `session_id` / `user_id` bound once per request or turn, not passed to every call.
-- **A redaction processor**: drops or masks keys such as `answer`, `resume`, `job_description`, `token`, `password`, `authorization` before any renderer runs. The "no PII in logs" rule becomes code.
+- **Context binding**: `request_id` (replaces `request_id_ctx` and `RequestIdFilter`), and `session` / `user` bound once per request or turn, not passed to every call. Built as one dict per request that the middleware creates, because FastAPI runs sync dependencies and endpoints in worker threads, each with a copy of the context; outside a request it falls back to `structlog.contextvars`.
+- **A redaction processor**: masks keys such as `answer`, `resume`, `job_description`, `token`, `password`, `authorization` before any renderer runs. The "no PII in logs" rule becomes code. It matches key names only: a secret inside free text (a library's own message, an exception message) is not scanned.
 - **Gradual conversion**: one module at a time to `log.info("llm_call", tokens=..., latency_ms=...)`; delete `split_fields` once nothing uses it.
 - **Keep the interview report working**: `interviews_log.py` (behind `app.scripts.interview_report`) parses today's text log with `split_fields`. Teach it to read the JSON lines, and the old text lines in `logs/app.log.1` too, before the format changes.
 
