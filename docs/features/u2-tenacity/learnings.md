@@ -47,16 +47,16 @@ The two multiply. One LLM task makes at most `(llm_max_retries + 1) x MAX_REPLY_
 **One failing `complete`, walked through the code:**
 1. The adapter's constructor built its policy once: `RetryPolicy(max_retries=..., task="chat", logger=get_logger("app.llm"), clock=..., sleep=...)` (`app/core/ai/openai_compatible.py:53`).
 2. `complete` calls `self._retry.call(lambda remaining: self._attempt(body, remaining=remaining), budget=...)` (`app/core/ai/openai_compatible.py:89`).
-3. `call` builds a fresh `_Call` (start time, attempt count) and a fresh tenacity `Retrying` for this call only (`app/core/ai/retry.py:90`). One adapter serves concurrent requests and worker threads, so nothing per-call lives on the policy.
+3. `call` builds a fresh `_Call` (start time, attempt count) and a fresh tenacity `Retrying` for this call only (`app/core/ai/retry.py:102`). One adapter serves concurrent requests and worker threads, so nothing per-call lives on the policy.
 4. The attempt raises `LLMServerError` (a 503). `once` stamps `attempts` and `latency_ms` on it, then re-raises.
-5. Tenacity asks `retry_if_exception(_transient)` (`:171`): yes, `retryable` is true.
-6. Tenacity runs the **wait before the stop**. `_wait` (`:176`) draws full jitter (`_jitter`, `:36`: random from 0 up to 0.5 s, then 1 s, ...) and raises it to `Retry-After` if the vendor sent one.
-7. Then the stop: `stop_after_attempt(max_retries + 1)` or `out_of_time` (`:129`), which checks `elapsed + coming wait >= budget` on the adapter's clock. Because the wait is already known, a wait that doesn't fit stops the call without sleeping.
-8. Otherwise `_log_wait` (`:143`) logs `retry_wait`, tenacity sleeps with the injected `sleep`, and attempt 2 starts with what is left of the budget.
-9. On the final failure, `call` catches the `LLMError`, `log_giveup` (`:152`) works out the reason (`not_retryable`, `max_attempts` or `deadline`) and logs `retry_giveup`, and the stamped error is raised to the reply loop.
+5. Tenacity asks `retry_if_exception(_transient)` (`:181`): yes, `retryable` is true.
+6. Tenacity runs the **wait before the stop**. `_wait` (`:186`) draws full jitter (`_jitter`, `:36`: random from 0 up to 0.5 s, then 1 s, ...) and raises it to `Retry-After` if the vendor sent one.
+7. Then the stop: `stop_after_attempt(max_retries + 1) | _OutOfTime(state)` (`:67`, a small `stop_base` subclass), which checks `elapsed + coming wait >= budget` on the adapter's clock. Because the wait is already known, a wait that doesn't fit stops the call without sleeping.
+8. Otherwise `_log_wait` (`:153`) logs `retry_wait`, tenacity sleeps with the injected `sleep`, and attempt 2 starts with what is left of the budget.
+9. On the final failure, `call` catches the `LLMError`, `log_giveup` (`:162`) works out the reason (`not_retryable`, `max_attempts` or `deadline`) and logs `retry_giveup`, and the stamped error is raised to the reply loop.
 10. The reply loop (`app/modules/interviews/ai/interviews_decide.py:50`) catches the `LLMError` and stops: no content retry on a transport failure.
 
-**The stream** (`app/core/ai/openai_compatible.py:116`): the retried step is `open_stream`, which opens the request and reads the first chunk. After the first chunk, a failure is stamped `after_output=True`, logged as a `not_retryable` give-up and raised (`:131`). It's never retried: the caller may already have shown the text, so a retry would duplicate it. A `finally` closes the inner generator (`:134`), also when the caller stops reading early.
+**The stream** (`app/core/ai/openai_compatible.py:119`): the retried step is `open_stream`, which opens the request and reads the first chunk. After the first chunk, a failure is stamped `after_output=True`, logged as a `not_retryable` give-up and raised (`:134`). It's never retried: the caller may already have shown the text, so a retry would duplicate it. A `finally` closes the inner generator (`:137`), also when the caller stops reading early.
 
 **The reply header** (`app/modules/interviews/ai/interviews_reply_attempts.py:17`): iterating `ReplyAttempts` yields `(attempt, seconds_left)`. It stops after 2 attempts, at zero time, or (after the first) under 5 s. `stopped_at` tells the feedback turn which outcome to record (`no_time` or `retry_skipped:no_time`, `interviews_feedback_turn.py:332`).
 

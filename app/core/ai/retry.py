@@ -24,9 +24,9 @@ from tenacity import (
     Retrying,
     retry_if_exception,
     stop_after_attempt,
-    stop_any,
     wait_random_exponential,
 )
+from tenacity.stop import stop_base
 
 from app.core.logging import Logger
 
@@ -62,6 +62,17 @@ class _Call:
 
     def stamp(self, exc: LLMError) -> None:
         exc.attempts, exc.latency_ms = self.attempts, self.latency_ms()
+
+
+class _OutOfTime(stop_base):
+    """Stop when the coming wait would end at or past the call's budget. tenacity runs `wait` before `stop`, so the
+    coming wait is known here. It reads the adapter's clock, not tenacity's, so a test's fake clock decides it too."""
+
+    def __init__(self, state: _Call):
+        self._state = state
+
+    def __call__(self, retry_state: RetryCallState) -> bool:
+        return self._state.elapsed() + retry_state.upcoming_sleep >= self._state.budget
 
 
 class RetryPolicy:
@@ -130,14 +141,9 @@ class RetryPolicy:
         return Attempted(value=value, attempts=state.attempts, latency_ms=state.latency_ms())
 
     def _rules(self, state: _Call) -> dict:
-        def out_of_time(rs: RetryCallState) -> bool:
-            # tenacity runs `wait` before `stop`, so the coming wait is known here. Read on the adapter's clock, not
-            # tenacity's, so a test's fake clock decides it too.
-            return state.elapsed() + rs.upcoming_sleep >= state.budget
-
         return {
             "retry": retry_if_exception(_transient),
-            "stop": stop_any(stop_after_attempt(self._max_retries + 1), out_of_time),
+            "stop": stop_after_attempt(self._max_retries + 1) | _OutOfTime(state),
             "wait": _wait,
             "before_sleep": lambda rs: self._log_wait(rs, state.task),
             "reraise": True,
