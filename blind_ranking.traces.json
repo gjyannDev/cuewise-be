@@ -1,0 +1,51 @@
+{
+  "complete-behavioral-junior": {
+    "A": "637a1a570bdf780e210f359436797808",
+    "B": "932cb1f9227699141799649dc7249cb4",
+    "C": "865b27c814bb55381e7797092ffc8efe",
+    "D": "6759863eac59a878e6c18c490a0fc417",
+    "E": "8aa8e538fb0ef651d21f82b45ddafc61"
+  },
+  "long-history-backend-senior": {
+    "A": "f915274a2a7729445202b5479f1bcd3d",
+    "B": "b072b824ef935a8f2cae9f5fb155c2b1",
+    "C": "58d2c2cb2185eb04363a0301cc51fde3",
+    "D": "7d3250a31e620dc44a2972ffd09700fb",
+    "E": "b178e106db5984ea932250204c7c12cb"
+  },
+  "long-job-description-frontend-junior": {
+    "A": "f69692f2df0fd3c76e61f3a12690be42",
+    "B": "b3308d12b5fecd66288bb70dfad276b9",
+    "C": "1e5e393838b295088361a6a5e0f696ce",
+    "D": "8a60dbbb1093debce0a3e5b3e05163e9",
+    "E": "3f4d7487cd2427d7ee3f6f8cc2025616"
+  },
+  "near-empty-data-intern": {
+    "A": "2dc36669b1483343411eb47b354425ad",
+    "B": "45a217a91f10903fa5ed34ae6519b6ad",
+    "C": "b0e558d6e3107a773242d425e61baf07",
+    "D": "b769008e18f6779d187e62f1ab1c2039",
+    "E": "d3f70e57a3dec1c9c44f05fc16229207"
+  },
+  "profile-injection-backend-mid": {
+    "A": "5211d00bd30fe22a9ae8719a1d6d52bd",
+    "B": "941ca94e73e5277e569d1fd00a47db87",
+    "C": "839057534913fe8280e91d5c83af0f43",
+    "D": "0f7db1d246c15e1839dd65f0a4df5553",
+    "E": "2f11e5140d76e6db3d38ee8ec9f8744b"
+  },
+  "profile-mismatch-backend-mid": {
+    "A": "caf278fb40c7be4e494ed06216961b5d",
+    "B": "652cbc58a221a305ffb05ee757ad9898",
+    "C": "1a68f2fb101f556e4ce2c888c0f48f5f",
+    "D": "663d3ad5a038cbe2e9aee13742ef903c",
+    "E": "4e80aede6875466f7fb8db4f3c8d1217"
+  },
+  "strong-backend-mid": {
+    "A": "d51f448179a93677db347328106d1333",
+    "B": "39c8cdf72ddd2e270486cd08a58c8dc6",
+    "C": "c98eefe652b4fa3bf742ec0e58f0bb1f",
+    "D": "6e684440216e4bc01352cd6112990fca",
+    "E": "e413b102842620ceab5286a9de1fd6c3"
+  }
+}

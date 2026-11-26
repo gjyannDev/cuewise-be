@@ -604,7 +604,7 @@ reference answers.
 - [ ] Slice 8d: Résumé-aware interview (profile in the question prompt and retrieval query)
 - [ ] Slice 8e: Feedback grounding (retrieved strong-answer notes in the feedback prompts)
 - [ ] Slice 9: Tool use and agents (a bounded tool loop, read-only tools)
-- [ ] Slice 10: Provider fallback chain (`LLM_PROVIDERS`, the same evals on each vendor)
+- [ ] Slice 10: Provider fallback chain (`LLM_PROVIDERS`, the same evals on each xvendor)
 
 ## Slices
 

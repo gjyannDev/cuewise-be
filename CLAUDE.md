@@ -84,13 +84,14 @@ Rules:
 - Migrations: `uv run alembic revision --autogenerate -m "<msg>"` then `uv run alembic upgrade head` (always review the generated migration)
 
 ## AI Engineering Guidelines
-- **Provider abstraction**: LLM/embedding calls live behind an interface in the feature (or `core/ai/`); no direct SDK calls from routes, controllers or services (services orchestrate through the interface).
+- **Provider abstraction (LangChain)**: the project is migrating from the hand-built `LLMProvider` to LangChain (`docs/ai-engineering-upgrade-path.md`, U3). LangChain's `BaseChatModel` / `Embeddings` are the model abstraction, built from config by the factory in `core/ai/` (never hardcoded model names). LangChain may only be imported in `app/core/ai/` and the feature `ai/` folders; routes, controllers, services and repositories never import LangChain or a vendor SDK; services call the feature's `ai/` functions. Vendor exceptions are mapped to the `LLMError` types in `core/ai/` before they leave it. Don't use LangChain vector stores (`PGVector` / `PGVectorStore`) for the DB; SQL stays in repositories, and LangChain retrievers in a feature's `ai/` folder get the repository's search functions from the service instead of importing the repository. Until U3 is done, tasks not yet migrated still use `LLMProvider`; don't mix both in one task.
 - **Prompts are data, not inline strings**: keep them in dedicated, versioned files/modules; no prompt text scattered through business logic.
 - **Structured outputs**: validate all LLM output with Pydantic schemas; handle malformed/empty responses with retries and a safe fallback.
 - **Cost & reliability**: set timeouts, retries with backoff, max tokens, and log token usage/latency per call. Never block the event loop; use async clients.
 - **Prompt-injection safety**: treat user text (answers, resumes, job descriptions) as untrusted; separate instructions from user content, never let it alter system behavior, and never put secrets in prompts.
 - **Privacy**: interview answers/resumes are personal data; don't log raw content, and minimize what is sent to providers.
 - **Evaluation**: add a small eval set (sample inputs + expected qualities) for each AI feature so prompt/model changes can be compared, not guessed.
+- **Compare AI changes against the baseline**: after changing a prompt, model/provider config, `core/ai/`, a feature `ai/` folder, retrieval or ingestion, run the eval task(s) that cover it (same model, at least 2 repeats) and compare the run with `docs/features/upgrade-baselines/baselines.md` through Langfuse. A difference within the noise margin is no change; a drop beyond it is a regression to fix before moving on. When a change that moves a score is kept on purpose, record its run as the new baseline row. Skip this for non-AI changes.
 - **Tests**: mock the LLM in unit tests (deterministic); keep real-model calls in separate, opt-in tests.
 - **RAG** (when added): keep ingestion, chunking, embedding, retrieval, and generation as separate, individually testable steps.
 - **Teach as you build**: when adding an AI concept, briefly explain what it is and why it was chosen over alternatives.
@@ -98,7 +99,7 @@ Rules:
 ## Workflow / Definition of Done
 1. Orient with graphify + `ctx_compose` before changing anything.
 2. Implement within the route → controller → service → repository layers (schema/utils included).
-3. Add/update tests and run them; run lint.
+3. Add/update tests and run them; run lint. For AI changes, also run the covering evals and compare with the baseline (see Evaluation above).
 4. Run `graphify update .`.
 5. Summarize what changed and what's left. **Do not commit or push.**
 
