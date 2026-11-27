@@ -47,8 +47,13 @@ class ChatTrace(BaseCallbackHandler):
     def succeed(self, result: LLMResult) -> None:
         self._started().succeed(result)
 
-    def fail(self, error: LLMError) -> None:
-        self._started().fail(error)
+    def fail(self, error: LLMError, partial_text: str = "") -> None:
+        # `partial_text`: what a stream had sent before it failed (shown to the user, so kept in the trace).
+        self._started().fail(error, partial_text)
+
+    def cancel(self, partial_text: str) -> None:
+        """A stream closed before it finished (client left, or the turn's deadline ran out). No-op once ended."""
+        self._started().cancel(partial_text)
 
     def _started(self) -> Generation:
         # A call that never reached the model (no budget left) still shows up, as today, with no input.
