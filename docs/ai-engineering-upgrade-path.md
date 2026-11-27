@@ -17,9 +17,10 @@ The first path (`docs/ai-engineering-learning-path.md`) built the fundamentals b
 | U0 | Baselines | Every later slice compares against these numbers |
 | U1 | structlog | Every later slice logs through it |
 | U2 | tenacity | Replaces the custom retry code before new vendors arrive |
-| U3 | Migrate to LangChain + fallback chain | The base that U4, U6 and U8 build on; also delivers the old Slice 10. Runs as three sub-slices: |
+| U3 | Migrate to LangChain + fallback chain | The base that U4, U6 and U8 build on; also delivers the old Slice 10. Runs as four sub-slices: |
 | U3a | ↳ Foundation + first chains | Model factory, error mapping, deadline, callbacks, fake model; JD summary and profile extraction |
-| U3b | ↳ Interview tasks + retrieval | Feedback, decide, write/write-stream, embeddings and the retriever |
+| U3b1 | ↳ Interview calls | Write, write-stream (async), decide, feedback; the eval tooling moves with each task |
+| U3b2 | ↳ Retrieval | Embeddings, the retriever, the splitter if chunks stay identical |
 | U3c | ↳ Fallback chain + remove the old layer | `.with_fallbacks()`, question bank removed, old LLM layer deleted |
 | U4 | Prompt templates + Langfuse Prompt Management | Uses LangChain templates; prompts linked to traces |
 | U5 | Expand the knowledge corpus | Hybrid RAG can't show a gain on a tiny corpus |
@@ -32,7 +33,7 @@ The first path (`docs/ai-engineering-learning-path.md`) built the fundamentals b
 - U0 comes before everything: every slice compares against it.
 - U1 and U2 are small and standalone; you can swap them.
 - U4, U6 and U8 need U3 (LangChain templates, retrievers and models). U9 needs U8.
-- Inside U3: U3a → U3b → U3c, in that order. U4 and U6 can start after U3b (every prompt is a template and the retriever exists); U8 waits for U3c (fallbacks in place, old layer gone).
+- Inside U3: U3a → U3b1 → U3b2 → U3c, in that order (U3b2 only needs U3a, but running it after U3b1 keeps each eval comparison to one cause). U4 can start after U3b1 (every prompt is a template); U6 after U3b2 (the retriever exists); U8 waits for U3c (fallbacks in place, old layer gone).
 - U6 needs U5 (a corpus big enough to measure on).
 - **U5 is content work, not code**: draft notes while you do U1 to U4, so the corpus is ready when U6 starts.
 - U7 only needs U0. It comes after U6 in the list, but you can move it earlier if you want a judge to compare U3/U4 changes.
@@ -152,7 +153,7 @@ The first path (`docs/ai-engineering-learning-path.md`) built the fundamentals b
 - **Ingestion: LangChain splitters where they fit.** `Document` and `MarkdownHeaderTextSplitter` can replace the section splitter in `interviews_knowledge_utils.py`. **Stays yours:** the note header (roles, levels, source), hash-based change detection and the corpus checks.
 - **Speech: LiveKit, not LangChain.** LangChain has no STT/TTS pipeline. In U9, LiveKit Agents' STT/TTS plugins (Deepgram, ElevenLabs) and its fallback adapters take over the real-time path, and LiveKit's LangChain plugin can run the U8 graph as the agent's LLM. Until then, the current speech code stays; after U9 it's only needed for the pause-and-continue fallback flow.
 
-**Split into three sub-slices.** U3 is too big for one spec, so it runs as U3a, U3b and U3c, each with its own `/feature` → `/create-plan` → `/implement` → `/review-feature` cycle and its own `docs/features/<sub-slice>/` folder. Old and new layers live side by side until U3c, but never inside the same task (rule: one owner per concern). Each migration step is checked against the U0 evals before the next one starts.
+**Split into four sub-slices.** U3 is too big for one spec, so it runs as U3a, U3b1, U3b2 and U3c, each with its own `/feature` → `/create-plan` → `/implement` → `/review-feature` cycle and its own `docs/features/<sub-slice>/` folder. Old and new layers live side by side until U3c, but never inside the same task (rule: one owner per concern). Each migration step is checked against the U0 evals before the next one starts.
 
 **U3a: Foundation + first chains** (steps 1-3; needs U0, U2)
 1. **Foundation**: dependencies (check Python 3.14 support), the chat model factory from config, `to_llm_error()`, the deadline wrapper, the Langfuse callback, the fake chat model and a contract test that every model the factory builds passes. Settle who owns LLM retries (`.with_retry()` or tenacity) and how `reasoning_effort` reaches Gemini, and confirm import paths and the streaming retry/fallback behavior in a spike (see "Check first").
@@ -161,16 +162,31 @@ The first path (`docs/ai-engineering-learning-path.md`) built the fundamentals b
 
 Done when: the JD summary and profile extraction run on LangChain and match U0 (the JD summary needs its own eval first, see `docs/evals/baselines.md`); a fake model's vendor rate-limit error arrives as your vendor-neutral rate-limit error; an almost-spent deadline cuts the call off; the U2 retry rules hold for the migrated tasks.
 
-**U3b: Interview tasks + retrieval** (steps 4-7; needs U3a)
+**U3b1: Interview calls** (steps 4-6; needs U3a)
 
-4. **Feedback**: scoring and writing.
-5. **Decide**: structured output inside the existing attempt loop.
-6. **Write and write-stream**: `astream()` with the streaming rules above, SSE events unchanged.
-7. **Embeddings and retrieval**: ingestion and retrieval on LangChain `Embeddings` (same vectors and model name stored), the vector `BaseRetriever` over `KnowledgeRepository`, and `MarkdownHeaderTextSplitter` in ingestion if it reproduces today's chunks.
+Before step 4 (found in the U3b pre-check, 2026-11-27):
+- A short `astream` spike: the whole-stream timeout through gRPC (the old layer bounded each read, gRPC takes one deadline for the call), usage and finish reason on the last chunk, how `after_output` gets set, and a real `DeadlineExceeded` (never observed yet).
+- A stream-capable fake chat model (scripted chunks, an error before and after the first chunk). `FakeChatModel` only has `_generate`. The shared `llm` fixture in `tests/modules/interviews/conftest.py` (about 35 test files) moves onto it.
+- An eval for the first-question JSON writers (`interviewer_v7_json`, `v8_json`), which have no baseline.
+- A plan for `Interviewer`, which takes one `LLMProvider` for decide and write: the two layers may not mix inside one task, so the plan says how write, decide and write-stream move without a half-migrated turn.
 
-Done when: feedback, decide, write and write-stream match U0; SSE events are unchanged; retrieval evals match U0; the worst-case call budget (`tests/core/ai/test_retry_budget.py`) still holds on the LangChain path.
+4. **Write and write-stream**: `complete_chat` for write. `astream()` through an async helper built on `RetryPolicy.acall` (it already exists), which sets `after_output`; SSE events unchanged. The reset on a rejected draft stays yours.
+5. **Decide**: `complete_structured` with a model-facing schema whose fields are all required (U3a: a schema with defaults sends no `required` list and the profile scores collapsed while the validity score stayed green), inside the existing attempt loop. `tests/core/ai/test_retry_budget.py` scripts an httpx transport against the old layer, so it is ported to the fake chat model with the same worst-case number.
+6. **Feedback**: scoring with structured output (required fields) and writing. The reply parsers (`parse_score_reply`, `parse_write_reply`) stay as a second check, since they hold interview rules (quotes, lengths, template fallback).
 
-**U3c: Fallback chain + remove the old layer** (steps 8-9; needs U3b)
+With every step, the eval tooling (`interviews_evals.py`, `interviews_feedback_evals.py`) moves to the chat model with its task; until then it still measures the old layer. Run 3 repeats against `baselines.md` (it has 2, taken on a dirty tree, and decide and feedback are coarse: one decide case is 0.07).
+
+Done when: write, write-stream, decide and feedback match U0 within the noise margin; SSE events are unchanged; a stream failing after its first chunk is never retried; the worst-case call budget (`tests/core/ai/test_retry_budget.py`) still holds on the LangChain path.
+
+Result (implemented 2026-11-27, `docs/features/u3b1-interview-calls/`): all four calls run on the chat model, and `get_llm_provider` and the app's `LLMProvider` are gone from the app's wiring (the old classes stay for U3c to delete). Evals against the U3b1 baselines: write and generation no change; decide better (0.933 x 3 vs 0.800 / 0.867, the new decide baseline row); write-stream no change in quality and ~300-600 ms faster to the first token (native Gemini streaming); feedback no change, with Gemini taking the nested score schema. Comparison files: `docs/evals/u3b1-*-vs-baseline.md`. Review (`/review-feature`) pending.
+
+**U3b2: Retrieval** (step 7; needs U3a, best after U3b1)
+
+7. **Embeddings and retrieval**: spike first. Compare `GoogleGenerativeAIEmbeddings` vectors (`gemini-embedding-001`, 768 dimensions, `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`, both set per call) with the stored ones. If they match, use it, with its errors mapped (it wraps them as `GoogleGenerativeAIError`, the Google error is `__cause__`) and retries owned by `RetryPolicy`. If not, a thin `Embeddings` adapter over `GoogleEmbedder`, with no re-embedding. Then the vector `BaseRetriever` over `KnowledgeRepository`; the time cap, degrade reasons, similarity floor and ranking merge stay in `RetrievalService`. `MarkdownHeaderTextSplitter` only if it reproduces today's chunks and hashes; it lives in `langchain-text-splitters`, which isn't installed, so it needs a dependency justification, and any chunk difference means re-embedding everything.
+
+Done when: retrieval evals match U0 (recall@5, MRR); stored vectors and the model name are unchanged; the embedder call-count test in `test_retry_budget.py` is ported and still holds.
+
+**U3c: Fallback chain + remove the old layer** (steps 8-9; needs U3b1 and U3b2)
 
 8. **Fallback chain**: reuse the existing `LLM_PROVIDERS` list in `core/config.py` (already ordered, primary first) and its `LLM_<VENDOR>_*` blocks. Build the models in that order with `.with_fallbacks()`; switches happen only before the first streamed chunk, and the trace records which provider answered. **Then remove the question bank**, but only after the spec decides two things. First, what the candidate sees when every provider fails (most likely a clear, retryable error). Second, what replaces today's "`LLM_PROVIDERS` empty = LLM off, bank only" mode for local development and tests (most likely the fake chat model).
 9. **Delete the old layer**: `LLMProvider`, `openai_compatible.py`, `json_reply.py`, `TracingProvider`, `FakeProvider`, once nothing imports them. Update `tests/test_layers.py` so only `core/ai` and feature `ai/` folders may import `langchain*`.
@@ -367,7 +383,8 @@ Same habit as the first path: each slice gets `docs/features/<slice>/` with `spe
 - [ ] U2: tenacity
 - [ ] U3: Migrate to LangChain + provider fallback chain
   - [x] U3a: Foundation + first chains (JD summary, profile extraction)
-  - [ ] U3b: Interview tasks + retrieval (feedback, decide, write/stream, embeddings)
+  - [x] U3b1: Interview calls (write/stream, decide, feedback) - implemented 2026-11-27, review pending
+  - [ ] U3b2: Retrieval (embeddings, retriever, splitter)
   - [ ] U3c: Fallback chain + remove the old layer
 - [ ] U4: Prompt templates + Langfuse Prompt Management
 - [ ] U5: Expand the knowledge corpus
