@@ -8,7 +8,7 @@ line of that request carries them. A value the provider didn't report is logged 
 import logging
 from collections.abc import Sequence
 
-from app.core.ai.provider import LLMError, LLMResult
+from app.core.ai.provider import LLMBadResponseError, LLMError, LLMResult
 from app.core.logging import get_logger
 
 llm_logger = get_logger("app.llm")
@@ -94,10 +94,13 @@ def log_result(
 
 
 def log_llm_error(exc: LLMError, task: str, version: str, budget_left_ms: int) -> None:
+    # The call layer raises LLMBadResponseError for a reply with no text: logged as `empty_reply`, the outcome the
+    # reports count (often a model spending all of max_tokens; `finish` says so). A warning, like an invalid reply.
+    empty = isinstance(exc, LLMBadResponseError)
     # Transient faults are expected now and then; a bad key or broken reply needs someone to look.
     log_llm_call(
-        logging.WARNING if exc.retryable else logging.ERROR,
-        type(exc).__name__,
+        logging.WARNING if exc.retryable or empty else logging.ERROR,
+        "empty_reply" if empty else type(exc).__name__,
         task=task,
         prompt_version=version,
         latency_ms=exc.latency_ms,

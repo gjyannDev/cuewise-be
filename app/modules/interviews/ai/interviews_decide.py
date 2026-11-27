@@ -1,13 +1,21 @@
-"""The decide step of an answer turn: the model suggests following up or moving on, with a gap and a running note."""
+"""The decide step of an answer turn: the model suggests following up or moving on, with a gap and a running note.
+
+On the LangChain call layer with structured output (U3b1): the model is given `ModelDecision` (every field required)
+as a JSON schema through `complete_structured`. `parse_decision_reply` still reads the reply text as a second check,
+so the gap and note rules keep their one home.
+"""
 
 import logging
+import time
 import uuid
 from collections.abc import Callable
 
+from app.core.ai.chat import ChatModel, complete_structured, fixed_prompt
 from app.core.ai.context import ContextManager, ContextTooLargeError
-from app.core.ai.provider import LLMError, LLMProvider, LLMResult
+from app.core.ai.provider import LLMError, LLMResult
 
 from ..ai.interviews_context import InterviewerInputs
+from ..ai.interviews_model_schemas import ModelDecision
 from ..ai.interviews_reply import Decision, InvalidReplyError, parse_decision_reply
 from ..ai.interviews_reply_attempts import ReplyAttempts
 from ..ai.interviews_turn_limits import Deadline
@@ -20,7 +28,7 @@ from ..constants.interviews_constants import (
 
 
 def decide(
-    llm: LLMProvider,
+    model: ChatModel,
     context: ContextManager,
     session_id: uuid.UUID,
     inputs: InterviewerInputs,
@@ -28,8 +36,11 @@ def decide(
     *,
     max_tokens: int,
     clock: Callable[[], float],
+    sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[Decision | None, list[LLMResult], str | None]:
-    """At most two attempts within the decide cap; any failure means "next_question" with no note."""
+    """At most two attempts within the decide cap; any failure means "next_question" with no note. Transport errors
+    are retried by the call helper (on `clock`, waiting with `sleep`), never by this loop; an empty reply is the
+    helper's `LLMBadResponseError` and is not retried either."""
     try:
         built = context.build(DECISION_TASK, inputs)
     except ContextTooLargeError:
@@ -42,6 +53,7 @@ def decide(
         )
         return None, [], None
     version = built.prompt_version
+    prompt = fixed_prompt(built.messages)
     # Never past the write call's reserve: leftover time goes to the question the candidate sees.
     end = clock() + min(
         DECIDE_MAX_SECONDS, deadline.remaining() - WRITE_RESERVE_SECONDS
@@ -50,28 +62,27 @@ def decide(
     for _, left in ReplyAttempts(lambda: end - clock()):
         budget_left_ms = round(deadline.remaining() * 1000)
         try:
-            result = llm.complete(
-                built.messages,
+            outcome = complete_structured(
+                model,
+                prompt,
+                {},
+                ModelDecision,
                 max_tokens=max_tokens,
                 budget_seconds=left,
-                trace_labels={"task": DECISION_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
+                labels={"task": DECISION_TASK, "prompt_version": version, "budget_left_ms": budget_left_ms},
+                clock=clock,
+                sleep=sleep,
             )
         except LLMError as exc:
             log_llm_error(exc, DECISION_TASK, version, budget_left_ms)
             break
+        result = outcome.result
         results.append(result)
-        if not result.text.strip():
-            log_result(
-                logging.WARNING,
-                "empty_reply",
-                result,
-                DECISION_TASK,
-                version,
-                budget_left_ms,
-            )
-            break
         try:
+            # The parser first, for its precise reason codes; then the schema, which an accepted reply must still fit.
             decision = parse_decision_reply(result.text)
+            if outcome.value is None:
+                raise InvalidReplyError("schema")
         except InvalidReplyError as exc:
             log_result(
                 logging.WARNING,

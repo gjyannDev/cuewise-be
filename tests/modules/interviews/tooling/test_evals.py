@@ -8,8 +8,14 @@ import pytest
 from app.core.ai.chat_fake import FakeChatModel, fake_reply
 from app.core.ai.context import ContextManager, Task
 from app.core.ai.fake import FakeProvider
-from app.core.ai.provider import LLMBadResponseError, LLMResult, LLMServerError
+from app.core.ai.provider import (
+    LLMBadResponseError,
+    LLMRequestError,
+    LLMResult,
+    LLMServerError,
+)
 from app.core.ai.tracing import Tracer
+from app.core.config import settings
 from app.modules.interviews.ai.interviews_context import (
     WindowLedger,
     build_context_manager,
@@ -31,18 +37,53 @@ from app.modules.interviews.tooling.interviews_evals import (
     check_reply,
     check_streamed_reply,
     load_cases,
-    main,
     pause_for,
-    run_case,
-    run_decide_case,
-    run_stream_case,
     summarize,
     summarize_decisions,
     summarize_runs,
 )
+from app.modules.interviews.tooling.interviews_evals import main as _main
+from app.modules.interviews.tooling.interviews_evals import run_case as _run_case
+from app.modules.interviews.tooling.interviews_evals import (
+    run_decide_case as _run_decide_case,
+)
+from app.modules.interviews.tooling.interviews_evals import (
+    run_stream_case as _run_stream_case,
+)
 from tests.fake_langfuse import FakeLangfuse, current_item
+from tests.modules.interviews.conftest import _RoutedChatModel
 
 REQUIRED_KINDS = {"strong", "vague", "off_topic", "near_empty", "injection_answer", "injection_job_description"}
+
+
+# The write and decide tasks are on the chat model (U3b1). These tests script them with a FakeProvider (its `.calls`
+# and replies), so the wrappers hand the eval a chat model served by that provider; a summary model, when given,
+# serves the job-description summary.
+def as_chat(provider, summary_model=None):
+    model = _RoutedChatModel(provider)
+    model._handle = SimpleNamespace(summary=summary_model or FakeChatModel())
+    return model
+
+
+def run_case(provider, case, *, chat_model=None, **kwargs):
+    return _run_case(as_chat(provider, chat_model), case, **kwargs)
+
+
+def run_decide_case(provider, case, **kwargs):
+    return _run_decide_case(as_chat(provider), case, **kwargs)
+
+
+def run_stream_case(provider, case, **kwargs):
+    return _run_stream_case(as_chat(provider), case, **kwargs)
+
+
+def main(argv, *, provider=None, chat_model=None, **kwargs):
+    return _main(argv, chat_model=chat_model or (as_chat(provider) if provider else None), **kwargs)
+
+
+def same_but_latency(out: str) -> list[str]:
+    """The console lines but the last, with the measured latencies blanked."""
+    return [re.sub(r"latency(_ms=| )\d+", r"latency\1-", line) for line in out.rstrip("\n").splitlines()[:-1]]
 
 
 @pytest.fixture
@@ -125,7 +166,8 @@ def test_run_case_records_the_reply_and_usage(case):
 
 
 def test_a_provider_error_fails_the_case_without_crashing(case):
-    result = run_case(FakeProvider([LLMServerError("503")]), case, max_tokens=800)
+    # A 503 is retried by the call layer (U3b1), so it fails the case only once every attempt has failed.
+    result = run_case(FakeProvider([LLMServerError("503")] * (1 + settings.llm_max_retries)), case, max_tokens=800)
 
     assert not result.passed and result.error == "LLMServerError"
 
@@ -196,12 +238,11 @@ def test_notes_on_sends_older_notes_and_notes_off_leaves_them_out():
     assert "Explained B-trees" not in " ".join(m.content for m in without.calls[0])
 
 
-def test_the_reasoning_effort_reaches_the_provider(case):
-    provider = FakeProvider([noted()])
+def test_the_reasoning_effort_flag_is_refused_for_the_write_task(capsys):  # U3b1: write uses the config's thinking
+    with pytest.raises(SystemExit):
+        main(["--reasoning-effort", "low"], provider=FakeProvider([noted()]))
 
-    run_case(provider, case, max_tokens=800, reasoning_effort="low")
-
-    assert provider.reasoning_efforts == ["low"]
+    assert "--reasoning-effort" in capsys.readouterr().err
 
 
 def test_summary_on_condenses_a_long_job_description_and_counts_its_tokens():
@@ -486,7 +527,8 @@ def test_run_stream_case_streams_v5_and_records_usage_and_the_first_token(case):
 
 
 def test_a_streamed_provider_error_fails_the_case_without_crashing(case):  # AC18
-    result = run_stream_case(FakeProvider([LLMServerError("503")]), case, max_tokens=800)
+    # A 503 before any text is retried by the call layer (U3b1), so it fails the case once every attempt failed.
+    result = run_stream_case(FakeProvider([LLMServerError("503")] * (1 + settings.llm_max_retries)), case, max_tokens=800)
 
     assert not result.passed and result.error == "LLMServerError"
 
@@ -543,22 +585,23 @@ def test_a_failed_check_is_scored_false_with_its_detail(experiments):  # eval-la
 
 def test_a_provider_error_scores_the_case_failed_and_errored_with_the_class(experiments):  # eval-langfuse AC2, EC4
     def down():
-        raise LLMServerError("503")
+        # Not retryable, so each case fails on its one call (a 503 would be retried by the call layer, with waits).
+        raise LLMRequestError("401", status_code=401)
 
     run_task(experiments, "write", [], FakeProvider(default=down))
 
     scores = scores_on(experiments, write_cases()[0].id)
     assert set(scores) == {"case_passed", "errored"}
-    assert (scores["case_passed"]["value"], scores["case_passed"]["comment"]) == (0.0, "ERROR: LLMServerError")
-    assert (scores["errored"]["value"], scores["errored"]["comment"]) == (1.0, "LLMServerError")
-    assert experiments.client.outputs[trace_of(experiments, write_cases()[0].id)]["verdict"] == "ERROR: LLMServerError"
+    assert (scores["case_passed"]["value"], scores["case_passed"]["comment"]) == (0.0, "ERROR: LLMRequestError")
+    assert (scores["errored"]["value"], scores["errored"]["comment"]) == (1.0, "LLMRequestError")
+    assert experiments.client.outputs[trace_of(experiments, write_cases()[0].id)]["verdict"] == "ERROR: LLMRequestError"
 
 
 def test_a_write_run_per_repeat_carries_what_produced_it(experiments):  # AC1, AC2, AC14, EC5
     run_task(
         experiments,
         "write",
-        ["--model", "m1", "--reasoning-effort", "low", "--notes", "off", "--repeat", "2", "--note", "notes off"],
+        ["--model", "m1", "--notes", "off", "--repeat", "2", "--note", "notes off"],
         FakeProvider(default=noted),
     )
 
@@ -568,7 +611,7 @@ def test_a_write_run_per_repeat_carries_what_produced_it(experiments):  # AC1, A
     first = runs[0]["metadata"]
     assert (first["task"], first["model"], first["prompt.interviewer"]) == ("write", "m1", "interviewer_v4")
     assert (first["flag.strategy"], first["flag.notes"], first["flag.summary"]) == ("window_ledger", "off", "off")
-    assert (first["flag.reasoning_effort"], first["note"]) == ("low", "notes off")
+    assert first["note"] == "notes off"
     assert [r["metadata"]["repeat"] for r in runs] == ["1", "2"]
     assert "prompt.summary" not in first
 
@@ -711,7 +754,8 @@ def test_a_cut_off_reply_hints_at_max_tokens_before_quality(experiments):
 
 def test_a_provider_error_hints_that_it_is_not_a_quality_problem(experiments):
     def down():
-        raise LLMServerError("503")
+        # Not retryable, so the run makes no call-layer retries (and no waits) on its way to the hint.
+        raise LLMRequestError("401", status_code=401)
 
     hints = hints_of(experiments, "write", "strong-backend-mid", FakeProvider(default=down))
 
@@ -788,13 +832,13 @@ def test_decide_records_one_run_per_repeat_with_one_result_per_labelled_case(exp
 def test_each_run_carries_what_produced_it(experiments):  # AC2, EC11
     run_decide(
         experiments,
-        ["--model", "m1", "--reasoning-effort", "low", "--repeat", "2", "--note", "baseline"],
+        ["--model", "m1", "--repeat", "2", "--note", "baseline"],
         FakeProvider(default=decision),
     )
 
     first, second = (r["metadata"] for r in experiments.client.experiments)
     assert first["task"] == "decide" and first["commit"] == "abc1234" and first["model"] == "m1"
-    assert first["prompt.decision"] == DECISION_PROMPT_VERSION and first["flag.reasoning_effort"] == "low"
+    assert first["prompt.decision"] == DECISION_PROMPT_VERSION
     assert (first["repeat"], second["repeat"]) == ("1", "2")
     assert first["note"] == "baseline"  # also in the metadata, wherever the UI shows the description
     assert all(isinstance(v, str) for v in first.values())
@@ -843,14 +887,15 @@ def test_the_run_scores_equal_what_the_console_prints(experiments, capsys):  # A
 
 def test_a_provider_error_is_a_failed_errored_case_and_the_run_goes_on(experiments):  # EC4
     def down():
-        raise LLMServerError("503")
+        # Not retryable, so each case fails on its one call (a 503 would be retried by the call layer, with waits).
+        raise LLMRequestError("401", status_code=401)
 
     assert run_decide(experiments, [], FakeProvider(default=down)) == 0
 
     first = labelled_cases()[0]
     scores = scores_on(experiments, first.id)
     assert (scores["case_passed"]["value"], scores["errored"]["value"]) == (0.0, 1.0)
-    assert scores["errored"]["comment"] == "LLMServerError"
+    assert scores["errored"]["comment"] == "LLMRequestError"
     run = experiments.client.experiments[0]
     assert run["item_ids"] == [f"decide:{c.id}" for c in labelled_cases()] and experiments.client.dropped == []
     assert experiments.client.run_score(run["run_name"], "errored_count")["value"] == len(labelled_cases())
@@ -866,7 +911,8 @@ def test_the_console_is_unchanged_except_the_last_line(experiments, capsys):  # 
     run_decide(experiments, [], FakeProvider(default=decision))
     keyed = capsys.readouterr().out
 
-    assert keyless.rstrip("\n").splitlines()[:-1] == keyed.rstrip("\n").splitlines()[:-1]
+    # Latency is measured by the call layer (U3b1), so it differs run to run; everything else must match.
+    assert same_but_latency(keyless) == same_but_latency(keyed)
     assert last_line(keyless) == "Langfuse: not recorded (no LANGFUSE keys set)."
     run = experiments.client.experiments[0]["run_name"]
     assert last_line(keyed) == f"Langfuse runs: {run} (https://langfuse.test/experiments/{run})"

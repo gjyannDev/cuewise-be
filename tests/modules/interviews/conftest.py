@@ -1,8 +1,11 @@
 import json
 from datetime import UTC, datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatResult
+from pydantic import PrivateAttr
 from sqlalchemy import delete
 
 from app.core.ai.chat_fake import FakeChatModel
@@ -15,13 +18,13 @@ from app.modules.interviews.constants.interviews_constants import (
     DECISION_PROMPT_VERSION,
     FEEDBACK_SCORE_PROMPT_VERSION,
     FEEDBACK_WRITE_PROMPT_VERSION,
+    SUMMARY_PROMPT_VERSION,
     Level,
     QuestionCategory,
 )
 from app.modules.interviews.dependencies.interviews_shared_dependencies import (
     get_bank,
     get_clock,
-    get_llm_provider,
     get_synthesizer,
     get_transcriber,
 )
@@ -34,6 +37,7 @@ from app.modules.interviews.utils.interviews_utils import load_prompt
 from app.modules.profile.constants.profile_constants import PROFILE_PROMPT_VERSION
 from app.modules.profile.models.profile_model import CandidateProfileRow
 from app.modules.profile.schemas.profile_schema import CandidateProfile
+from tests.provider_chat import ProviderChatModel
 
 
 def _bank_question(qid, category="behavioral", roles=("general",), levels=tuple(Level)):
@@ -208,6 +212,10 @@ def llm():
 
     The job-description summary runs on the LangChain chat model (U3a): `llm.summary` is a `FakeChatModel`, scripted
     with `llm.script_summary(...)` (text, `fake_reply(...)` or an exception); unscripted, it replies "Fake reply.".
+
+    Every call runs on the LangChain chat model (U3b1). The app gets `llm.chat`, which routes each call by its system
+    prompt to the scripted fakes above (`tests/provider_chat.py`), so the scripts, `llm.<name>.calls`, `.budgets`,
+    `.cancelled` and `on_call` keep working.
     """
     counter = iter(range(1, 1000))
 
@@ -244,31 +252,18 @@ def llm():
             self.write = FakeProvider(replies, on_call=on_call)
             return self.write
 
-        # The provider the app gets: routes each call by its system prompt.
-        def complete(self, messages, **kwargs):
-            system = messages[0].content
+        def route(self, system: str) -> FakeProvider:
             if _SCORE_MARKER in system:
-                return self.score.complete(messages, **kwargs)
+                return self.score
             if _WRITE_MARKER in system:
-                return self.write.complete(messages, **kwargs)
-            fake = self.decide if _DECISION_MARKER in system else self.fake
-            return fake.complete(messages, **kwargs)
-
-        # Only write calls stream (the streamed turn's interviewer_v5); they share the write fake's script.
-        def stream(self, messages, **kwargs):
-            return self.fake.stream(messages, **kwargs)
-
-        def close(self) -> None:
-            pass
-
-        async def aclose(self) -> None:
-            pass
+                return self.write
+            return self.decide if _DECISION_MARKER in system else self.fake
 
     handle = _LLM()
-    app.dependency_overrides[get_llm_provider] = lambda: handle
-    app.dependency_overrides[get_chat_model] = lambda: handle.summary
+    handle.chat = _RoutedChatModel(handle.route)
+    handle.chat._handle = handle
+    app.dependency_overrides[get_chat_model] = lambda: handle.chat
     yield handle
-    app.dependency_overrides.pop(get_llm_provider, None)
     app.dependency_overrides.pop(get_chat_model, None)
 
 
@@ -276,6 +271,22 @@ def llm():
 _DECISION_MARKER = load_prompt(DECISION_PROMPT_VERSION).splitlines()[1].split("{{")[0]
 _SCORE_MARKER = load_prompt(FEEDBACK_SCORE_PROMPT_VERSION).splitlines()[1].split("{{")[0]
 _WRITE_MARKER = load_prompt(FEEDBACK_WRITE_PROMPT_VERSION).splitlines()[1].split("{{")[0]
+_SUMMARY_MARKER = load_prompt(SUMMARY_PROMPT_VERSION).splitlines()[1].split("{{")[0]
+
+
+class _RoutedChatModel(ProviderChatModel):
+    """The chat model of the `llm` fixture: the summary goes to `llm.summary`; every other call is served by the same
+    scripted `FakeProvider` the old-style route uses (`llm.route`)."""
+
+    _handle: Any = PrivateAttr(default=None)
+
+    def _generate(
+        self, messages: list[BaseMessage], stop: list[str] | None = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
+        if messages and _SUMMARY_MARKER in messages[0].text:
+            limits = {"temperature": self.temperature, "timeout": self.timeout, "max_output_tokens": self.max_output_tokens}
+            return self._handle.summary.model_copy(update=limits)._generate(messages, stop, run_manager, **kwargs)
+        return super()._generate(messages, stop, run_manager, **kwargs)
 
 
 def as_v5_text(reply: str) -> str:
@@ -291,7 +302,8 @@ def as_v5_text(reply: str) -> str:
 
 
 def _decision_json(action="next_question", gap=None, note=None) -> str:
-    return json.dumps({"action": action, "gap": gap} | ({"note": note} if note else {}))
+    # Every field present (`note` null when none), as the decide schema `ModelDecision` makes the model reply (U3b1).
+    return json.dumps({"action": action, "gap": gap, "note": note})
 
 
 @pytest.fixture

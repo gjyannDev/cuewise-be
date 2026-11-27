@@ -14,8 +14,8 @@ from typing import NamedTuple
 
 import anyio
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.errors import QuestionNotCurrentError, SessionNotInProgressError
 from app.core.logging import bind_log_context, get_logger
@@ -129,7 +129,8 @@ class AnswerService:
         repo: InterviewsRepository,
         bank: list[BankQuestion],
         rng: random.Random,
-        llm: LLMProvider | None = None,
+        # The LangChain chat model every call of the turn runs on (U3b1); None = LLM off.
+        chat_model: ChatModel | None = None,
         llm_max_tokens: int = 800,
         *,
         llm_budget_seconds: float = 30,
@@ -148,9 +149,9 @@ class AnswerService:
         # Decide, limits, write: one answer turn of the LLM interviewer (ai/interviews_turn.py). None = LLM off.
         self.interviewer = (
             None
-            if llm is None
+            if chat_model is None
             else Interviewer(
-                llm, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
+                chat_model, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
             )
         )
 

@@ -19,7 +19,7 @@ from app.modules.interviews.constants.interviews_constants import (
     QuestionCategory,
 )
 from app.modules.interviews.tooling import interviews_evals as evals_module
-from app.modules.interviews.tooling.interviews_evals import main
+from app.modules.interviews.tooling.interviews_evals import main as _main
 from app.modules.interviews.tooling.interviews_feedback_evals import (
     FEEDBACK_DATASET,
     FEEDBACK_EVAL_CASES_PATH,
@@ -32,15 +32,28 @@ from app.modules.interviews.tooling.interviews_feedback_evals import (
     feedback_trace_output,
     level_gap_check,
     load_feedback_cases,
-    run_feedback_case,
     summarize_feedback,
+)
+from app.modules.interviews.tooling.interviews_feedback_evals import (
+    run_feedback_case as _run_feedback_case,
 )
 from app.modules.interviews.utils.interviews_utils import load_prompt
 from tests.fake_langfuse import FakeLangfuse
+from tests.provider_chat import ProviderChatModel
 
 SCORE_MARKER = load_prompt(FEEDBACK_SCORE_PROMPT_VERSION).splitlines()[1].split("{{")[0]
 CASES = load_feedback_cases(FEEDBACK_EVAL_CASES_PATH)
 RUN = {"score_max_tokens": 6000, "write_max_tokens": 2000, "score_temperature": 0.2, "budget_seconds": 60}
+
+
+# Feedback is on the chat model (U3b1): the fake grader (a FakeProvider-like object) is handed to the eval wrapped
+# in a chat model that calls it, so its counts and replies work as before.
+def run_feedback_case(grader, case, **kwargs):
+    return _run_feedback_case(ProviderChatModel(grader), case, **kwargs)
+
+
+def main(argv, *, provider=None, **kwargs):
+    return _main(argv, chat_model=ProviderChatModel(provider) if provider else None, **kwargs)
 
 
 class Grader:

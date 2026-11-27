@@ -1,8 +1,10 @@
 """The worst-case number of HTTP calls one logical call can make, across both retry layers (U2 AC10, EC14, EC15).
 
-Transport retries (`RetryPolicy`, inside each vendor adapter) and content retries (`ReplyAttempts`, in the interview
-reply loops) multiply: one LLM task makes at most (llm_max_retries + 1) x MAX_REPLY_ATTEMPTS HTTP calls. These tests
-drive the real adapters on a mock transport, so a new retry layer, or a changed limit, makes them fail loudly.
+Transport retries (`RetryPolicy`, inside the call helper or each vendor adapter) and content retries (`ReplyAttempts`,
+in the interview reply loops) multiply: one LLM task makes at most (llm_max_retries + 1) x MAX_REPLY_ATTEMPTS calls.
+The decide cases run on the fake chat model behind the LangChain call helper (U3b1 FR12), each scripted vendor error
+or reply standing for one HTTP call; the embedder and Deepgram cases drive the real adapters on a mock transport. A
+new retry layer, or a changed limit, makes them fail loudly.
 """
 
 import json
@@ -10,11 +12,12 @@ import uuid
 
 import httpx
 import pytest
+from google.api_core import exceptions as gx
 
+from app.core.ai.chat_fake import FakeChatModel
 from app.core.ai.deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from app.core.ai.embedder import EmbeddingKind
 from app.core.ai.google_embedder import GoogleEmbedder
-from app.core.ai.openai_compatible import OpenAICompatibleProvider
 from app.core.ai.provider import LLMServerError
 from app.core.config import settings
 from app.modules.interviews.ai.interviews_context import (
@@ -66,24 +69,13 @@ def counting(responses):
     return handler, calls
 
 
-def malformed_reply() -> httpx.Response:
-    # A 200 whose text the decide parser rejects: a content failure, so the reply loop asks again.
-    body = {"choices": [{"message": {"content": json.dumps({"action": "dance"})}, "finish_reason": "stop"}]}
-    return httpx.Response(200, json=body)
+# A reply whose text the decide schema rejects: a content failure, so the reply loop asks again.
+MALFORMED_REPLY = json.dumps({"action": "dance"})
 
 
-def run_decide(handler, clock: Clock):
-    provider = OpenAICompatibleProvider(
-        api_key="test-key",
-        model="vendor/model-x",
-        base_url="https://llm.test/v1",
-        timeout_seconds=settings.llm_timeout_seconds,
-        max_retries=settings.llm_max_retries,
-        total_budget_seconds=settings.llm_total_budget_seconds,
-        transport=httpx.MockTransport(handler),
-        sleep=clock.sleep,
-        clock=clock,
-    )
+def run_decide(script, clock: Clock):
+    # More than the worst case is scripted, so a new retry layer would show up as extra calls, not as a short script.
+    model = FakeChatModel(script, default=MALFORMED_REPLY)
     inputs = InterviewerInputs(
         role=JobRole.backend,
         level=Level.mid,
@@ -92,24 +84,25 @@ def run_decide(handler, clock: Clock):
         job_description=None,
         turns=[QuestionTurn("How would you shard it?", "technical", "By user id.", None)],
     )
-    return decide(
-        provider,
+    outcome = decide(
+        model,
         build_context_manager(),
         uuid.uuid4(),
         inputs,
         Deadline(clock, settings.llm_total_budget_seconds),
         max_tokens=200,
         clock=clock,
+        sleep=clock.sleep,
     )
+    return outcome, model.calls
 
 
-def test_both_layers_fully_used_never_exceed_the_worst_case():  # EC15
+def test_both_layers_fully_used_never_exceed_the_worst_case():  # EC15, U3b1 FR12
     clock = Clock()
-    per_reply = settings.llm_max_retries + 1
     # Every reply attempt: transport failures until its last transport attempt, which gets a malformed reply.
-    handler, calls = counting(lambda n: malformed_reply() if n % per_reply == 0 else httpx.Response(503))
+    per_reply = [gx.ServiceUnavailable("503")] * settings.llm_max_retries + [MALFORMED_REPLY]
 
-    decision, results, _ = run_decide(handler, clock)
+    (decision, results, _), calls = run_decide(per_reply * (MAX_REPLY_ATTEMPTS + 1), clock)
 
     assert decision is None
     assert len(results) == MAX_REPLY_ATTEMPTS
@@ -118,9 +111,8 @@ def test_both_layers_fully_used_never_exceed_the_worst_case():  # EC15
 
 def test_a_transport_error_stops_the_reply_loop():  # EC14: the two layers never multiply on the same failure
     clock = Clock()
-    handler, calls = counting(lambda n: httpx.Response(503))
 
-    decision, results, _ = run_decide(handler, clock)
+    (decision, results, _), calls = run_decide([gx.ServiceUnavailable("503")] * LLM_WORST_CASE, clock)
 
     assert decision is None and results == []
     assert len(calls) == settings.llm_max_retries + 1

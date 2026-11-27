@@ -1,10 +1,12 @@
-"""The blocking write step: the interviewer writes the next question (or a follow-up) as one JSON reply."""
+"""The blocking write step: the interviewer writes the next question (or a follow-up) as one JSON reply, on the
+LangChain call layer (U3b1)."""
 
 import logging
 import uuid
 
+from app.core.ai.chat import ChatModel, complete_chat, fixed_prompt
 from app.core.ai.context import ContextManager, ContextTooLargeError
-from app.core.ai.provider import LLMError, LLMProvider, LLMResult
+from app.core.ai.provider import LLMError, LLMResult
 
 from ..ai.interviews_context import InterviewerInputs, write_trace_labels
 from ..ai.interviews_reply import InvalidReplyError, parse_interviewer_reply
@@ -19,7 +21,7 @@ from ..constants.interviews_constants import (
 
 
 def write(
-    llm: LLMProvider,
+    model: ChatModel,
     context: ContextManager,
     session_id: uuid.UUID,
     inputs: InterviewerInputs,
@@ -28,8 +30,9 @@ def write(
     follow_up_category: QuestionCategory | None,
     max_tokens: int,
 ) -> Written:
-    """At most two attempts. Only a reply that came back but broke the contract is retried: a provider error was
-    already retried inside the provider, and an empty reply would fail the same way.
+    """At most two attempts. Only a reply that came back but broke the contract is retried: a transport error was
+    already retried by the call helper, and an empty reply (the helper's `LLMBadResponseError`) would fail the same
+    way.
     """
     try:
         built = context.build(INTERVIEWER_TASK, inputs)
@@ -44,32 +47,25 @@ def write(
         )
         return Written(None, [], None)
     version = built.prompt_version
+    prompt = fixed_prompt(built.messages)
     # The code-side repeat check always sees every earlier question, whatever the strategy sent.
     earlier = [turn.question for turn in inputs.turns]
     results: list[LLMResult] = []
     for _, remaining in ReplyAttempts(deadline.remaining):
         budget_left_ms = round(remaining * 1000)
         try:
-            result = llm.complete(
-                built.messages,
+            result = complete_chat(
+                model,
+                prompt,
+                {},
                 max_tokens=max_tokens,
                 budget_seconds=remaining,
-                trace_labels=write_trace_labels(INTERVIEWER_TASK, built, budget_left_ms),
+                labels=write_trace_labels(INTERVIEWER_TASK, built, budget_left_ms),
             )
         except LLMError as exc:
             log_llm_error(exc, INTERVIEWER_TASK, version, budget_left_ms)
             break
         results.append(result)
-        if not result.text.strip():
-            log_result(
-                logging.WARNING,
-                "empty_reply",
-                result,
-                INTERVIEWER_TASK,
-                version,
-                budget_left_ms,
-            )
-            break
         try:
             reply = parse_interviewer_reply(
                 result.text,

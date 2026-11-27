@@ -1,15 +1,20 @@
-"""The streamed write step (interviewer_v5): the question is shown as it is written, and a failed draft is taken back."""
+"""The streamed write step (interviewer_v5): the question is shown as it is written, and a failed draft is taken back.
+
+On the LangChain call layer since U3b1: each attempt streams through `stream_chat` (`app/core/ai/chat_stream.py`),
+which retries only before the first chunk and flags a failure after text with `after_output`.
+"""
 
 import logging
 import uuid
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import aclosing
 
+from app.core.ai.chat import ChatModel, fixed_prompt
+from app.core.ai.chat_stream import stream_chat
 from app.core.ai.context import ContextManager, ContextTooLargeError
 from app.core.ai.provider import (
     ChatMessage,
     LLMError,
-    LLMProvider,
     LLMResult,
     LLMTimeoutError,
 )
@@ -27,7 +32,7 @@ from ..constants.interviews_constants import (
 
 
 async def stream_write(
-    llm: LLMProvider,
+    model: ChatModel,
     context: ContextManager,
     session_id: uuid.UUID,
     inputs: InterviewerInputs,
@@ -39,7 +44,7 @@ async def stream_write(
 ) -> AsyncGenerator[Delta | Reset | Written]:
     """`write` for interviewer_v5, streamed: question text as Deltas, then the Written (last). The same attempts
     and checks; but a draft was already shown, so one that fails is taken back (Reset) before the retry, and a
-    provider failure after some text is retried too (the provider couldn't: it had already sent text).
+    failure after some text is retried too (the call layer couldn't: it had already sent text).
     """
     try:
         built = context.build(INTERVIEWER_STREAM_TASK, inputs)
@@ -60,7 +65,7 @@ async def stream_write(
         try:
             labels = write_trace_labels(INTERVIEWER_STREAM_TASK, built, budget_left_ms)
             draft = stream_draft(
-                llm, built.messages, remaining, deadline, follow_up_category, labels, max_tokens=max_tokens
+                model, built.messages, remaining, deadline, follow_up_category, labels, max_tokens=max_tokens
             )
             async with aclosing(draft) as chunks:
                 async for item in chunks:
@@ -75,7 +80,7 @@ async def stream_write(
                 yield Reset()
             if exc.after_output:
                 continue
-            # Before any text, the provider already retried what was worth retrying.
+            # Before any text, the call layer already retried what was worth retrying.
             break
         except InvalidReplyError as exc:
             # A missing or broken CATEGORY line: nothing of it was shown.
@@ -134,7 +139,7 @@ async def stream_write(
 
 
 async def stream_draft(
-    llm: LLMProvider,
+    model: ChatModel,
     messages: Sequence[ChatMessage],
     remaining: float,
     deadline: Deadline,
@@ -148,8 +153,8 @@ async def stream_draft(
     runs out mid-stream."""
     buffer, category, text = "", follow_up_category, ""
     result: LLMResult | None = None
-    stream = llm.stream(
-        messages, max_tokens=max_tokens, budget_seconds=remaining, trace_labels=trace_labels
+    stream = stream_chat(
+        model, fixed_prompt(messages), {}, max_tokens=max_tokens, budget_seconds=remaining, labels=trace_labels
     )
     async with aclosing(stream) as items:
         async for item in items:

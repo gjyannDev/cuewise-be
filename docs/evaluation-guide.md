@@ -78,13 +78,17 @@ uv run python -m app.modules.profile.tooling.profile_evals --model gemini-3.5-fl
 | `--task` | Which task. Default `write` | interviews runner |
 | `--model` | Overrides the primary provider's model for this run. Keep it the same when you compare runs | all |
 | `--repeat N` | Runs every case N times and reports the pass rate's mean, min and max. `feedback` also reports the score **spread** | all |
-| `--reasoning-effort` | Reasoning effort for models that support it | interviews runner |
 | `--prompt <version>` | Swaps the **interviewer** prompt for the chosen strategy | **`write` only** |
 | `--strategy` | `window_ledger` or `full_history` | `write` only |
 | `--notes on/off`, `--summary on/off` | Ablations: the running note, and the job description summary | `write`, `stream` |
 | `--note "<why>"` | Why you are running this and what you expect. Saved as the Langfuse run's description, so the reason travels with the numbers (cut to 300 characters) | all |
 | `--pause-seconds` | Wait between cases, and between repeats (free-tier limits). Default 2.5 for `retrieval` and `generation`, 0 for the others | all |
 | `--arms C,D,E` | Which generation arms run (two or more of A-E). Default `A,B,C`. D and E add the résumé-aware arms and two generation-only setups (injection, mismatch) | `generation` only |
+| `--blocking` | Writes the generation questions with the JSON writer of the blocking answer route (A v4, B/C v7_json, D/E v8_json) instead of the streamed prompts | `generation` only |
+
+**Thinking (reasoning) is set in the config, not by a flag.** Every task runs on the LangChain chat model (U3b1), which
+takes its thinking setting from `.env` (`LLM_GOOGLE_THINKING_BUDGET` for Gemini). The old `--reasoning-effort` flag is
+gone; to compare thinking settings, change the value between runs and say so in `--note`.
 
 **Trying a new prompt for another task.** `--prompt` doesn't reach `decide`, `stream` or `feedback` yet. Point the
 task's constant in `app/modules/interviews/constants/interviews_constants.py` at the new file for the run, then point it back:

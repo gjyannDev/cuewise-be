@@ -6,6 +6,7 @@ from itertools import pairwise
 from sqlalchemy import func, select
 
 from app.core.ai.provider import LLMResult, LLMServerError
+from app.core.config import settings
 from app.modules.interviews.constants.interviews_constants import (
     CLOSING_REACTIONS,
     REACTION_POOLS,
@@ -119,7 +120,8 @@ def test_llm_failure_mid_interview_falls_back_to_an_unused_bank_question(
     start_interview, make_user, answer, llm, db
 ):  # EC4, EC24
     owner = make_user()
-    llm.script(LLMServerError("503"), LLMServerError("503"))
+    # Both writes fail after the call layer's retries (U3b1: 1 + LLM_MAX_RETRIES calls each).
+    llm.script(*[LLMServerError("503")] * 2 * (1 + settings.llm_max_retries))
     created = start_interview(owner, question_count=3).json()
 
     r = answer(owner, created["session"]["id"], created["current_question"]["id"])
@@ -169,7 +171,7 @@ def test_usage_is_stored_with_the_question_it_produced(start_interview, make_use
     # The turn's decide call is summed onto the question it produced too (follow-ups AC10).
     llm.script_decide(
         LLMResult(
-            text='{"action": "next_question", "gap": null}',
+            text='{"action": "next_question", "gap": null, "note": null}',
             model="m",
             prompt_tokens=40,
             completion_tokens=5,

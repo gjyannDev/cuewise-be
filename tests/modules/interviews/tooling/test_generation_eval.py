@@ -12,7 +12,7 @@ from contextlib import nullcontext
 import pytest
 
 from app.core.ai.fake import FakeEmbedder
-from app.core.ai.provider import LLMResult, LLMServerError
+from app.core.ai.provider import LLMRequestError, LLMResult
 from app.core.ai.tracing import Tracer
 from app.modules.interviews.constants.interviews_constants import (
     INTERVIEWER_V5_PROMPT_VERSION,
@@ -33,6 +33,7 @@ from app.modules.interviews.tooling.interviews_rag_evals import (
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import parse_note
 from tests.fake_langfuse import FakeLangfuse
+from tests.provider_chat import ProviderChatModel
 
 SETUPS = json.loads(GENERATION_KEYWORDS_PATH.read_text(encoding="utf-8"))["setups"]
 SETUP_IDS = sorted(SETUPS)
@@ -47,7 +48,8 @@ class Writer:
 
     def complete(self, messages, **_):
         if self.fail_with_notes and any("<reference_notes>" in m.content for m in messages):
-            raise LLMServerError("down", status_code=503)
+            # Not retryable, so the call layer (U3b1) fails it at once, with no backoff waits.
+            raise LLMRequestError("rejected", status_code=400)
         self.count += 1
         category = "behavioral" if "mock behavioral interview" in messages[0].content else "technical"
         text = f"CATEGORY: {category}\nHow would you handle situation number {self.count}?"
@@ -72,7 +74,9 @@ def quiet(client):
 
 def run(db, tracer, sheet, provider=None, **overrides):
     args = Namespace(**({"repeat": 1, "pause_seconds": 0, "sheet": str(sheet), "seed": 8, "note": None} | overrides))
-    return run_generation(args, provider or Writer(), FakeEmbedder(), KnowledgeRepository(db), 400, tracer=tracer, model="m")
+    return run_generation(
+        args, ProviderChatModel(provider or Writer()), FakeEmbedder(), KnowledgeRepository(db), 400, tracer=tracer, model="m"
+    )
 
 
 def test_each_arm_is_one_run_of_the_setups(db, corpus, lf, tmp_path):  # AC16

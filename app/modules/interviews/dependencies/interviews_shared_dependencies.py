@@ -8,7 +8,6 @@ from app.core.ai.context import ContextManager
 
 # Shared with every feature; re-exported so the interviews imports and test overrides stay the same objects.
 from app.core.ai.dependencies import (  # noqa: F401
-    get_llm_provider,
     get_synthesizer,
     get_tracer,
     get_transcriber,

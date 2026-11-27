@@ -2,8 +2,12 @@
 
 The score call reads the whole interview and is the expensive one, so a failed write call never repeats it: the
 service stores the scores as soon as they validate, then asks for the text, and falls back to the template if the
-write call fails. One deadline is shared by both calls; each call is also still capped by the provider's own limits.
+write call fails. One deadline is shared by both calls; each call is also still capped by the call layer's limits.
 Every call logs one metadata line (llm_call), and every generation one summary line; never answer, quote or text.
+
+On the LangChain call layer since U3b1: the score call gets `ModelScore` as a JSON schema (`complete_structured`)
+and `parse_score_reply` still checks the reply text (quotes, criteria, caps); the write call is `complete_chat` and
+`parse_write_reply`.
 """
 
 import logging
@@ -11,8 +15,11 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import NamedTuple, TypeVar
 
+from pydantic import BaseModel
+
+from app.core.ai.chat import ChatModel, complete_chat, complete_structured, fixed_prompt
 from app.core.ai.context import BuiltContext, ContextManager, ContextTooLargeError
-from app.core.ai.provider import LLMError, LLMProvider, LLMResult
+from app.core.ai.provider import LLMBadResponseError, LLMError, LLMResult
 from app.core.ai.tracing import Tracer
 
 from ..ai.interviews_context import FeedbackScoreInputs, FeedbackWriteInputs
@@ -22,6 +29,7 @@ from ..ai.interviews_feedback import (
     parse_score_reply,
     parse_write_reply,
 )
+from ..ai.interviews_model_schemas import ModelScore
 from ..ai.interviews_reply import InvalidReplyError
 from ..ai.interviews_reply_attempts import ReplyAttempts
 from ..ai.interviews_turn_limits import Deadline
@@ -148,7 +156,7 @@ class _Attempts(NamedTuple):
 class FeedbackGenerator:
     def __init__(
         self,
-        llm: LLMProvider,
+        model: ChatModel,
         context: ContextManager,
         *,
         score_max_tokens: int,
@@ -157,13 +165,13 @@ class FeedbackGenerator:
         clock: Callable[[], float],
         tracer: Tracer | None = None,
     ):
-        self.llm = llm
+        self.model = model
         self.context = context
         self.score_max_tokens = score_max_tokens
         self.write_max_tokens = write_max_tokens
         self.score_temperature = score_temperature
         self.clock = clock
-        # Langfuse steps and checks (metadata only); the generations themselves come from the TracingProvider.
+        # Langfuse steps and checks (metadata only); the generations themselves come from the chat model's tracer.
         self.tracer = tracer or Tracer(None)
 
     def deadline(self, seconds: float) -> Deadline:
@@ -197,6 +205,7 @@ class FeedbackGenerator:
                 max_tokens=self.score_max_tokens,
                 temperature=self.score_temperature,
                 parse=lambda text: parse_score_reply(text, inputs.threads),
+                schema=ModelScore,
             )
             parsed = attempts.parsed
             assert parsed is None or isinstance(parsed, ScoreResult)
@@ -270,9 +279,12 @@ class FeedbackGenerator:
         max_tokens: int,
         temperature: float | None,
         parse: Callable[[str], T],
+        schema: type[BaseModel] | None = None,
     ) -> _Attempts:
+        """`schema` set: a structured call (the model fills it; `parse` still checks the text); else plain text."""
         version = built.prompt_version
         check = FEEDBACK_CHECKS[task]
+        prompt = fixed_prompt(built.messages)
         results: list[LLMResult] = []
         reasons: list[str] = []
         outcomes: list[str] = []
@@ -280,40 +292,55 @@ class FeedbackGenerator:
         attempts = ReplyAttempts(deadline.remaining)
         for attempt, remaining in attempts:
             budget_left_ms = round(remaining * 1000)
+            call = {
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "budget_seconds": remaining,
+                "labels": {"task": task, "prompt_version": version, "attempt": attempt, "budget_left_ms": budget_left_ms},
+            }
+            fits_schema = True
             try:
-                result = self.llm.complete(
-                    built.messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    budget_seconds=remaining,
-                    trace_labels={
-                        "task": task,
-                        "prompt_version": version,
-                        "attempt": attempt,
-                        "budget_left_ms": budget_left_ms,
-                    },
+                if schema is None:
+                    result = complete_chat(self.model, prompt, {}, **call)
+                else:
+                    outcome = complete_structured(self.model, prompt, {}, schema, **call)
+                    result, fits_schema = outcome.result, outcome.value is not None
+            except LLMBadResponseError as exc:
+                # No text came back. The call layer raises this for an empty reply; the code stays `empty_reply`,
+                # the stored failure reason and the hint's key.
+                failure = "empty_reply"
+                log_llm_call(
+                    logging.WARNING,
+                    failure,
+                    task=task,
+                    prompt_version=version,
+                    latency_ms=exc.latency_ms,
+                    attempts=exc.attempts,
+                    finish=exc.finish_reason,
+                    budget_left_ms=budget_left_ms,
                 )
+                outcomes.append(failure)
+                self.tracer.check(
+                    check, passed=False, verdict=failure, metadata={"attempt": attempt}, hint=hint_for(failure)
+                )
+                break
             except LLMError as exc:
-                # Already retried inside the provider where that makes sense (timeouts, 429, 5xx); the generation
+                # Already retried by the call layer where that makes sense (timeouts, 429, 5xx); the generation
                 # itself is marked ERROR, so no check is needed.
                 log_llm_error(exc, task, version, budget_left_ms)
                 failure = type(exc).__name__
                 outcomes.append(failure)
                 break
             results.append(result)
-            if not result.text.strip():
-                log_result(logging.WARNING, "empty_reply", result, task, version, budget_left_ms)
-                failure = "empty_reply"
-                outcomes.append(failure)
-                self.tracer.check(
-                    check, passed=False, verdict=failure, metadata={"attempt": attempt}, hint=hint_for(failure)
-                )
-                break
             try:
                 if result.finish_reason == "length":
                     # Cut off by max_tokens: never a complete reply, whatever it parses as.
                     raise InvalidReplyError("truncated")
+                # The parser first, for its precise reason codes (and their hints); then the schema, which a reply
+                # the parser accepts still has to fit (FR8).
                 parsed = parse(result.text)
+                if not fits_schema:
+                    raise InvalidReplyError("schema")
             except InvalidReplyError as exc:
                 log_result(
                     logging.WARNING, f"invalid_reply:{exc.reason}", result, task, version, budget_left_ms

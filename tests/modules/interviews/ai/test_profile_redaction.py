@@ -10,8 +10,9 @@ from contextlib import nullcontext
 
 import pytest
 
-from app.core.ai.fake import FakeProvider
-from app.core.ai.tracing import REDACT_LABEL, REDACTED, Tracer, TracingProvider
+from app.core.ai.chat_fake import FakeChatModel
+from app.core.ai.chat_tracing import TracerHandle
+from app.core.ai.tracing import REDACT_LABEL, REDACTED, Tracer
 from app.modules.interviews.ai.interviews_context import (
     CONTEXT_MANAGER,
     InterviewerInputs,
@@ -52,10 +53,12 @@ def inputs(**overrides) -> InterviewerInputs:
     return InterviewerInputs(**(values | overrides))
 
 
-def traced(reply: str) -> tuple[TracingProvider, FakeLangfuse]:
+def traced(reply: str) -> tuple[FakeChatModel, FakeLangfuse]:
+    """A chat model replying `reply`, with the tracer riding on it as the factory attaches it (U3b1)."""
     langfuse = FakeLangfuse()
-    tracer = Tracer(langfuse, propagate=lambda **_: nullcontext())
-    return TracingProvider(FakeProvider(default=reply), tracer), langfuse
+    model = FakeChatModel(default=reply)
+    model.callbacks = [TracerHandle(Tracer(langfuse, propagate=lambda **_: nullcontext()))]
+    return model, langfuse
 
 
 def generations(langfuse: FakeLangfuse) -> list[dict]:
@@ -64,11 +67,11 @@ def generations(langfuse: FakeLangfuse) -> list[dict]:
 
 def run_write(data: InterviewerInputs) -> tuple[Written, dict]:
     reply = {"question": QUESTION} if data.mode == FollowUpAction.follow_up else {"question": QUESTION, "category": "technical"}
-    provider, langfuse = traced(json.dumps(reply))
+    model, langfuse = traced(json.dumps(reply))
     clock = lambda: 0.0
     category = QuestionCategory.technical if data.mode == FollowUpAction.follow_up else None
     written = write(
-        provider,
+        model,
         CONTEXT_MANAGER,
         uuid.uuid7(),
         data,
@@ -81,13 +84,13 @@ def run_write(data: InterviewerInputs) -> tuple[Written, dict]:
 
 
 async def run_stream_write(data: InterviewerInputs) -> tuple[Written, dict]:
-    provider, langfuse = traced(f"CATEGORY: technical\n{QUESTION}")
+    model, langfuse = traced(f"CATEGORY: technical\n{QUESTION}")
     clock = lambda: 0.0
     category = QuestionCategory.technical if data.mode == FollowUpAction.follow_up else None
     items = [
         item
         async for item in stream_write(
-            provider,
+            model,
             CONTEXT_MANAGER,
             uuid.uuid7(),
             data,

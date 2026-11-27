@@ -216,7 +216,7 @@ async def test_a_reset_retry_in_a_stream_reuses_the_same_notes(llm, clock):  # E
         FakeStream(["CATEGORY: technical\n", "Tell me "], error=LLMServerError("connection dropped")),
         "CATEGORY: technical\nHow would you version a public API?",
     )
-    interviewer = Interviewer(llm, CONTEXT_MANAGER, max_tokens=800, budget_seconds=30, clock=clock)
+    interviewer = Interviewer(llm.chat, CONTEXT_MANAGER, max_tokens=800, budget_seconds=30, clock=clock)
 
     events = [e async for e in interviewer.stream_turn(uuid.uuid7(), inputs(), last_main=False)]
 

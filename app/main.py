@@ -6,7 +6,6 @@ from fastapi import APIRouter, FastAPI
 from app.core.ai.factory import (
     build_chat_model,
     build_embedder,
-    build_provider,
     build_synthesizer,
     build_transcriber,
 )
@@ -28,16 +27,13 @@ setup_logging(settings.debug)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Before anything else: a missing or broken routed prompt stops startup instead of failing mid-interview.
     check_prompts()
-    # One LLM client for the whole app (connection reuse); None when no key is configured.
     tracer = build_tracer(settings)
-    provider = build_provider(settings, tracer=tracer)
-    # The LangChain chat model, for the tasks already migrated off `provider` (U3a: JD summary, profile extraction).
+    # The LangChain chat model every LLM task runs on (U3a, U3b1), shared by all requests; None when LLM is off.
     chat_model = build_chat_model(settings, tracer=tracer)
     transcriber = build_transcriber(settings)
     synthesizer = build_synthesizer(settings)
     embedder = build_embedder(settings)
     app.state.tracer = tracer
-    app.state.llm_provider = provider
     app.state.chat_model = chat_model
     app.state.transcriber = transcriber
     app.state.synthesizer = synthesizer
@@ -45,16 +41,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        if provider is not None:
-            provider.close()
-            await provider.aclose()
         if transcriber is not None:
             await transcriber.aclose()
         if synthesizer is not None:
             await synthesizer.aclose()
         if embedder is not None:
             embedder.close()
-        # After the provider: its last calls are recorded by now, so this flush sends them too.
+        # Last: every call is recorded by now, so this flush sends them too.
         tracer.close()
 
 

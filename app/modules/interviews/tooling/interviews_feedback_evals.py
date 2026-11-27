@@ -22,8 +22,9 @@ from typing import Any, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMProvider, LLMResult
+from app.core.ai.provider import LLMResult
 from app.core.ai.tracing import ExperimentRun, Tracer
 from app.core.logging import bind_log_context
 
@@ -278,7 +279,7 @@ def _band_check(name: str, band: Band, value: float | None) -> Check:
 
 
 def run_feedback_case(
-    provider: LLMProvider,
+    chat_model: ChatModel,
     case: FeedbackEvalCase,
     *,
     score_max_tokens: int,
@@ -294,7 +295,7 @@ def run_feedback_case(
     if not assess_evidence(threads):
         return FeedbackCaseResult(case_id=case.id, insufficient=True, checks=check_feedback(case, insufficient=True))
     generator = FeedbackGenerator(
-        provider,
+        chat_model,
         context,
         score_max_tokens=score_max_tokens,
         write_max_tokens=write_max_tokens,
@@ -510,7 +511,7 @@ def feedback_scores_for(result: FeedbackCaseResult) -> list[tuple[str, bool, str
 
 def run_feedback(
     args: argparse.Namespace,
-    provider: LLMProvider,
+    chat_model: ChatModel,
     tracer: Tracer,
     settings: Any,
     *,
@@ -539,7 +540,7 @@ def run_feedback(
         def run_one(case: FeedbackEvalCase, earlier: dict[str, FeedbackCaseResult] = earlier) -> FeedbackCaseResult:
             wait()
             result = run_feedback_case(
-                provider,
+                chat_model,
                 case,
                 score_max_tokens=settings.feedback_score_max_tokens,
                 write_max_tokens=settings.feedback_write_max_tokens,

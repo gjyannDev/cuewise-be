@@ -3,15 +3,9 @@
 from fastapi import Request
 
 from .chat import ChatModel
-from .provider import LLMProvider
 from .synthesizer import SpeechSynthesizer
 from .tracing import Tracer
 from .transcriber import Transcriber
-
-
-def get_llm_provider(request: Request) -> LLMProvider | None:
-    """Built once at startup (app lifespan); None when no key is configured or the lifespan didn't run."""
-    return getattr(request.app.state, "llm_provider", None)
 
 
 def get_chat_model(request: Request) -> ChatModel | None:

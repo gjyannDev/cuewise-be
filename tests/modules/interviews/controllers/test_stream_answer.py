@@ -22,6 +22,7 @@ from app.modules.interviews.repositories.interviews_repository import (
 )
 from app.modules.interviews.schemas.interviews_schema import AnswerIn
 from app.modules.interviews.services.interviews_answer_service import AnswerService
+from tests.provider_chat import closed_soon
 
 pytestmark = pytest.mark.anyio
 
@@ -35,7 +36,9 @@ def turn(make_user, start_interview, db, bank, llm, clock):
     created = start_interview(owner, question_count=3).json()
     session_id = uuid.UUID(created["session"]["id"])
     controller = AnswerController(
-        AnswerService(InterviewsRepository(db), bank, random.Random(0), llm, 800, llm_budget_seconds=30, clock=clock)
+        AnswerService(
+            InterviewsRepository(db), bank, random.Random(0), llm.chat, 800, llm_budget_seconds=30, clock=clock
+        )
     )
     ctx = controller.prepare_answer(
         owner, session_id, AnswerIn(question_id=created["current_question"]["id"], answer=ANSWER)
@@ -137,6 +140,7 @@ async def test_leaving_while_the_question_streams_cancels_the_call_and_saves_not
             break
     await events.aclose()
 
+    assert await closed_soon(lambda: llm.fake.cancelled)  # the vendor stream closes a few loop turns later (U3b1)
     assert llm.fake.cancelled is True
     assert saved_answers(db) == 0
     assert db.get(InterviewSession, session_id).current_position == 1

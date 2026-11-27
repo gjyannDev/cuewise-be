@@ -10,7 +10,6 @@ from typing import NamedTuple
 
 from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMProvider
 from app.core.ai.tracing import Tracer
 from app.core.errors import ProfileRequiredError
 from app.core.logging import bind_log_context
@@ -73,7 +72,9 @@ class InterviewsService:
         repo: InterviewsRepository,
         bank: list[BankQuestion],
         rng: random.Random,
-        llm: LLMProvider | None = None,
+        # The LangChain chat model: the job-description summary (U3a) and the first question (U3b1). None = LLM off,
+        # every question comes from the bank.
+        chat_model: ChatModel | None = None,
         llm_max_tokens: int = 800,
         *,
         llm_budget_seconds: float = 30,
@@ -82,14 +83,10 @@ class InterviewsService:
         tracer: Tracer | None = None,
         retrieval: RetrievalService | None = None,
         profiles: ProfileService | None = None,
-        # The LangChain chat model, for the job-description summary (U3a); None = LLM off, no summary.
-        chat_model: ChatModel | None = None,
     ):
         self.repo = repo
         self.bank = bank
         self.rng = rng
-        # None = LLM off: every question comes from the bank.
-        self.llm = llm
         self.chat_model = chat_model
         # Picks the interview's reference notes at start (knowledge-base RAG); None = no notes (evals, older tests).
         self.retrieval = retrieval
@@ -103,9 +100,9 @@ class InterviewsService:
         # Writes the first question (ai/interviews_turn.py).
         self.interviewer = (
             None
-            if llm is None
+            if chat_model is None
             else Interviewer(
-                llm, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
+                chat_model, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
             )
         )
 

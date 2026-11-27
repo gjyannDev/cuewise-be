@@ -10,7 +10,6 @@ from google.api_core import exceptions as gx
 
 from app.core.ai.chat_fake import FakeChatModel, fake_reply
 from app.core.ai.chat_tracing import TracerHandle
-from app.core.ai.fake import FakeProvider
 from app.core.ai.tracing import Tracer
 from app.core.config import settings
 from app.modules.interviews.constants.interviews_constants import (
@@ -162,7 +161,7 @@ def good_summary_for_every_case() -> FakeChatModel:
 
 def run_main(client, argv, chat_model):
     tracer = Tracer(client, propagate=lambda **_: nullcontext())
-    return main(["--task", "summary", *argv], provider=FakeProvider(), chat_model=chat_model, tracer=tracer)
+    return main(["--task", "summary", *argv], chat_model=chat_model, tracer=tracer)
 
 
 def test_main_runs_every_case_as_one_experiment_run_with_check_scores(lf, capsys):  # FR10, AC9
@@ -205,5 +204,5 @@ def test_each_case_records_a_summary_generation_with_its_labels(lf):  # FR5: sam
 
 
 def test_without_a_chat_model_the_summary_task_stops_with_a_hint(capsys):
-    assert main(["--task", "summary"], provider=FakeProvider(), tracer=Tracer(None)) == 1
+    assert main(["--task", "summary"], tracer=Tracer(None)) == 1
     assert "LangChain chat model" in capsys.readouterr().out

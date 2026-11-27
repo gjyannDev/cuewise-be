@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 
+from app.core.ai.chat_fake import FakeChatModel
 from app.core.ai.fake import FakeProvider
 from app.modules.interviews.ai.interviews_context import (
     CONTEXT_MANAGER,
@@ -45,11 +46,11 @@ def expired() -> Deadline:
 
 
 def test_write_makes_no_call_once_the_deadline_has_passed():
-    llm = FakeProvider(default=json.dumps({"question": QUESTION, "category": "technical"}))
+    model = FakeChatModel(default=json.dumps({"question": QUESTION, "category": "technical"}))
 
-    written = write(llm, CONTEXT_MANAGER, uuid.uuid7(), inputs(), expired(), follow_up_category=None, max_tokens=200)
+    written = write(model, CONTEXT_MANAGER, uuid.uuid7(), inputs(), expired(), follow_up_category=None, max_tokens=200)
 
-    assert llm.calls == []
+    assert model.calls == []
     assert written.reply is None and written.results == []
 
 

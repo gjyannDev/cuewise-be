@@ -56,7 +56,12 @@ def test_a_decide_call_that_never_answers_is_capped_and_the_write_call_keeps_its
     body = answer(owner, session_id, q1).json()
 
     assert llm.decide.budgets == [DECIDE_MAX_SECONDS]
-    assert llm.fake.budgets[-1] == 30.0 - DECIDE_MAX_SECONDS >= WRITE_RESERVE_SECONDS
+    left = 30.0 - DECIDE_MAX_SECONDS
+    assert left >= WRITE_RESERVE_SECONDS
+    # The write call starts with all the time left (its log line), its attempt capped by LLM_TIMEOUT_SECONDS (U3b1).
+    assert llm.fake.budgets[-1] == min(left, settings.llm_timeout_seconds)
+    write_line = [line for line in llm_lines(app_logs) if "task=interviewer_turn" in line][-1]
+    assert f"budget_left_ms={round(left * 1000)}" in write_line
     assert body["current_question"]["question_kind"] == "main"
     [summary] = [line for line in llm_lines(app_logs) if line.startswith("turn_summary")]
     assert "decision=none" in summary and "source=llm" in summary
@@ -128,7 +133,8 @@ def test_usage_of_both_calls_is_summed_and_every_call_logs_metadata_only(
     )
 
     q2 = db.query(InterviewQuestion).filter_by(position=2).one()
-    assert (q2.prompt_tokens, q2.completion_tokens, q2.latency_ms) == (300, 30, 800)
+    # Both calls' latency is measured by the call layer now (U3b1), so only that it is recorded is checked.
+    assert (q2.prompt_tokens, q2.completion_tokens) == (300, 30) and q2.latency_ms is not None
     lines = llm_lines(app_logs)
     decide_line = next(line for line in lines if "task=follow_up_decision" in line)
     write_line = next(line for line in lines if "task=interviewer_turn" in line and "SECRET" not in line)

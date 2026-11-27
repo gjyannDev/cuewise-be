@@ -28,6 +28,11 @@ def llm_lines(app_logs):
     return [r for r in app_logs.records if r.name == "app.llm"]
 
 
+def call_lines(app_logs):
+    """The `llm_call` lines only (the call layer's `retry_wait` / `retry_giveup` events share the logger)."""
+    return [r for r in llm_lines(app_logs) if r.getMessage().startswith("llm_call")]
+
+
 def result(text, prompt_tokens=100, completion_tokens=20, latency_ms=900):
     return LLMResult(
         text=text,
@@ -89,18 +94,24 @@ def test_without_an_llm_the_first_question_comes_from_the_bank(start_interview, 
 
 
 @pytest.mark.parametrize(
-    "error",
-    [LLMTimeoutError("slow"), LLMServerError("503", status_code=503), LLMRequestError("bad key", status_code=401)],
+    ("error", "calls"),
+    [
+        (LLMTimeoutError("slow"), 1 + settings.llm_max_retries),
+        (LLMServerError("503", status_code=503), 1 + settings.llm_max_retries),
+        (LLMRequestError("bad key", status_code=401), 1),
+    ],
     ids=["timeout", "server-error", "bad-key"],
 )
-def test_a_provider_error_falls_back_to_the_bank_without_a_retry(start_interview, make_user, llm, db, error):  # EC2
-    llm.script(error)
+def test_a_provider_error_falls_back_to_the_bank_after_the_call_layer(
+    start_interview, make_user, llm, db, error, calls
+):  # EC2; U3b1 EC3: transient errors are retried by the call layer (as the old provider did inside), never by write
+    llm.script(*[error] * calls)
 
     r = start_interview(make_user(), interview_type="technical")
 
     assert r.status_code == 201
     assert stored_questions(db, r.json()["session"]["id"])[0].source == "bank"
-    assert len(llm.fake.calls) == 1
+    assert len(llm.fake.calls) == calls
 
 
 def test_an_invalid_reply_is_retried_once(start_interview, make_user, llm, reply_json, db):  # EC3, AC5, AC13
@@ -110,7 +121,8 @@ def test_an_invalid_reply_is_retried_once(start_interview, make_user, llm, reply
 
     [q] = stored_questions(db, r.json()["session"]["id"])
     assert (q.source, q.text) == ("llm", "What is a mutex?")
-    assert (q.prompt_tokens, q.completion_tokens, q.latency_ms) == (220, 25, 1700)  # summed over both calls
+    # Summed over both calls; latency is measured by the call layer (U3b1), so only that it is summed is checked.
+    assert (q.prompt_tokens, q.completion_tokens) == (220, 25) and q.latency_ms is not None
     assert len(llm.fake.calls) == 2
 
 
@@ -134,20 +146,22 @@ def test_no_usable_text_is_not_retried(start_interview, make_user, llm, db, app_
 
     assert stored_questions(db, r.json()["session"]["id"])[0].source == "bank"
     assert len(llm.fake.calls) == 1
-    [line] = llm_lines(app_logs)
-    if isinstance(failure, LLMBadResponseError):
-        assert "finish=length" in line.getMessage() and "outcome=LLMBadResponseError" in line.getMessage()
-    else:
-        assert "outcome=empty_reply" in line.getMessage()
+    [line] = call_lines(app_logs)
+    # A blank reply is the call layer's LLMBadResponseError (as it was the old provider's), logged as `empty_reply`.
+    finish = "length" if isinstance(failure, LLMBadResponseError) else "stop"
+    assert f"finish={finish}" in line.getMessage() and "outcome=empty_reply" in line.getMessage()
 
 
 def test_the_retry_only_gets_the_time_that_is_left(start_interview, make_user, llm, reply_json, clock):  # AC7
-    llm.script("not json", reply_json(), on_call=lambda: clock.advance(10))
+    total = settings.llm_total_budget_seconds
+    used = total - settings.llm_timeout_seconds / 2  # leaves less than one attempt's timeout for the retry
+    llm.script("not json", reply_json(), on_call=lambda: clock.advance(used))
 
     start_interview(make_user(), interview_type="technical")
 
+    # Each attempt's timeout is the time left, capped by LLM_TIMEOUT_SECONDS (the call layer's rule).
     first, second = llm.fake.budgets
-    assert first == settings.llm_total_budget_seconds and second == first - 10
+    assert first == min(total, settings.llm_timeout_seconds) and second == pytest.approx(total - used, abs=0.05)
 
 
 def test_no_retry_when_too_little_time_is_left(start_interview, make_user, llm, reply_json, clock, db):  # AC7

@@ -8,7 +8,7 @@ Run:  uv run python -m app.modules.interviews.tooling.interviews_evals [--strate
       uv run python -m app.modules.interviews.tooling.interviews_evals --task summary --repeat 2 (job-description summary;
       interviews_summary_evals.py)
 (needs LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings). It costs real calls, so it never runs in
-`uv run pytest`; the checks themselves are unit-tested with the fake provider. Never imported by the app.
+`uv run pytest`; the checks themselves are unit-tested with a fake chat model. Never imported by the app.
 
 Each case is one moment of an interview (setup, conversation so far, last answer). The checks are reference-free
 rules, because a good interview question has no single right text: is the reply valid, is it only a question,
@@ -40,15 +40,16 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal
 
 import anyio
 from anyio.from_thread import BlockingPortal, start_blocking_portal
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from app.core.ai.chat import ChatModel
+from app.core.ai.chat import ChatModel, complete_chat, complete_structured, fixed_prompt
+from app.core.ai.chat_stream import stream_chat
 from app.core.ai.context import ContextManager, ContextTooLargeError
-from app.core.ai.provider import LLMError, LLMProvider, LLMResult, ReasoningEffort
+from app.core.ai.provider import LLMError, LLMResult
 from app.core.ai.tracing import ExperimentRun, Tracer
 
 from ..ai.interviews_context import (
@@ -56,6 +57,7 @@ from ..ai.interviews_context import (
     InterviewerInputs,
     build_context_manager,
 )
+from ..ai.interviews_model_schemas import ModelDecision
 from ..ai.interviews_reply import (
     InvalidReplyError,
     parse_decision_reply,
@@ -344,14 +346,17 @@ def check_decision(case: EvalCase, raw: str) -> list[Check]:
 
 
 def run_decide_case(
-    provider: LLMProvider,
+    chat_model: ChatModel,
     case: EvalCase,
     *,
     max_tokens: int,
     context: ContextManager = CONTEXT_MANAGER,
-    reasoning_effort: ReasoningEffort | None = None,
+    budget_seconds: float = 30,
 ) -> CaseResult:
-    """One decide call on the case's latest answer, as the app makes it after every answer."""
+    """One decide call on the case's latest answer, as the app makes it after every answer: the app's chat model,
+    call helper and `ModelDecision` schema (U3b1). Scored on the reply text, as the app's parser reads it. The time
+    budget is the run's (LLM_TOTAL_BUDGET_SECONDS, as the old provider's), not the app's decide cap, so the
+    comparison with the baseline isn't skewed by timeouts."""
     assert case.expect is not None
     usage = CaseResult(
         case_id=case.id,
@@ -372,7 +377,15 @@ def run_decide_case(
     except ContextTooLargeError:
         return usage.model_copy(update={"error": "context_too_large"})
     try:
-        result = provider.complete(built.messages, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
+        result = complete_structured(
+            chat_model,
+            fixed_prompt(built.messages),
+            {},
+            ModelDecision,
+            max_tokens=max_tokens,
+            budget_seconds=budget_seconds,
+            labels={"task": DECISION_TASK, "prompt_version": built.prompt_version},
+        ).result
     except LLMError as exc:
         return usage.model_copy(update={"error": type(exc).__name__, "finish_reason": exc.finish_reason})
     _add_usage(usage, result)
@@ -416,7 +429,7 @@ def summarize_decisions(results: Sequence[CaseResult]) -> DecisionSummary:
 
 
 def run_case(
-    provider: LLMProvider,
+    chat_model: ChatModel,
     case: EvalCase,
     *,
     max_tokens: int,
@@ -424,10 +437,11 @@ def run_case(
     strategy: str | None = None,
     notes: bool = True,
     summary: bool = False,
-    reasoning_effort: ReasoningEffort | None = None,
-    # The job-description summary's model (the app's LangChain chat model); None = no summary, as with LLM off.
-    chat_model: ChatModel | None = None,
+    budget_seconds: float = 30,
 ) -> CaseResult:
+    """The blocking write call on one case, on the app's chat model and call helper (U3b1): one reply, scored as it
+    came back (the app's reply loop would retry an invalid one; the eval wants to see it). The same model makes the
+    job-description summary when `summary` is on."""
     usage = CaseResult(case_id=case.id, checks=[])
     inputs = _case_inputs(chat_model, case, usage, context, max_tokens, notes, summary)
     try:
@@ -435,8 +449,13 @@ def run_case(
     except ContextTooLargeError:
         return usage.model_copy(update={"error": "context_too_large"})
     try:
-        result = provider.complete(
-            built.messages, max_tokens=max_tokens, reasoning_effort=reasoning_effort
+        result = complete_chat(
+            chat_model,
+            fixed_prompt(built.messages),
+            {},
+            max_tokens=max_tokens,
+            budget_seconds=budget_seconds,
+            labels={"task": INTERVIEWER_TASK, "prompt_version": built.prompt_version},
         )
     except LLMError as exc:
         return usage.model_copy(
@@ -456,20 +475,20 @@ def run_case(
 
 
 def run_stream_case(
-    provider: LLMProvider,
+    chat_model: ChatModel,
     case: EvalCase,
     *,
     max_tokens: int,
     context: ContextManager = CONTEXT_MANAGER,
     notes: bool = True,
     summary: bool = False,
-    reasoning_effort: ReasoningEffort | None = None,
     # The event loop to stream on (the CLI keeps one for the whole run); None runs this case on its own loop.
     portal: BlockingPortal | None = None,
-    chat_model: ChatModel | None = None,
+    budget_seconds: float = 30,
 ) -> CaseResult:
     """The streamed turn's write call (interviewer_stream, v5) on one case: the same checks as `run_case`, plus the
-    time to the first chunk of question text, the number the streaming slice exists for."""
+    time to the first chunk of question text, the number the streaming slice exists for. On the app's chat model and
+    stream helper (`stream_chat`, U3b1); the same model makes the summary when `summary` is on."""
     usage = CaseResult(case_id=case.id, checks=[])
     inputs = _case_inputs(chat_model, case, usage, context, max_tokens, notes, summary)
     try:
@@ -485,7 +504,15 @@ def run_stream_case(
         for var, value in caller.items():
             var.set(value)
         start, first_token_ms, buffer, final = time.perf_counter(), None, "", None
-        async for item in provider.stream(built.messages, max_tokens=max_tokens, reasoning_effort=reasoning_effort):
+        stream = stream_chat(
+            chat_model,
+            fixed_prompt(built.messages),
+            {},
+            max_tokens=max_tokens,
+            budget_seconds=budget_seconds,
+            labels={"task": INTERVIEWER_STREAM_TASK, "prompt_version": built.prompt_version},
+        )
+        async for item in stream:
             if isinstance(item, LLMResult):
                 final = item
                 continue
@@ -783,7 +810,6 @@ def _parser() -> argparse.ArgumentParser:
         "--prompt", help="prompt version for the chosen strategy (ablations)"
     )
     parser.add_argument("--model", help="override the primary provider's model for this run")
-    parser.add_argument("--reasoning-effort", choices=get_args(ReasoningEffort))
     parser.add_argument("--notes", choices=["on", "off"], default="on")
     parser.add_argument("--summary", choices=["on", "off"], default="on")
     parser.add_argument("--repeat", type=_positive, default=1)
@@ -815,6 +841,14 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--blocking",
+        action="store_true",
+        help=(
+            "generation: write the questions with the JSON writer of the blocking answer route (A v4, B/C v7_json, "
+            "D/E v8_json) instead of the streamed text prompts"
+        ),
+    )
+    parser.add_argument(
         "--pause-seconds",
         type=_non_negative_seconds,
         default=None,
@@ -829,7 +863,6 @@ def _parser() -> argparse.ArgumentParser:
 def main(
     argv: Sequence[str] | None = None,
     *,
-    provider: LLMProvider | None = None,
     chat_model: ChatModel | None = None,
     tracer: Tracer | None = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -837,13 +870,13 @@ def main(
     parser = _parser()
     args = parser.parse_args(argv)
     args.pause_seconds = pause_for(args.task, args.pause_seconds)
-    from app.core.ai.factory import build_chat_model, build_provider
+    from app.core.ai.factory import build_chat_model
     from app.core.ai.tracing import build_tracer
     from app.core.config import settings
 
     if args.task in RAG_TASKS:
         # Their own data, runners and output (interviews_rag_evals.py).
-        return run_rag_task(args, provider, settings, tracer)
+        return run_rag_task(args, chat_model, settings, tracer)
     context = CONTEXT_MANAGER
     if args.prompt:
         # Every catalogued version, archived ones too: old comparisons stay repeatable.
@@ -857,28 +890,29 @@ def main(
     configs = settings.llm_provider_configs
     model = args.model or (configs[0].model if configs else None)
     # Eval calls go to Langfuse under environment "eval", apart from real traffic (only when keys are configured).
-    # A tracer passed in (tests) is used as is; without one and without keys this is the no-op tracer.
-    if provider is None:
+    # A chat model and tracer passed in (tests) are used as they are; without keys this is the no-op tracer.
+    if chat_model is None:
         tracer = tracer or build_tracer(settings, environment="eval")
-        provider = build_provider(settings, model=args.model, tracer=tracer)
-        # The tasks already on LangChain (U3a: the job-description summary) use the app's chat model, traced the same.
-        chat_model = chat_model or build_chat_model(settings, model=args.model, tracer=tracer)
-        if provider is None:
+        # Every task runs on the app's LangChain chat model (U3a, U3b1), traced the same way.
+        chat_model = build_chat_model(settings, model=args.model, tracer=tracer)
+        if chat_model is None:
             print(
-                "LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first."
+                "LLM is not configured (no LangChain chat model): set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* "
+                "settings in .env first."
             )
             return 1
     tracer = tracer or Tracer(None)
+    args.budget_seconds = settings.llm_total_budget_seconds
     print(
         f"model={model} max_tokens={settings.llm_max_tokens} task={args.task} strategy={args.strategy or 'default'} "
-        f"prompt={args.prompt or 'default'} reasoning_effort={args.reasoning_effort or '-'} "
-        f"notes={args.notes} summary={args.summary} repeat={args.repeat}\n"
+        f"prompt={args.prompt or 'default'} notes={args.notes} summary={args.summary} repeat={args.repeat}\n"
     )
     decide = args.task == "decide"
     wait = pacer(args.pause_seconds, sleep=sleep)
     runs, decisions = [], []
     records: list[ExperimentRun | None] = []
-    # One event loop for every streamed call, so the provider's async connections are reused, never moved between loops.
+    # One event loop for every streamed call, so the chat model's async connections are reused, never moved between
+    # loops.
     with start_blocking_portal() as portal:
         try:
             stamp = run_stamp()
@@ -888,14 +922,11 @@ def main(
                 # Its own cases, checks and summary (interviews_feedback_evals.py); imported here to avoid a cycle.
                 from ..tooling.interviews_feedback_evals import run_feedback
 
-                run_feedback(args, provider, tracer, settings, model=model, commit=commit, stamp=stamp, wait=wait)
+                run_feedback(args, chat_model, tracer, settings, model=model, commit=commit, stamp=stamp, wait=wait)
                 return 0
             if args.task == "summary":
                 from ..tooling.interviews_summary_evals import run_summary
 
-                if chat_model is None:
-                    print("The summary task needs the LangChain chat model: set LLM_PROVIDERS and its settings in .env.")
-                    return 1
                 run_summary(args, chat_model, tracer, settings, model=model, commit=commit, stamp=stamp, wait=wait)
                 return 0
             cases = load_cases(EVAL_CASES_PATH)
@@ -905,8 +936,8 @@ def main(
                 print(f"=== run {run}/{args.repeat}")
                 # Each repeat is one Langfuse experiment run (langfuse-experiments).
                 results, record = _run_as_experiment(
-                    provider, cases, args, context, settings.llm_max_tokens, portal, tracer,
-                    model=model, commit=commit, stamp=stamp, repeat=run, wait=wait, chat_model=chat_model,
+                    chat_model, cases, args, context, settings.llm_max_tokens, portal, tracer,
+                    model=model, commit=commit, stamp=stamp, repeat=run, wait=wait,
                 )  # fmt: skip
                 records.append(record)
                 runs.append(summarize(results))
@@ -915,8 +946,6 @@ def main(
                     decisions.append(summarize_decisions(results))
                     _print_decisions(decisions[-1])
         finally:
-            provider.close()
-            portal.call(provider.aclose)
             tracer.close()
     aggregate = summarize_runs(runs)
     print(
@@ -960,7 +989,7 @@ def write_run_scores(results: Sequence[CaseResult]) -> list[tuple[str, float]]:
 
 
 def _run_as_experiment(
-    provider: LLMProvider,
+    chat_model: ChatModel,
     cases: Sequence[EvalCase],
     args: argparse.Namespace,
     context: ContextManager,
@@ -973,13 +1002,12 @@ def _run_as_experiment(
     stamp: str,
     repeat: int,
     wait: Callable[[], None],
-    chat_model: ChatModel | None = None,
 ) -> tuple[list[CaseResult], ExperimentRun | None]:
     """One repeat of a moved task as one Langfuse experiment run: same cases, same console lines, plus a run that
     carries what produced it and the scores the console summary is built from."""
     item_by_case = dict(zip((c.id for c in cases), dataset_items(cases, args.task), strict=True))
     description = run_description(args.note)
-    flags: dict[str, object] = {"reasoning_effort": args.reasoning_effort, "max_tokens": max_tokens}
+    flags: dict[str, object] = {"max_tokens": max_tokens}
     if args.task == "decide":
         prompts: dict[str, str | None] = {"decision": DECISION_VERSION}
         run_scores_of = decide_run_scores
@@ -994,7 +1022,7 @@ def _run_as_experiment(
 
     def run_one(case: EvalCase) -> CaseResult:
         wait()
-        result = _run_one(provider, case, args, context, max_tokens, portal, chat_model)
+        result = _run_one(chat_model, case, args, context, max_tokens, portal)
         _print_case(case, result)
         return result
 
@@ -1060,40 +1088,37 @@ def _print_summary(summary: Summary) -> None:
 
 
 def _run_one(
-    provider: LLMProvider,
+    chat_model: ChatModel,
     case: EvalCase,
     args: argparse.Namespace,
     context: ContextManager,
     max_tokens: int,
     portal: BlockingPortal | None = None,
-    chat_model: ChatModel | None = None,
 ) -> CaseResult:
     if args.task == "decide":
         return run_decide_case(
-            provider, case, max_tokens=max_tokens, context=context, reasoning_effort=args.reasoning_effort
+            chat_model, case, max_tokens=max_tokens, context=context, budget_seconds=args.budget_seconds
         )
     if args.task == "stream":
         return run_stream_case(
-            provider,
+            chat_model,
             case,
             max_tokens=max_tokens,
             context=context,
             notes=args.notes == "on",
             summary=args.summary == "on",
-            reasoning_effort=args.reasoning_effort,
             portal=portal,
-            chat_model=chat_model,
+            budget_seconds=args.budget_seconds,
         )
     return run_case(
-        provider,
+        chat_model,
         case,
         max_tokens=max_tokens,
         context=context,
         strategy=args.strategy,
         notes=args.notes == "on",
         summary=args.summary == "on",
-        reasoning_effort=args.reasoning_effort,
-        chat_model=chat_model,
+        budget_seconds=args.budget_seconds,
     )
 
 

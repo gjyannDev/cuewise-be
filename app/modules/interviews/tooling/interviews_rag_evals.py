@@ -45,15 +45,23 @@ from typing import Any, Literal, NamedTuple
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.ai.chat import ChatModel, complete_chat, fixed_prompt
 from app.core.ai.embedder import Embedder, EmbeddingKind
-from app.core.ai.provider import LLMError, LLMProvider
+from app.core.ai.provider import LLMError
 from app.core.ai.tracing import ExperimentRun, Tracer
+from app.core.config import settings
 from app.modules.profile.schemas.profile_schema import CandidateProfile
 
 from ..ai.interviews_context import CONTEXT_MANAGER, InterviewerInputs
-from ..ai.interviews_reply import InvalidReplyError, parse_streamed_reply, split_header
+from ..ai.interviews_reply import (
+    InvalidReplyError,
+    parse_interviewer_reply,
+    parse_streamed_reply,
+    split_header,
+)
 from ..constants.interviews_constants import (
     INTERVIEWER_STREAM_TASK,
+    INTERVIEWER_TASK,
     MODULE_DIR,
     RETRIEVAL_MIN_SIMILARITY,
     RETRIEVAL_PROFILE_SLOTS,
@@ -61,7 +69,11 @@ from ..constants.interviews_constants import (
     JobRole,
     Level,
 )
-from ..constants.interviews_prompt_registry import INTERVIEWER_STREAM, Data
+from ..constants.interviews_prompt_registry import (
+    INTERVIEWER_JSON,
+    INTERVIEWER_STREAM,
+    Data,
+)
 from ..repositories.interviews_knowledge_repository import KnowledgeRepository
 from ..services.interviews_retrieval_service import RetrievalService
 from ..utils.interviews_knowledge_utils import ReferenceNote, pick_filter_notes
@@ -107,6 +119,14 @@ ARM_PROMPTS = {
     "C": INTERVIEWER_STREAM[Data.notes],
     "D": INTERVIEWER_STREAM[Data.profile],
     "E": INTERVIEWER_STREAM[Data.profile],
+}
+# `--blocking`: the same arms on the JSON writer (the blocking answer route): v4, v7_json, v8_json.
+BLOCKING_ARM_PROMPTS = {
+    "A": INTERVIEWER_JSON[Data.plain],
+    "B": INTERVIEWER_JSON[Data.notes],
+    "C": INTERVIEWER_JSON[Data.notes],
+    "D": INTERVIEWER_JSON[Data.profile],
+    "E": INTERVIEWER_JSON[Data.profile],
 }
 # Neutral sheet labels, one per arm in the run, in a seeded random order per setup.
 LABELS = ("X", "Y", "Z", "V", "W")
@@ -268,7 +288,7 @@ def skill_coverage(questions: Sequence[str], skills: Sequence[str]) -> float | N
 
 
 def simulate_main_questions(
-    llm: LLMProvider,
+    chat_model: ChatModel,
     *,
     role: JobRole,
     level: Level,
@@ -278,9 +298,13 @@ def simulate_main_questions(
     notes: Sequence[ReferenceNote],
     max_tokens: int,
     profile: CandidateProfile | None = None,
+    blocking: bool = False,
 ) -> list[WrittenQuestion]:
     """One interview's main questions through the streamed writer's text format (the arm's prompt: v5, v7, or v8 with
-    a profile), with a canned neutral answer between them and no decide call or follow-ups."""
+    a profile), with a canned neutral answer between them and no decide call or follow-ups. `blocking` writes them
+    with the JSON writer instead (v4, v7_json, v8_json), parsed as the blocking answer route parses them. Each call
+    goes through the app's chat model and call helper (U3b1), one blocking call per question in both modes."""
+    task = INTERVIEWER_TASK if blocking else INTERVIEWER_STREAM_TASK
     turns: list[QuestionTurn] = []
     written: list[WrittenQuestion] = []
     for _ in range(question_count):
@@ -294,25 +318,29 @@ def simulate_main_questions(
             reference_notes=notes,
             candidate_profile=profile,
         )
-        built = CONTEXT_MANAGER.build(INTERVIEWER_STREAM_TASK, inputs)
+        built = CONTEXT_MANAGER.build(task, inputs)
         try:
-            result = llm.complete(
-                built.messages,
+            result = complete_chat(
+                chat_model,
+                fixed_prompt(built.messages),
+                {},
                 max_tokens=max_tokens,
-                trace_labels={"task": INTERVIEWER_STREAM_TASK, "prompt_version": built.prompt_version},
+                budget_seconds=settings.llm_total_budget_seconds,
+                labels={"task": task, "prompt_version": built.prompt_version},
             )
         except LLMError:
             written.append(WrittenQuestion(None, None))
             continue
+        earlier = [t.question for t in turns]
         try:
-            header = split_header(result.text, final=True)
-            assert header is not None
-            reply = parse_streamed_reply(
-                header.text,
-                interview_type=interview_type,
-                earlier_questions=[t.question for t in turns],
-                category=header.category,
-            )
+            if blocking:
+                reply = parse_interviewer_reply(result.text, interview_type=interview_type, earlier_questions=earlier)
+            else:
+                header = split_header(result.text, final=True)
+                assert header is not None
+                reply = parse_streamed_reply(
+                    header.text, interview_type=interview_type, earlier_questions=earlier, category=header.category
+                )
         except InvalidReplyError:
             written.append(WrittenQuestion(None, result.prompt_tokens))
             continue
@@ -544,7 +572,7 @@ def _ranking(number: int, raw: str, labels: Mapping[str, str]) -> list[str]:
 
 
 def run_rag_task(
-    args: argparse.Namespace, provider: LLMProvider | None, settings, tracer: Tracer | None = None
+    args: argparse.Namespace, chat_model: ChatModel | None, settings, tracer: Tracer | None = None
 ) -> int:
     if args.task == "ranking":
         # Reads your filled-in sheet (no model call), then posts your judgement onto each arm's Langfuse result.
@@ -555,15 +583,16 @@ def run_rag_task(
             return run_ranking(Path(args.sheet), tracer=tracer)
         finally:
             tracer.close()
-    from app.core.ai.factory import build_embedder, build_provider
+    from app.core.ai.factory import build_chat_model, build_embedder
     from app.core.ai.tracing import build_tracer
 
     configs = settings.llm_provider_configs
     model = args.model or (configs[0].model if configs else None)
     # Both record their runs in Langfuse (no-op without keys): retrieval as an experiment run, generation as traces.
     tracer = tracer or build_tracer(settings, environment="eval")
-    if args.task == "generation" and provider is None:
-        provider = build_provider(settings, model=args.model, tracer=tracer)
+    if args.task == "generation" and chat_model is None:
+        # The questions are written on the app's LangChain chat model (U3b1).
+        chat_model = build_chat_model(settings, model=args.model, tracer=tracer)
     try:
         embedder = build_embedder(settings)
         if embedder is None:
@@ -574,10 +603,10 @@ def run_rag_task(
             if args.task == "retrieval":
                 # Deterministic for fixed notes and embeddings: one run, whatever --repeat says.
                 return run_retrieval(repo, embedder, tracer=tracer, pause=args.pause_seconds, note=args.note)
-            if provider is None:
+            if chat_model is None:
                 print("LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first.")
                 return 1
-            return run_generation(args, provider, embedder, repo, settings.llm_max_tokens, tracer=tracer, model=model)
+            return run_generation(args, chat_model, embedder, repo, settings.llm_max_tokens, tracer=tracer, model=model)
     finally:
         tracer.close()
 
@@ -788,7 +817,7 @@ class ArmInterview(NamedTuple):
 
 def run_generation(
     args: argparse.Namespace,
-    provider: LLMProvider,
+    chat_model: ChatModel,
     embedder: Embedder,
     repo: KnowledgeRepository,
     max_tokens: int,
@@ -829,16 +858,18 @@ def run_generation(
     sets: dict[str, dict[str, Sequence[str] | None]] = {}
     traces: dict[str, dict[str, str]] = {}
     records: list[ExperimentRun | None] = []
+    blocking = bool(getattr(args, "blocking", False))
+    prompts = BLOCKING_ARM_PROMPTS if blocking else ARM_PROMPTS
     for repeat in range(1, args.repeat + 1):
         for arm in arms:
-            prompt = ARM_PROMPTS[arm]
+            prompt = prompts[arm]
 
             def run_one(case, arm: str = arm, repeat: int = repeat) -> ArmInterview:
                 session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{case.id}/{repeat}")
                 profile = facts[case.id].profile if arm in PROFILE_ARMS else None
                 notes, start_ms, profile_notes = _arm_notes(arm, case, repo, embedder, session_id, tracer, profile)
                 questions = simulate_main_questions(
-                    provider,
+                    chat_model,
                     role=case.setup.role,
                     level=case.setup.level,
                     interview_type=case.setup.interview_type,
@@ -847,6 +878,7 @@ def run_generation(
                     notes=notes,
                     max_tokens=max_tokens,
                     profile=profile,
+                    blocking=blocking,
                 )
                 time.sleep(args.pause_seconds)
                 return ArmInterview(
@@ -880,7 +912,12 @@ def run_generation(
                     model=model,
                     prompts={"interviewer": prompt},
                     repeat=repeat,
-                    flags={"max_tokens": max_tokens, "pause_seconds": args.pause_seconds, "seed": args.seed},
+                    flags={
+                        "max_tokens": max_tokens,
+                        "pause_seconds": args.pause_seconds,
+                        "seed": args.seed,
+                        "blocking": blocking,
+                    },
                     extra={
                         "arm": arm,
                         "embedding_model": embedder.model,

@@ -16,8 +16,9 @@ from contextlib import aclosing
 
 import anyio
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMProvider, LLMResult
+from app.core.ai.provider import LLMResult
 
 from ..ai.interviews_context import InterviewerInputs
 from ..ai.interviews_decide import decide
@@ -41,14 +42,15 @@ from ..constants.interviews_constants import QuestionCategory, TurnPhase
 class Interviewer:
     def __init__(
         self,
-        llm: LLMProvider,
+        chat_model: ChatModel,
         context: ContextManager,
         *,
         max_tokens: int,
         budget_seconds: float,
         clock: Callable[[], float],
     ):
-        self.llm = llm
+        # Every call of the turn (decide, the blocking and the streamed write) runs on the LangChain chat model (U3b1).
+        self.chat_model = chat_model
         self.context = context
         self.max_tokens = max_tokens
         self.budget_seconds = budget_seconds
@@ -101,7 +103,7 @@ class Interviewer:
         if plan.write_inputs is not None:
             yield PhaseChanged(TurnPhase.writing)
             write_events = stream_write(
-                self.llm,
+                self.chat_model,
                 self.context,
                 session_id,
                 plan.write_inputs,
@@ -158,7 +160,7 @@ class Interviewer:
         self, session_id: uuid.UUID, inputs: InterviewerInputs, deadline: Deadline
     ) -> tuple[Decision | None, list[LLMResult], str | None]:
         return decide(
-            self.llm, self.context, session_id, inputs, deadline, max_tokens=self.max_tokens, clock=self.clock
+            self.chat_model, self.context, session_id, inputs, deadline, max_tokens=self.max_tokens, clock=self.clock
         )
 
     def _write(
@@ -170,7 +172,7 @@ class Interviewer:
         follow_up_category: QuestionCategory | None,
     ) -> Written:
         return write(
-            self.llm,
+            self.chat_model,
             self.context,
             session_id,
             inputs,

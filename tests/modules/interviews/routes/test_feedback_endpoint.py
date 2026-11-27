@@ -12,8 +12,11 @@ import pytest
 from sqlalchemy import func, select, update
 
 from app.core.ai.context import ContextManager, Task
+from app.core.ai.dependencies import get_chat_model
+from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import LLMServerError
 from app.core.ai.tracing import Tracer
+from app.core.config import settings
 from app.core.rate_limit import RateLimiter
 from app.main import app
 from app.modules.interviews.ai.interviews_context import FeedbackScore, FeedbackWrite
@@ -37,7 +40,6 @@ from app.modules.interviews.dependencies.interviews_feedback_dependencies import
 )
 from app.modules.interviews.dependencies.interviews_shared_dependencies import (
     get_context_manager,
-    get_llm_provider,
     get_now,
     get_tracer,
 )
@@ -246,25 +248,27 @@ def test_a_completed_interview_gets_scored_written_and_stored(client, auth_heade
 
 
 def test_the_score_call_runs_at_a_low_temperature_within_the_budget(client, auth_header, owner, interview, llm, monkeypatch):
+    # The calls run on the chat model (U3b1); the fixture's chat model hands each one to the scripted FakeProvider,
+    # so its `complete` sees the per-call limits the call helper set (the budget is the attempt's timeout).
     seen = {}
-    original = type(llm).complete
+    original = FakeProvider.complete
 
     def spy(self, messages, **kwargs):
-        seen.setdefault(messages[0].content[:40], kwargs)
+        seen.setdefault(messages[0].content[:40], (self, kwargs))
         return original(self, messages, **kwargs)
 
-    monkeypatch.setattr(type(llm), "complete", spy)
+    monkeypatch.setattr(FakeProvider, "complete", spy)
     llm.script_score(score_json())
     llm.script_write(write_text())
 
     assert post(client, auth_header, owner, interview(owner)).status_code == 201
 
-    score_kwargs, write_kwargs = list(seen.values())
+    (score_fake, score_kwargs), (write_fake, write_kwargs) = list(seen.values())
     assert score_kwargs["temperature"] == 0.2 and score_kwargs["max_tokens"] == 6000
     assert write_kwargs["temperature"] is None and write_kwargs["max_tokens"] == 2000
     assert 0 < score_kwargs["budget_seconds"] <= 60
-    assert score_kwargs["trace_labels"]["task"] == FEEDBACK_SCORE_TASK
-    assert write_kwargs["trace_labels"]["task"] == FEEDBACK_WRITE_TASK
+    # Routed by system prompt to the score and write scripts: each call went to its own task's prompt.
+    assert score_fake is llm.score and write_fake is llm.write
 
 
 def test_a_second_post_returns_the_stored_feedback_with_no_llm_call(client, auth_header, owner, interview, happy, db):  # AC3, EC5
@@ -340,12 +344,13 @@ def test_two_invalid_score_replies_fail_with_502_and_no_scores(client, auth_head
 
 
 def test_a_provider_error_fails_at_once_with_no_partial_scores(client, auth_header, owner, interview, llm, db):  # AC11, EC12
-    llm.script_score(LLMServerError("upstream 503", status_code=503))
+    # A 503 is retried by the call layer (U3b1), never by the reply loop: it fails once every transport attempt has.
+    llm.script_score(*[LLMServerError("upstream 503", status_code=503)] * (1 + settings.llm_max_retries))
     session_id = interview(owner)
 
     r = post(client, auth_header, owner, session_id)
 
-    assert r.status_code == 502 and len(llm.score.calls) == 1
+    assert r.status_code == 502 and len(llm.score.calls) == 1 + settings.llm_max_retries
     assert row(db, session_id).failure_reason == "LLMServerError"
 
 
@@ -564,7 +569,7 @@ def test_without_an_llm_post_is_503_and_stores_nothing(client, auth_header, owne
 def test_without_an_llm_a_generated_feedback_is_still_returned(client, auth_header, owner, interview, happy, db):  # EC28
     session_id = interview(owner)
     first = post(client, auth_header, owner, session_id).json()
-    app.dependency_overrides.pop(get_llm_provider)  # the LLM is switched off
+    app.dependency_overrides.pop(get_chat_model)  # the LLM is switched off
 
     r = post(client, auth_header, owner, session_id)
 

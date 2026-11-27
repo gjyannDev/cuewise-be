@@ -5,8 +5,9 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMProvider
+from app.core.ai.dependencies import get_chat_model
 from app.core.ai.tracing import Tracer
 from app.core.config import settings
 from app.core.errors import RateLimitedError
@@ -21,7 +22,6 @@ from ..controllers.interviews_feedback_controller import FeedbackController
 from ..dependencies.interviews_shared_dependencies import (
     get_clock,
     get_context_manager,
-    get_llm_provider,
     get_now,
     get_tracer,
 )
@@ -51,7 +51,7 @@ def limit_feedback(
 
 def get_feedback_service(
     db: Annotated[Session, Depends(get_db)],
-    llm: Annotated[LLMProvider | None, Depends(get_llm_provider)],
+    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     now: Annotated[Callable[[], datetime], Depends(get_now)],
     context: Annotated[ContextManager, Depends(get_context_manager)],
@@ -59,7 +59,7 @@ def get_feedback_service(
 ) -> FeedbackService:
     return FeedbackService(
         InterviewsRepository(db),
-        llm,
+        chat_model,
         context=context,
         clock=clock,
         now=now,

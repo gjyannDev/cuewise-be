@@ -8,6 +8,7 @@ import pytest
 
 from app.core.ai.fake import FakeStream
 from app.core.ai.provider import LLMServerError
+from app.core.config import settings
 from app.modules.interviews.ai.interviews_context import (
     CONTEXT_MANAGER,
     InterviewerInputs,
@@ -29,6 +30,7 @@ from app.modules.interviews.constants.interviews_constants import (
     TurnPhase,
 )
 from app.modules.interviews.utils.interviews_utils import QuestionTurn
+from tests.provider_chat import closed_soon
 
 pytestmark = pytest.mark.anyio
 
@@ -38,7 +40,7 @@ GOOD = "CATEGORY: behavioral\nTell me about a project you led from start to fini
 
 
 def make_interviewer(llm, clock) -> Interviewer:
-    return Interviewer(llm, CONTEXT_MANAGER, max_tokens=800, budget_seconds=30, clock=clock)
+    return Interviewer(llm.chat, CONTEXT_MANAGER, max_tokens=800, budget_seconds=30, clock=clock)
 
 
 def inputs(*turns: QuestionTurn) -> InterviewerInputs:
@@ -227,7 +229,8 @@ async def test_the_deadline_running_out_mid_question_takes_it_back_and_the_bank_
 
 
 async def test_a_failure_before_any_text_needs_no_reset(llm, clock):  # EC10
-    llm.script(LLMServerError("provider down"))
+    # A 503 is retried by the call layer before the first chunk (U3b1), so it fails every attempt.
+    llm.script(*[LLMServerError("provider down")] * (1 + settings.llm_max_retries))
 
     events = await collect(make_interviewer(llm, clock))
 
@@ -253,5 +256,6 @@ async def test_leaving_mid_question_cancels_the_provider_call(llm, clock):  # AC
         if isinstance(event, Delta):
             break
     await turn.aclose()
+    assert await closed_soon(lambda: llm.fake.cancelled)  # the vendor stream closes a few loop turns later (U3b1)
 
     assert llm.fake.cancelled is True

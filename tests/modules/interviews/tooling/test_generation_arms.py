@@ -42,6 +42,7 @@ from tests.modules.interviews.tooling.test_generation_eval import (
     lf,  # noqa: F401 (a fixture)
     quiet,
 )
+from tests.provider_chat import ProviderChatModel
 
 
 def test_the_arms_send_the_stream_routes_versions():  # prompt-registry AC5
@@ -130,7 +131,7 @@ def run(db, tracer, sheet, writer, embedder, arms):
     args = argparse.Namespace(
         repeat=1, pause_seconds=0, sheet=str(sheet), seed=8, note=None, arms=arms
     )
-    return run_generation(args, writer, embedder, KnowledgeRepository(db), 400, tracer=tracer, model="m")
+    return run_generation(args, ProviderChatModel(writer), embedder, KnowledgeRepository(db), 400, tracer=tracer, model="m")
 
 
 def test_arms_c_d_e_are_one_run_each_with_their_prompt_and_profile(db, corpus, lf, tmp_path):  # AC12
@@ -156,7 +157,7 @@ def test_without_arms_the_run_is_todays_three_arms(db, corpus, lf, tmp_path):
     writer = RecordingWriter()
     args = argparse.Namespace(repeat=1, pause_seconds=0, sheet=str(tmp_path / "b.md"), seed=8, note=None)
 
-    run_generation(args, writer, FakeEmbedder(), KnowledgeRepository(db), 400, tracer=quiet(lf), model="m")
+    run_generation(args, ProviderChatModel(writer), FakeEmbedder(), KnowledgeRepository(db), 400, tracer=quiet(lf), model="m")
 
     assert [r["metadata"]["arm"] for r in lf.experiments] == list(DEFAULT_ARMS)
     assert not any("<candidate_profile>" in p[1].content for p in writer.prompts)

@@ -30,12 +30,20 @@ from app.modules.interviews.tooling.interviews_rag_evals import (
     recall_at_k,
     reciprocal_rank,
     run_scores,
-    simulate_main_questions,
     skill_coverage,
     summarize_arm,
     threshold_sweep,
 )
+from app.modules.interviews.tooling.interviews_rag_evals import (
+    simulate_main_questions as _simulate,
+)
 from app.modules.interviews.utils.interviews_knowledge_utils import ReferenceNote
+from tests.provider_chat import ProviderChatModel
+
+
+def simulate_main_questions(llm, **kwargs):
+    # The writer is on the chat model (U3b1); these tests script it with a FakeProvider and read its `.calls`.
+    return _simulate(ProviderChatModel(llm), **kwargs)
 
 
 def case(i: int, kind: CaseKind = "plain") -> RetrievalCase:
@@ -154,6 +162,44 @@ def test_an_invalid_reply_counts_as_a_failed_question_not_a_crash():  # EC24 fee
     )
 
     assert [w.question for w in written] == [None, "How do you test a payment flow?"]
+
+
+@pytest.mark.parametrize(
+    "notes", [(), (ReferenceNote(uuid.uuid7(), "API design", "Probe versioning.", 1, 0.9),)], ids=["plain", "notes"]
+)
+def test_blocking_mode_writes_with_the_json_writer(notes):  # U3b1 FR4
+    llm = FakeProvider(
+        [
+            '{"question": "How would you design an API endpoint for refunds?", "category": "technical"}',
+            "CATEGORY: technical\nA streamed-format reply is invalid here?",
+        ]
+    )
+
+    written = simulate_main_questions(
+        llm,
+        role=JobRole.backend,
+        level=Level.mid,
+        interview_type=InterviewType.technical,
+        question_count=2,
+        job_description="Payments APIs.",
+        notes=notes,
+        max_tokens=400,
+        blocking=True,
+    )
+
+    assert [w.question for w in written] == ["How would you design an API endpoint for refunds?", None]
+    assert ("<reference_notes>" in llm.calls[0][1].content) == bool(notes)
+
+
+def test_the_blocking_arms_use_the_json_prompts():  # U3b1 FR4
+    from app.modules.interviews.tooling.interviews_evals import _parser
+    from app.modules.interviews.tooling.interviews_rag_evals import BLOCKING_ARM_PROMPTS
+
+    assert (BLOCKING_ARM_PROMPTS["A"], BLOCKING_ARM_PROMPTS["C"], BLOCKING_ARM_PROMPTS["D"]) == (
+        "interviewer_v4", "interviewer_v7_json", "interviewer_v8_json",
+    )  # fmt: skip
+    assert _parser().parse_args(["--task", "generation", "--blocking"]).blocking is True
+    assert _parser().parse_args(["--task", "generation"]).blocking is False
 
 
 def test_an_arm_summary_pools_its_interviews():  # AC24

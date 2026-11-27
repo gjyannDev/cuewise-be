@@ -5,8 +5,9 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMProvider
+from app.core.ai.dependencies import get_chat_model
 from app.core.ai.tracing import Tracer
 from app.core.config import settings
 from app.db.session import get_db
@@ -18,7 +19,6 @@ from ..dependencies.interviews_shared_dependencies import (
     get_bank,
     get_clock,
     get_context_manager,
-    get_llm_provider,
     get_tracer,
 )
 from ..repositories.interviews_repository import InterviewsRepository
@@ -29,7 +29,7 @@ from ..services.interviews_answer_service import AnswerService
 def get_answer_service(
     db: Annotated[Session, Depends(get_db)],
     bank: Annotated[list[BankQuestion], Depends(get_bank)],
-    llm: Annotated[LLMProvider | None, Depends(get_llm_provider)],
+    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     context: Annotated[ContextManager, Depends(get_context_manager)],
     tracer: Annotated[Tracer, Depends(get_tracer)],
@@ -39,7 +39,7 @@ def get_answer_service(
         InterviewsRepository(db),
         bank,
         random.Random(),
-        llm,
+        chat_model,
         settings.llm_max_tokens,
         llm_budget_seconds=settings.llm_total_budget_seconds,
         clock=clock,

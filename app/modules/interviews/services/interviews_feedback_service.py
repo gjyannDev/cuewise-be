@@ -11,8 +11,9 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple
 
+from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
-from app.core.ai.provider import LLMProvider, LLMResult
+from app.core.ai.provider import LLMResult
 from app.core.ai.tracing import Tracer
 from app.core.errors import (
     FeedbackFailedError,
@@ -93,7 +94,7 @@ class FeedbackService:
     def __init__(
         self,
         repo: InterviewsRepository,
-        llm: LLMProvider | None,
+        chat_model: ChatModel | None,
         *,
         context: ContextManager,
         clock: Callable[[], float],
@@ -112,12 +113,12 @@ class FeedbackService:
         self.tracer = tracer or Tracer(None)
         self.budget_seconds = budget_seconds
         self.stale_margin_seconds = stale_margin_seconds
-        # None = LLM off: POST answers 503, GET still works.
+        # None = LLM off: POST answers 503, GET still works. On the LangChain chat model since U3b1.
         self.generator = (
             None
-            if llm is None
+            if chat_model is None
             else FeedbackGenerator(
-                llm,
+                chat_model,
                 context,
                 score_max_tokens=score_max_tokens,
                 write_max_tokens=write_max_tokens,
