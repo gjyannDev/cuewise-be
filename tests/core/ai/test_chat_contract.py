@@ -3,16 +3,19 @@ reply, a structured reply, usage reported, and vendor errors arriving as our LLM
 model `build_chat_model` builds (with its SDK client scripted, no network) and against the fake used by unit tests,
 so the fake can't drift from the real thing."""
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
 import pytest
 from google.api_core import exceptions as gx
+from langchain_core.messages import AIMessageChunk
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel
 
 from app.core.ai.chat import ChatModel, complete_chat, complete_structured
-from app.core.ai.chat_fake import FakeChatModel, fake_reply
+from app.core.ai.chat_errors import to_llm_error
+from app.core.ai.chat_fake import FakeChatModel, fake_chunks, fake_reply
 from app.core.ai.factory import build_chat_model
 from app.core.ai.provider import (
     LLMRateLimitError,
@@ -140,3 +143,117 @@ def test_the_per_call_limits_reach_a_structured_call_too(build: Build):
         assert call["timeout"] == 4 and config.max_output_tokens == 300 and config.temperature == pytest.approx(0.2)
     else:
         assert (call["timeout"], call["max_output_tokens"], call["temperature"]) == (4, 300, 0.2)
+
+
+# --- Streaming (U3b1 FR2): `astream`, which the stream helper builds on --------------------------------------------
+
+# One streamed call: its chunks in order, as (text, prompt tokens so far, completion tokens so far) - Gemini reports
+# usage cumulatively and the SDK turns it into per-chunk differences - with an exception where the stream breaks.
+# A bare exception fails the call before the first chunk.
+StreamOutcome = list[tuple[str, int, int] | Exception] | Exception
+
+
+class _ScriptedStreamClient:
+    """Stands in for the SDK's async client: `stream_generate_content` is awaited, then iterated."""
+
+    def __init__(self, outcome: StreamOutcome):
+        self.outcome = outcome
+        self.calls: list[dict[str, Any]] = []
+
+    async def stream_generate_content(self, **kwargs: Any):
+        self.calls.append(kwargs)
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        outcome = self.outcome
+
+        async def chunks():
+            for position, item in enumerate(outcome, 1):
+                if isinstance(item, Exception):
+                    raise item
+                response = _response(item[0], prompt=item[1], candidates=item[2])
+                if position < len(outcome):  # like Gemini: only the last chunk says why the reply ended
+                    response.candidates[0].finish_reason = 0
+                yield response
+
+        return chunks()
+
+
+def _gemini_stream(outcome: StreamOutcome):
+    model, _ = _gemini([])
+    client = _ScriptedStreamClient(outcome)
+    object.__setattr__(model, "async_client_running", client)
+    return model, lambda: client.calls
+
+
+def _fake_stream(outcome: StreamOutcome):
+    if isinstance(outcome, Exception):
+        model = FakeChatModel([outcome])
+    else:
+        totals = [item for item in outcome if not isinstance(item, Exception)][-1]
+        parts = [item if isinstance(item, Exception) else item[0] for item in outcome]
+        model = FakeChatModel([fake_chunks(*parts, input_tokens=totals[1], output_tokens=totals[2])])
+    return model, lambda: [kwargs for _, kwargs in model.calls]
+
+
+STREAM_BUILDS = [pytest.param(_gemini_stream, id="gemini"), pytest.param(_fake_stream, id="fake")]
+
+
+def _collect(model) -> tuple[list[AIMessageChunk], BaseException | None]:
+    chunks: list[AIMessageChunk] = []
+
+    async def run():
+        async for chunk in model.astream(PROMPT.invoke({"text": "hi"})):
+            chunks.append(chunk)
+
+    try:
+        asyncio.run(run())
+    except Exception as exc:  # noqa: BLE001 - the test asserts which error, after which chunks
+        return chunks, exc
+    return chunks, None
+
+
+@pytest.mark.parametrize("build", STREAM_BUILDS)
+def test_a_stream_yields_its_text_in_order_with_the_total_usage(build):
+    model, _ = build([("Hel", 7, 1), ("lo.", 7, 3)])
+    chunks, error = _collect(model)
+    assert error is None
+    merged = sum(chunks[1:], chunks[0])
+    assert [c.text for c in chunks if c.text] == ["Hel", "lo."]
+    assert (merged.usage_metadata["input_tokens"], merged.usage_metadata["output_tokens"]) == (7, 3)
+    assert merged.response_metadata.get("finish_reason") == "STOP"
+
+
+@pytest.mark.parametrize("build", STREAM_BUILDS)
+def test_a_stream_can_fail_before_its_first_chunk(build):
+    model, _ = build(gx.ServiceUnavailable("down"))
+    chunks, error = _collect(model)
+    assert chunks == [] and isinstance(to_llm_error(error), LLMServerError)
+
+
+@pytest.mark.parametrize("build", STREAM_BUILDS)
+def test_a_stream_can_fail_after_some_text(build):
+    model, _ = build([("Hel", 7, 1), gx.DeadlineExceeded("slow")])
+    chunks, error = _collect(model)
+    assert [c.text for c in chunks if c.text] == ["Hel"]
+    assert isinstance(to_llm_error(error), LLMTimeoutError)
+
+
+@pytest.mark.parametrize("build", STREAM_BUILDS)
+def test_the_per_call_timeout_reaches_a_stream(build):
+    model, calls = build([("ok", 1, 1)])
+    _collect(model.model_copy(update={"timeout": 4}))
+    [call] = calls()
+    assert call["timeout"] == 4
+
+
+def test_a_fake_stream_without_usage_reports_none():
+    model = FakeChatModel([fake_chunks("a", "b", input_tokens=None, output_tokens=None)])
+    chunks, _ = _collect(model)
+    assert all(c.usage_metadata is None for c in chunks)
+
+
+def test_a_fake_plain_reply_streams_as_one_chunk_and_a_stream_script_works_blocking():
+    model = FakeChatModel(["Whole reply.", fake_chunks("Hel", "lo.")])
+    chunks, _ = _collect(model)
+    assert [c.text for c in chunks if c.text] == ["Whole reply."] and chunks[0].usage_metadata is not None
+    assert model.invoke("hi").text == "Hello."
