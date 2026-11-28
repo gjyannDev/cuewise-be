@@ -7,6 +7,10 @@ that doesn't matter for ranking.
 
 The key goes in the `x-goog-api-key` header, never the URL (httpx logs request URLs). Nothing here logs: callers log
 the result's metadata, never the input text.
+
+It is also a LangChain `Embeddings` (U3b2), so LangChain retrievers and U6 can use it. Not `GoogleGenerativeAIEmbeddings`:
+that class sends no per-call timeout and its Google client retries 503s on its own for up to 60 s, so the caller's time
+cap and our retry budget could not hold (docs/features/u3b2-retrieval/learnings.md).
 """
 
 import time
@@ -14,6 +18,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
+from langchain_core.embeddings import Embeddings
 
 from app.core.logging import get_logger
 
@@ -24,7 +29,7 @@ from .retry import RetryPolicy, raise_for_status
 TASK_TYPES = {EmbeddingKind.query: "RETRIEVAL_QUERY", EmbeddingKind.document: "RETRIEVAL_DOCUMENT"}
 
 
-class GoogleEmbedder:
+class GoogleEmbedder(Embeddings):
     def __init__(
         self,
         *,
@@ -61,6 +66,13 @@ class GoogleEmbedder:
 
     def close(self) -> None:
         self._client.close()
+
+    # LangChain's `Embeddings` interface: one batched call each, under the same retry rules and errors as `embed`.
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed(texts, kind=EmbeddingKind.document).vectors
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed([text], kind=EmbeddingKind.query).vectors[0]
 
     def embed(
         self, texts: Sequence[str], *, kind: EmbeddingKind, budget_seconds: float | None = None

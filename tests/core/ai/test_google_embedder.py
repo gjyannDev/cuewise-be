@@ -4,6 +4,7 @@ import json
 
 import httpx
 import pytest
+from langchain_core.embeddings import Embeddings
 
 from app.core.ai.embedder import EmbeddingKind, EmbeddingSizeError
 from app.core.ai.google_embedder import GoogleEmbedder
@@ -249,3 +250,23 @@ def test_the_retry_count_is_an_argument_and_retries_log_on_the_rag_logger(clock,
     assert (len(requests), result.attempts) == (4, 4)
     waits = log_lines.events("retry_wait")
     assert len(waits) == 3 and {w["logger"] for w in waits} == {"app.rag"}
+
+
+def test_it_is_a_langchain_embeddings_whose_methods_send_one_batched_call(make_embedder):  # U3b2 AC2
+    embedder, requests, _ = make_embedder(ok(V1, V2), ok(V2))
+
+    assert isinstance(embedder, Embeddings)
+    assert embedder.embed_documents(["a", "b"]) == [V1, V2]
+    assert embedder.embed_query("q") == V2
+
+    task_types = [[r["taskType"] for r in json.loads(request.content)["requests"]] for request in requests]
+    assert task_types == [["RETRIEVAL_DOCUMENT", "RETRIEVAL_DOCUMENT"], ["RETRIEVAL_QUERY"]]
+
+
+def test_the_langchain_methods_keep_the_retry_rules_and_the_typed_errors(make_embedder):  # U3b2 AC5, EC12
+    embedder, requests, _ = make_embedder(httpx.Response(503), httpx.Response(503), ok(V1))
+
+    with pytest.raises(LLMServerError):
+        embedder.embed_query("q")
+
+    assert len(requests) == 2
