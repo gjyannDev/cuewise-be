@@ -14,6 +14,7 @@ import httpx
 import pytest
 from google.api_core import exceptions as gx
 
+from app.core.ai.chat_chain import ChatChain, as_chain
 from app.core.ai.chat_fake import FakeChatModel
 from app.core.ai.deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from app.core.ai.embedder import EmbeddingKind
@@ -73,9 +74,9 @@ def counting(responses):
 MALFORMED_REPLY = json.dumps({"action": "dance"})
 
 
-def run_decide(script, clock: Clock):
+def run_decide(script, clock: Clock, members: tuple[tuple[str, FakeChatModel], ...] | None = None):
     # More than the worst case is scripted, so a new retry layer would show up as extra calls, not as a short script.
-    model = FakeChatModel(script, default=MALFORMED_REPLY)
+    model = ChatChain(members) if members else FakeChatModel(script, default=MALFORMED_REPLY)
     inputs = InterviewerInputs(
         role=JobRole.backend,
         level=Level.mid,
@@ -94,7 +95,23 @@ def run_decide(script, clock: Clock):
         clock=clock,
         sleep=clock.sleep,
     )
-    return outcome, model.calls
+    return outcome, [call for _, member in as_chain(model).members for call in member.calls]
+
+
+def test_the_chain_multiplies_the_worst_case_by_the_provider_count_and_no_more():  # AC6, EC16, U3c FR chain
+    clock = Clock()
+    transport = [gx.ServiceUnavailable("503")]
+    rounds = settings.llm_max_retries + 1  # each reply attempt: this many passes over the chain
+    # Every provider fails every pass, except the last provider of the last pass, which gets a malformed reply.
+    first = FakeChatModel(transport * rounds * (MAX_REPLY_ATTEMPTS + 1), default=MALFORMED_REPLY)
+    second = FakeChatModel(
+        (transport * (rounds - 1) + [MALFORMED_REPLY]) * (MAX_REPLY_ATTEMPTS + 1), default=MALFORMED_REPLY
+    )
+
+    (decision, results, _), calls = run_decide(None, clock, (("a", first), ("b", second)))
+
+    assert decision is None and len(results) == MAX_REPLY_ATTEMPTS
+    assert len(calls) == LLM_WORST_CASE * 2 == 12  # (retries + 1) x reply attempts x providers
 
 
 def test_both_layers_fully_used_never_exceed_the_worst_case():  # EC15, U3b1 FR12

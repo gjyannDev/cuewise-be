@@ -9,7 +9,6 @@ from app.modules.interviews.constants.interviews_constants import KNOWLEDGE_VECT
 GOOGLE = {
     "LLM_GOOGLE_API_KEY": "google-test-secret",
     "LLM_GOOGLE_MODEL": "gemini-test",
-    "LLM_GOOGLE_BASE_URL": "https://google.test/v1beta/openai/",
 }
 
 
@@ -79,12 +78,12 @@ def test_negative_embedding_retries_are_rejected(monkeypatch):  # U2 EC13
     assert "embedding_max_retries" in str(exc.value)
 
 
-def test_llm_settings_default_to_off_with_documented_limits(no_llm_env):  # interviewer-reaction AC16, EC18
+def test_llm_providers_are_required_and_the_limits_have_documented_defaults(no_llm_env):  # U3c AC7, EC9
+    _google(no_llm_env)
     s = _settings()
 
-    assert s.llm_providers == []
-    assert s.llm_provider_configs == []
-    assert s.llm_configured is False
+    assert s.llm_providers == ["google"]
+    assert not hasattr(s, "llm_configured")  # there is no "LLM off" mode any more
     # 4000 since the token cap was raised (a reasoning model's thinking counts against it); the user confirmed 4000
     # is right (2026-11-15).
     assert (s.llm_timeout_seconds, s.llm_max_retries, s.llm_total_budget_seconds, s.llm_max_tokens) == (15, 2, 30, 4000)
@@ -95,10 +94,9 @@ def test_listed_provider_with_its_block_is_configured(no_llm_env):  # sse-stream
 
     s = _settings()
 
-    assert s.llm_configured is True
     [config] = s.llm_provider_configs
     assert isinstance(config, ProviderConfig)
-    assert (config.name, config.model, config.base_url) == ("google", "gemini-test", GOOGLE["LLM_GOOGLE_BASE_URL"])
+    assert (config.name, config.model) == ("google", "gemini-test")
     assert config.api_key.get_secret_value() == "google-test-secret"
 
 
@@ -109,21 +107,18 @@ def test_provider_list_is_trimmed_lowercased_and_ignores_blanks(no_llm_env):  # 
     assert _settings().llm_providers == ["google"]
 
 
-@pytest.mark.parametrize("blank", ["", "  ", " , "])
-def test_blank_provider_list_means_llm_off(no_llm_env, blank):  # EC18: .env.example may ship it blank
-    no_llm_env.setenv("LLM_PROVIDERS", blank)
-
-    assert _settings().llm_configured is False
-
-
-def test_a_vendor_block_that_is_not_listed_is_ignored(no_llm_env):  # inferred: the list decides, not the keys
+@pytest.mark.parametrize("blank", [None, "", "  ", " , "])
+def test_an_empty_or_blank_provider_list_refuses_to_start(no_llm_env, blank):  # U3c AC7, EC9
     for name, value in GOOGLE.items():
-        no_llm_env.setenv(name, value)
+        no_llm_env.setenv(name, value)  # a vendor block alone does not turn it on: the list decides
+    if blank is not None:
+        no_llm_env.setenv("LLM_PROVIDERS", blank)
 
-    s = _settings()
+    with pytest.raises(ValidationError) as exc:
+        _settings()
 
-    assert s.llm_configured is False
-    assert s.llm_provider_configs == []
+    assert "LLM_PROVIDERS" in str(exc.value)
+    assert "google-test-secret" not in str(exc.value)
 
 
 @pytest.mark.parametrize("missing", list(GOOGLE))
@@ -181,9 +176,10 @@ def test_removed_llm_settings_refuse_to_start_and_point_to_the_new_ones(no_llm_e
 
 @pytest.mark.parametrize("old", ["OPENROUTER_API_KEY", "LLM_MODEL", "LLM_BASE_URL"])
 def test_blank_removed_settings_are_tolerated(no_llm_env, old):  # inferred: a cleared line in an old .env
+    _google(no_llm_env)
     no_llm_env.setenv(old, "")
 
-    assert _settings().llm_configured is False
+    assert _settings().llm_providers == ["google"]
 
 
 def test_api_key_never_shows_in_repr_or_errors(no_llm_env):  # AC16, Step 0
@@ -213,10 +209,13 @@ def test_api_key_never_shows_in_repr_or_errors(no_llm_env):  # AC16, Step 0
 def test_llm_limits_must_be_positive(
     no_llm_env, name, value
 ):  # inferred: a zero timeout or budget would disable the LLM
+    _google(no_llm_env)
     no_llm_env.setenv(name, value)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc:
         _settings()
+
+    assert name.lower() in str(exc.value)
 
 
 def test_env_example_lists_every_llm_setting():  # AC16, sse-streaming Step 0
@@ -227,7 +226,6 @@ def test_env_example_lists_every_llm_setting():  # AC16, sse-streaming Step 0
         "LLM_PROVIDERS",
         "LLM_GOOGLE_API_KEY",
         "LLM_GOOGLE_MODEL",
-        "LLM_GOOGLE_BASE_URL",
         "LLM_TIMEOUT_SECONDS",
         "LLM_MAX_RETRIES",
         "LLM_TOTAL_BUDGET_SECONDS",
@@ -423,10 +421,11 @@ def no_embedding_env(no_llm_env):
     return no_llm_env
 
 
-def test_embedding_defaults_and_off_without_the_google_key(no_embedding_env):  # knowledge-base-rag AC27
+def test_embedding_defaults_and_on_with_the_google_key(no_embedding_env):  # knowledge-base-rag AC27
+    _google(no_embedding_env)
     s = _settings()
 
-    assert s.embedding_configured is False
+    assert s.embedding_configured is True
     assert (s.embedding_model, s.embedding_dimensions, s.embedding_base_url, s.embedding_timeout_seconds) == (
         "gemini-embedding-001",
         768,
@@ -439,20 +438,23 @@ def test_embedding_dimensions_match_the_vector_column():  # AC27, EC14: a mismat
     assert Settings.model_fields["embedding_dimensions"].default == KNOWLEDGE_VECTOR_SIZE
 
 
-def test_embeddings_use_the_google_key_and_a_blank_one_is_unset(no_embedding_env):  # AC27: no second secret
-    no_embedding_env.setenv("LLM_GOOGLE_API_KEY", "  ")
-    assert _settings().embedding_configured is False
-
-    no_embedding_env.setenv("LLM_GOOGLE_API_KEY", "google-test-secret")
-    assert _settings().embedding_configured is True
+def test_embeddings_use_the_google_key_and_a_missing_one_turns_them_off(no_embedding_env):  # AC27: no second secret
+    _google(no_embedding_env)
+    s = _settings()
+    assert s.embedding_configured is True
+    # Settings refuses a listed google provider without its key, so "off" is only reachable with the key removed.
+    assert s.model_copy(update={"llm_google_api_key": None}).embedding_configured is False
 
 
 @pytest.mark.parametrize(("name", "value"), [("EMBEDDING_DIMENSIONS", "0"), ("EMBEDDING_TIMEOUT_SECONDS", "0")])
 def test_embedding_limits_must_be_positive(no_embedding_env, name, value):  # inferred: a zero size or timeout
+    _google(no_embedding_env)
     no_embedding_env.setenv(name, value)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc:
         _settings()
+
+    assert name.lower() in str(exc.value)
 
 
 def test_env_example_lists_every_embedding_setting():  # AC27

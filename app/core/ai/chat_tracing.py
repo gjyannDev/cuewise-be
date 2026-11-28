@@ -3,7 +3,7 @@
 A LangChain *callback handler* is an object the framework notifies as a run happens (`on_chat_model_start`, ...);
 it is how LangChain lets you observe a call without wrapping it. We use one handler per call to see the exact
 messages LangChain sends to the model, and open the Langfuse generation from them. The call helper (`chat.py`) then
-closes the generation once, with the final `LLMResult` or `LLMError`. That keeps what `TracingProvider` records today:
+closes the generation once, with the final `LLMResult` or `LLMError`. That records:
 one generation per call (retries are its `attempts`), the same labels, the same redaction and usage, nested under
 the request's trace. Langfuse's own LangChain handler isn't used: it would be a second writer of generations and
 couldn't reuse our redaction (see plan.md, Approaches Considered).
@@ -23,7 +23,7 @@ _ROLES = {"system": "system", "human": "user", "ai": "assistant"}
 
 class TracerHandle(BaseCallbackHandler):
     """Carries the app's Tracer on a chat model (`build_chat_model(..., tracer=)` attaches it), the way
-    `TracingProvider` wrapped the old provider at the factory: services and feature code never pass a tracer around.
+    The factory attaches it to every model: services and feature code never pass a tracer around.
     It observes nothing itself; the call helper reads it to start each call's `ChatTrace`."""
 
     def __init__(self, tracer: Tracer):
@@ -65,7 +65,7 @@ class ChatTrace(BaseCallbackHandler):
 
 
 def _chat_messages(messages: Sequence[BaseMessage]) -> list[ChatMessage]:
-    """LangChain messages in our own shape, so the trace reads like the old layer's (role + text)."""
+    """LangChain messages in our own shape, so the trace reads as role + text."""
     return [
         ChatMessage(role=_ROLES.get(m.type, "user"), content=m.content if isinstance(m.content, str) else m.text)  # type: ignore[arg-type]
         for m in messages

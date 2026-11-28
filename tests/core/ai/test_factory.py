@@ -1,6 +1,5 @@
 import logging
 import os
-from contextlib import nullcontext
 
 import pytest
 
@@ -8,13 +7,11 @@ from app.core.ai.deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from app.core.ai.embedder import EmbeddingKind
 from app.core.ai.factory import (
     build_embedder,
-    build_provider,
     build_synthesizer,
     build_transcriber,
 )
-from app.core.ai.fake import FakeEmbedder, FakeProvider
+from app.core.ai.fake import FakeEmbedder
 from app.core.ai.google_embedder import GoogleEmbedder
-from app.core.ai.openai_compatible import OpenAICompatibleProvider
 from app.core.ai.provider import (
     ChatMessage,
     LLMRateLimitError,
@@ -22,6 +19,13 @@ from app.core.ai.provider import (
     LLMTimeoutError,
 )
 from app.core.config import Settings
+from tests.provider_fakes import FakeProvider
+
+LLM_DEFAULTS = {  # the app refuses to start without a provider, so every settings object here has one
+    "LLM_PROVIDERS": "google",
+    "LLM_GOOGLE_API_KEY": "default-test-key",
+    "LLM_GOOGLE_MODEL": "gemini-test",
+}
 
 
 @pytest.fixture
@@ -30,7 +34,7 @@ def settings_with(monkeypatch):
         for name in list(os.environ):
             if name.upper().startswith(("LLM_", "OPENROUTER_", "DEEPGRAM_", "TRANSCRIPTION_", "SPEECH_", "EMBEDDING_")):
                 monkeypatch.delenv(name, raising=False)
-        for name, value in env.items():
+        for name, value in (LLM_DEFAULTS | env).items():
             monkeypatch.setenv(name, value)
         return Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
 
@@ -82,39 +86,11 @@ async def test_a_deepgram_key_builds_a_deepgram_transcriber(settings_with, app_l
     await transcriber.aclose()
 
 
-def test_no_key_and_model_means_no_provider_and_one_warning(settings_with, app_logs):  # EC18, AC16
-    provider = build_provider(settings_with())
-
-    assert provider is None
-    [warning] = [r for r in app_logs.records if r.name == "app.llm"]
-    assert warning.levelno == logging.WARNING
-    assert "questions will come from the question bank" in warning.getMessage()
-
-
 GOOGLE = {
     "LLM_PROVIDERS": "google",
     "LLM_GOOGLE_API_KEY": "test-key-123",
     "LLM_GOOGLE_MODEL": "vendor/model-x",
-    "LLM_GOOGLE_BASE_URL": "https://google.test/v1beta/openai/",
 }
-
-
-def test_listed_provider_builds_an_openai_compatible_provider(settings_with, app_logs):  # AC13, AC16, Step 0
-    provider = build_provider(settings_with(**GOOGLE))
-
-    assert isinstance(provider, OpenAICompatibleProvider)
-    assert provider.model == "vendor/model-x"
-    assert not [r for r in app_logs.records if r.name == "app.llm"]
-    assert all("test-key-123" not in r.getMessage() for r in app_logs.records)
-    provider.close()
-
-
-def test_model_override_replaces_the_primary_providers_model(settings_with):  # evals --model, Step 0
-    provider = build_provider(settings_with(**GOOGLE), model="vendor/other")
-
-    assert isinstance(provider, OpenAICompatibleProvider)
-    assert provider.model == "vendor/other"
-    provider.close()
 
 
 def test_fake_records_messages_and_returns_scripted_replies():  # test double used by endpoint tests
@@ -160,18 +136,11 @@ def test_fake_records_the_reasoning_effort():  # context-management AC18
     assert fake.reasoning_efforts == ["high", None]
 
 
-def test_enabled_tracer_wraps_the_provider_and_a_disabled_one_does_not(settings_with):  # AC1, AC8
-    from app.core.ai.tracing import Tracer, TracingProvider
-
-    wrapped = build_provider(settings_with(**GOOGLE), tracer=Tracer(object(), propagate=lambda **_: nullcontext()))
-    plain = build_provider(settings_with(**GOOGLE), tracer=Tracer(None))
-
-    assert isinstance(wrapped, TracingProvider)
-    assert isinstance(plain, OpenAICompatibleProvider)
-
-
 def test_no_google_key_means_no_embedder_and_one_warning(settings_with, app_logs):  # knowledge-base-rag EC7
-    assert build_embedder(settings_with()) is None
+    # Settings refuses a listed google provider without its key, so the key is removed after the settings are built.
+    no_key = settings_with().model_copy(update={"llm_google_api_key": None})
+
+    assert build_embedder(no_key) is None
 
     [warning] = [r for r in app_logs.records if r.name == "app.rag"]
     assert warning.levelno == logging.WARNING

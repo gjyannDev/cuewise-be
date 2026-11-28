@@ -1,4 +1,4 @@
-"""Langfuse tracing: the Tracer (on/off, fail-open) and the TracingProvider wrapper (one generation per LLM call).
+"""Langfuse tracing: the Tracer (on/off, fail-open: traces, steps, scores, experiments). Per-call generations: test_chat_tracing.py.
 
 A fake Langfuse client records what the SDK would be told, so no test touches the network. langfuse-tracing AC2-AC10.
 """
@@ -8,13 +8,10 @@ from contextlib import contextmanager, nullcontext
 
 import pytest
 
-from app.core.ai.fake import FakeProvider, FakeStream
-from app.core.ai.provider import ChatMessage, LLMResult, LLMServerError, LLMTimeoutError
+from app.core.ai.provider import ChatMessage, LLMResult
 from app.core.ai.tracing import (
     REDACT_LABEL,
-    REDACTED,
     Tracer,
-    TracingProvider,
     build_tracer,
 )
 from app.core.config import Settings
@@ -139,106 +136,7 @@ def result(text="Tell me about a bug.", **overrides):
     return LLMResult(**{**fields, **overrides})
 
 
-def traced(tracer, *replies):
-    return TracingProvider(FakeProvider(replies), tracer)
-
-
-async def drain(stream):
-    return [item async for item in stream]
-
-
 # --- complete ---------------------------------------------------------------------------------------------------
-
-
-def test_complete_records_one_generation_with_full_content_and_usage(tracer, client):  # AC2, AC4
-    provider = traced(tracer, result())
-
-    out = provider.complete(MESSAGES, max_tokens=100, trace_labels=LABELS)
-
-    assert out.text == "Tell me about a bug."
-    [gen] = client.generations
-    final = gen.final
-    assert final["as_type"] == "generation"
-    assert final["name"] == "interviewer"
-    assert final["input"] == [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "Hello there"}]
-    assert final["output"] == "Tell me about a bug."
-    assert final["model"] == "gemini-test"
-    assert final["usage_details"] == {
-        "input": 40, "output": 12, "input_cached_tokens": 8, "output_reasoning_tokens": 3,
-    }
-    assert final["metadata"] == {
-        "task": "interviewer", "prompt_version": "v3", "budget_left_ms": 12000,
-        "attempts": 1, "finish_reason": "stop", "latency_ms": 350,
-    }
-    assert gen.ended == 1
-
-
-def test_missing_usage_is_omitted_never_guessed(tracer, client):  # AC4, EC8
-    provider = traced(tracer, result(prompt_tokens=None, completion_tokens=None, cached_tokens=None, reasoning_tokens=None))
-
-    provider.complete(MESSAGES, max_tokens=100)
-
-    assert "usage_details" not in client.generations[0].final
-
-
-def test_retried_call_is_one_generation_with_attempts(tracer, client):  # AC5
-    provider = traced(tracer, result(attempts=3))
-
-    provider.complete(MESSAGES, max_tokens=100, trace_labels=LABELS)
-
-    assert len(client.generations) == 1
-    assert client.generations[0].final["metadata"]["attempts"] == 3
-
-
-def test_failed_call_is_marked_error_and_the_same_exception_is_raised(tracer, client):  # AC6, EC5
-    error = LLMServerError("LLM provider error", status_code=503)
-    error.attempts, error.latency_ms = 3, 900
-    provider = traced(tracer, error)
-
-    with pytest.raises(LLMServerError) as raised:
-        provider.complete(MESSAGES, max_tokens=100, trace_labels=LABELS)
-
-    assert raised.value is error
-    final = client.generations[0].final
-    assert final["level"] == "ERROR"
-    assert final["status_message"] == "LLMServerError status=503"
-    assert final["metadata"]["attempts"] == 3
-    assert client.generations[0].ended == 1
-
-
-def test_sdk_failure_never_changes_the_llm_result(propagated):  # AC9, EC4
-    broken = Tracer(FakeClient(fail=True), propagate=lambda **_: contextlib.nullcontext())
-    provider = traced(broken, result())
-
-    assert provider.complete(MESSAGES, max_tokens=100, trace_labels=LABELS).text == "Tell me about a bug."
-
-
-def test_sdk_failure_does_not_mask_the_llm_error():  # AC9, EC4, EC5
-    broken = Tracer(FakeClient(fail=True), propagate=lambda **_: contextlib.nullcontext())
-    provider = traced(broken, LLMTimeoutError("LLM request timed out"))
-
-    with pytest.raises(LLMTimeoutError):
-        provider.complete(MESSAGES, max_tokens=100)
-
-
-def test_disabled_tracer_is_a_pass_through():  # AC8, EC1
-    provider = TracingProvider(FakeProvider([result()]), Tracer(None))
-
-    assert provider.complete(MESSAGES, max_tokens=100, trace_labels=LABELS).text == "Tell me about a bug."
-
-
-def test_call_without_labels_still_gets_a_name(tracer, client):  # EC9
-    traced(tracer, result()).complete(MESSAGES, max_tokens=100)
-
-    assert client.generations[0].final["name"] == "llm-call"
-
-
-def test_the_generation_records_its_model_parameters(tracer, client):  # interview-feedback: clearer generations
-    traced(tracer, result(), result()).complete(MESSAGES, max_tokens=100, temperature=0.2)
-    traced(tracer, result()).complete(MESSAGES, max_tokens=50)
-
-    assert client.generations[0].final["model_parameters"] == {"max_tokens": 100, "temperature": 0.2}
-    assert client.generations[1].final["model_parameters"] == {"max_tokens": 50}  # no temperature sent, none shown
 
 
 # --- steps and checks inside a trace (interview-feedback) -----------------------------------------------------------
@@ -283,122 +181,9 @@ def test_steps_and_checks_are_no_ops_when_off_and_never_raise_when_langfuse_fail
 # --- stream -----------------------------------------------------------------------------------------------------
 
 
-async def test_stream_records_the_joined_text_and_final_usage(tracer, client):  # AC3, AC4
-    provider = traced(tracer, result("What was the bug"))
-
-    items = await drain(provider.stream(MESSAGES, max_tokens=100, trace_labels=LABELS))
-
-    assert isinstance(items[-1], LLMResult)
-    [gen] = client.generations
-    assert gen.final["output"] == "What was the bug"
-    assert gen.final["usage_details"]["input"] == 40
-    assert gen.final["metadata"]["finish_reason"] == "stop"
-    assert gen.ended == 1
-
-
-async def test_stream_closed_early_is_warning_cancelled_with_partial_text(tracer, client):  # AC7, EC6, EC7
-    provider = traced(tracer, FakeStream(["One ", "two ", "three"]))
-
-    stream = provider.stream(MESSAGES, max_tokens=100, trace_labels=LABELS)
-    assert await anext(stream) == "One "
-    assert await anext(stream) == "two "
-    await stream.aclose()
-
-    [gen] = client.generations
-    assert gen.final["level"] == "WARNING"
-    assert gen.final["status_message"] == "cancelled"
-    assert gen.final["output"] == "One two "
-    assert gen.ended == 1
-
-
-async def test_stream_closed_after_the_final_result_stays_a_success(tracer, client):  # AC7
-    provider = traced(tracer, result("Done."))
-
-    stream = provider.stream(MESSAGES, max_tokens=100)
-    async for item in stream:
-        if isinstance(item, LLMResult):
-            break
-    await stream.aclose()
-
-    assert "level" not in client.generations[0].final
-    assert client.generations[0].ended == 1
-
-
-async def test_stream_failure_is_error_with_partial_text_and_reraised(tracer, client):  # AC6
-    error = LLMServerError("LLM connection failed")
-    provider = traced(tracer, FakeStream(["Half "], error=error))
-
-    with pytest.raises(LLMServerError) as raised:
-        await drain(provider.stream(MESSAGES, max_tokens=100, trace_labels=LABELS))
-
-    assert raised.value is error
-    final = client.generations[0].final
-    assert final["level"] == "ERROR"
-    assert final["output"] == "Half "
-    assert client.generations[0].ended == 1
-
-
-async def test_stream_sdk_failure_does_not_change_the_stream():  # AC9
-    broken = Tracer(FakeClient(fail=True), propagate=lambda **_: contextlib.nullcontext())
-    provider = traced(broken, result("Fine."))
-
-    items = await drain(provider.stream(MESSAGES, max_tokens=100))
-
-    assert items[-1].text == "Fine."
-
-
 # --- redaction (resume-upload: résumé content never reaches Langfuse) -----------------------------------------------
 
 REDACTED_LABELS = {"task": "profile-extract", "prompt_version": "profile_extract_v1", REDACT_LABEL: True}
-
-
-def test_a_redacted_call_records_a_placeholder_instead_of_the_messages(tracer, client):  # resume-upload EC33
-    traced(tracer, result()).complete(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS)
-
-    final = client.generations[0].final
-    assert final["input"] == REDACTED
-    assert "Hello there" not in repr(final)
-
-
-def test_a_redacted_success_keeps_model_usage_and_labels_but_not_the_reply(tracer, client):  # resume-upload EC33
-    traced(tracer, result()).complete(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS)
-
-    final = client.generations[0].final
-    assert final["output"] == REDACTED
-    assert (final["name"], final["model"]) == ("profile-extract", "gemini-test")
-    assert final["usage_details"]["input"] == 40
-    assert final["metadata"]["prompt_version"] == "profile_extract_v1" and final["metadata"]["latency_ms"] == 350
-    assert "Tell me about a bug." not in repr(final)
-
-
-async def test_a_redacted_failure_records_no_partial_text(tracer, client):  # resume-upload EC33
-    error = LLMServerError("LLM provider error", status_code=503)
-    provider = traced(tracer, FakeStream(["Half of a résumé "], error=error))
-
-    with pytest.raises(LLMServerError):
-        await drain(provider.stream(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS))
-
-    final = client.generations[0].final
-    assert final["level"] == "ERROR" and final["output"] is None
-    assert "Half" not in repr(final)
-
-
-async def test_a_redacted_stream_closed_early_records_no_partial_text(tracer, client):  # resume-upload EC33
-    provider = traced(tracer, FakeStream(["One ", "two "]))
-
-    stream = provider.stream(MESSAGES, max_tokens=100, trace_labels=REDACTED_LABELS)
-    assert await anext(stream) == "One "
-    await stream.aclose()
-
-    final = client.generations[0].final
-    assert final["level"] == "WARNING" and final["output"] == REDACTED
-
-
-def test_an_unlabelled_call_still_records_full_content(tracer, client):  # langfuse-tracing default unchanged
-    traced(tracer, result()).complete(MESSAGES, max_tokens=100, trace_labels={**REDACTED_LABELS, REDACT_LABEL: False})
-
-    final = client.generations[0].final
-    assert final["input"][1]["content"] == "Hello there" and final["output"] == "Tell me about a bug."
 
 
 # --- trace boundary ---------------------------------------------------------------------------------------------

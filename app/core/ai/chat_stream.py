@@ -18,12 +18,14 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from typing import Any, cast
 
 import anyio
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessageChunk
 from langchain_core.runnables import Runnable
 
 from app.core.config import settings
 
 from .chat import ChatModel, _finish_reason, _result, _tracer_of, logger
+from .chat_chain import as_chain, log_switch
 from .chat_errors import to_llm_error
 from .chat_tracing import ChatTrace
 from .provider import LLMBadResponseError, LLMError, LLMResult, LLMTimeoutError
@@ -52,15 +54,13 @@ async def stream_chat(
         max_retries=settings.llm_max_retries, task="chat", logger=logger, clock=clock, async_sleep=async_sleep
     )
     tracer = _tracer_of(model)
+    chain = as_chain(model)
     trace = ChatTrace(tracer, labels, {"max_tokens": max_tokens}) if tracer is not None else None
     config = {"callbacks": [trace]} if trace is not None else None
     start = clock()
 
-    async def open_stream(remaining: float) -> tuple[AsyncGenerator[AIMessageChunk], AIMessageChunk]:
-        # The retried step: open the stream and wait for its first chunk.
-        if remaining <= 0:
-            raise LLMTimeoutError("LLM call has no time left")
-        limited = model.model_copy(update={"timeout": remaining, "max_output_tokens": max_tokens})
+    async def open_member(member: BaseChatModel, remaining: float) -> tuple[AsyncGenerator[AIMessageChunk], AIMessageChunk]:
+        limited = member.model_copy(update={"timeout": remaining, "max_output_tokens": max_tokens})
         # An async generator at runtime (LangChain types it as an iterator): closed below when it fails.
         chunks = cast(
             "AsyncGenerator[AIMessageChunk]",
@@ -75,13 +75,37 @@ async def stream_chat(
             await chunks.aclose()
             raise to_llm_error(exc) from exc
 
+    async def open_stream(
+        remaining: float,
+    ) -> tuple[str, BaseChatModel, AsyncGenerator[AIMessageChunk], AIMessageChunk]:
+        # The retried step: open a stream and wait for its first chunk. A transport error before any chunk hands the
+        # call to the next provider (within the time left); the first chunk commits the stream to its provider.
+        started = clock()
+        error: LLMError = LLMTimeoutError("LLM call has no time left")
+        previous: str | None = None
+        for name, member in chain.members:
+            left = remaining - (clock() - started)
+            if left <= 0:
+                break
+            if previous is not None:
+                log_switch(logger, previous, name, error)
+            try:
+                chunks, chunk = await open_member(member, left)
+            except LLMError as exc:
+                if not exc.retryable:
+                    raise
+                error, previous = exc, name
+                continue
+            return name, member, chunks, chunk
+        raise error  # every provider failed before its first chunk: RetryPolicy backs off and runs the chain again
+
     try:
         opened = await policy.acall(open_stream, budget=budget_seconds, task=task)
     except LLMError as exc:
         if trace is not None:
             trace.fail(exc)
         raise
-    chunks, chunk = opened.value
+    provider, answered, chunks, chunk = opened.value
     merged, parts, read_all = chunk, [], False
     try:
         while True:
@@ -114,7 +138,9 @@ async def stream_chat(
         if trace is not None:
             trace.fail(error)
         raise error
-    result = _result(merged, model, attempts=opened.attempts, latency_ms=round((clock() - start) * 1000))
+    result = _result(
+        merged, answered, provider=provider, attempts=opened.attempts, latency_ms=round((clock() - start) * 1000)
+    )
     if trace is not None:
         trace.succeed(result)
     yield result

@@ -1,10 +1,9 @@
-"""The LLM contract every feature codes against: message/result types, typed errors, the provider protocol.
+"""The LLM contract every feature codes against: message/result types and typed errors.
 
 Nothing here knows about HTTP or a vendor, so a service can handle "the LLM failed" without importing httpx.
 """
 
-from collections.abc import AsyncGenerator, Mapping, Sequence
-from typing import ClassVar, Literal, Protocol
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,10 +31,8 @@ class LLMResult(BaseModel):
     # (part of completion_tokens). None when not reported; never guessed.
     cached_tokens: int | None = None
     reasoning_tokens: int | None = None
-
-
-# Passed through to models that support a reasoning budget; others may ignore or reject it.
-ReasoningEffort = Literal["low", "medium", "high"]
+    # The provider of the chain that answered (`LLM_PROVIDERS` name); None for a call that didn't go through the chain.
+    provider: str | None = None
 
 
 class LLMError(Exception):
@@ -85,40 +82,3 @@ class LLMRequestError(LLMError):
 class LLMBadResponseError(LLMError):
     """A 200 whose body is unusable (not JSON, no choices, blank text). Not transient, so not retried."""
 
-
-class LLMProvider(Protocol):
-    def complete(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float | None = None,
-        # Lowers the total time budget for this call (a caller's own deadline); it never raises it.
-        budget_seconds: float | None = None,
-        reasoning_effort: ReasoningEffort | None = None,
-        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
-        trace_labels: Mapping[str, str | int | None] | None = None,
-    ) -> LLMResult: ...
-
-    def stream(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float | None = None,
-        budget_seconds: float | None = None,
-        reasoning_effort: ReasoningEffort | None = None,
-        # Labels for tracing only (task, prompt_version, ...); providers ignore them, TracingProvider records them.
-        trace_labels: Mapping[str, str | int | None] | None = None,
-    ) -> AsyncGenerator[str | LLMResult]:
-        """The reply as it is generated: text chunks, then one final LLMResult (the joined text, usage, timing).
-
-        Retries (and, later, switching to a fallback provider) may only happen before the first chunk: the caller
-        may already have shown it. After that, a failure raises an LLMError with `after_output` set. Closing the
-        iterator early cancels the call.
-        """
-        ...
-
-    def close(self) -> None: ...
-
-    async def aclose(self) -> None: ...

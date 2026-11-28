@@ -26,6 +26,7 @@ from langchain_core.runnables import Runnable
 from app.core.config import settings
 from app.core.logging import get_logger
 
+from .chat_chain import ChatChain, as_chain, log_switch
 from .chat_errors import to_llm_error
 from .chat_tracing import ChatTrace, TracerHandle
 from .provider import (
@@ -38,8 +39,9 @@ from .provider import (
 from .retry import RetryPolicy
 from .tracing import TraceLabels
 
-# Any LangChain chat model the factory builds (Gemini today; `FakeChatModel` in tests).
-type ChatModel = BaseChatModel
+# What the factory builds: the provider chain (`chat_chain.py`). A bare LangChain chat model (`FakeChatModel` in tests)
+# is accepted too and counts as a chain of one.
+type ChatModel = BaseChatModel | ChatChain
 
 logger = get_logger("app.llm")
 
@@ -161,20 +163,19 @@ def _run(
         clock=clock,
         sleep=sleep,
     )
+    chain = as_chain(model)
     tracer = _tracer_of(model)
     params: dict[str, int | float] = {"max_tokens": max_tokens} | ({"temperature": temperature} if temperature is not None else {})
     trace = ChatTrace(tracer, labels, params) if tracer is not None else None
     config = {"callbacks": [trace]} if trace is not None else None
     temperature_update = {"temperature": temperature} if temperature is not None else {}
 
-    def attempt(remaining: float) -> tuple[Any, AIMessage]:
-        if remaining <= 0:
-            raise LLMTimeoutError("LLM call has no time left")
+    def invoke(member: BaseChatModel, remaining: float) -> tuple[Any, AIMessage]:
         # Per-call limits are set on a copy of the shared model (one model serves every request; a pydantic copy
         # shares the vendor client, so it is cheap), never with `.bind()`: `with_structured_output` on a bound model
         # drops the bound kwargs (test_langchain_behaviour.py). The timeout never runs past the time left.
         # `max_output_tokens` is the Gemini integration's name for the token cap.
-        limited = model.model_copy(
+        limited = member.model_copy(
             update={"timeout": min(per_call_timeout, remaining), "max_output_tokens": max_tokens} | temperature_update
         )
         try:
@@ -187,6 +188,28 @@ def _run(
             raise LLMBadResponseError("LLM returned an empty message", finish_reason=_finish_reason(finish_reason))
         return output, message
 
+    def attempt(remaining: float) -> tuple[Any, AIMessage, str, BaseChatModel]:
+        # One pass over the chain: the first provider that answers wins; a transport error hands the call on within
+        # the time left (each provider keeps its own timeout, capped by what the turn has left).
+        started = clock()
+        error: LLMError = LLMTimeoutError("LLM call has no time left")
+        previous: str | None = None
+        for name, member in chain.members:
+            left = remaining - (clock() - started)
+            if left <= 0:
+                break
+            if previous is not None:
+                log_switch(logger, previous, name, error)
+            try:
+                output, message = invoke(member, left)
+            except LLMError as exc:
+                if not exc.retryable:
+                    raise
+                error, previous = exc, name
+                continue
+            return output, message, name, member
+        raise error  # every provider failed with a transport error: RetryPolicy backs off and runs the chain again
+
     task = labels.get("task")
     try:
         done = policy.call(attempt, budget=budget_seconds, task=task if isinstance(task, str) else None)
@@ -194,8 +217,8 @@ def _run(
         if trace is not None:
             trace.fail(exc)
         raise
-    output, message = done.value
-    result = _result(message, model, attempts=done.attempts, latency_ms=done.latency_ms)
+    output, message, provider, answered = done.value
+    result = _result(message, answered, provider=provider, attempts=done.attempts, latency_ms=done.latency_ms)
     if trace is not None:
         trace.succeed(result)
     return output, result
@@ -203,12 +226,13 @@ def _run(
 
 def _tracer_of(model: ChatModel):
     """The tracer the factory attached to the model (`build_chat_model(..., tracer=)`), if any."""
-    callbacks = model.callbacks if isinstance(model.callbacks, list) else []
+    primary = as_chain(model).members[0][1]
+    callbacks = primary.callbacks if isinstance(primary.callbacks, list) else []
     handle = next((c for c in callbacks if isinstance(c, TracerHandle)), None)
     return handle.tracer if handle is not None and handle.tracer.enabled else None
 
 
-def _result(message: AIMessage, model: ChatModel, *, attempts: int, latency_ms: int) -> LLMResult:
+def _result(message: AIMessage, model: BaseChatModel, *, provider: str, attempts: int, latency_ms: int) -> LLMResult:
     usage = message.usage_metadata or {}
     output_details = usage.get("output_token_details") or {}
     input_details = usage.get("input_token_details") or {}
@@ -224,6 +248,7 @@ def _result(message: AIMessage, model: ChatModel, *, attempts: int, latency_ms: 
         latency_ms=latency_ms,
         finish_reason=_finish_reason(meta.get("finish_reason")),
         attempts=attempts,
+        provider=provider,
     )
 
 

@@ -16,8 +16,8 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from pydantic import PrivateAttr
 
 from app.core.ai.chat_fake import FakeChatModel, fake_reply
-from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import ChatMessage, LLMResult
+from tests.provider_fakes import FakeProvider
 
 _ROLES = {"system": "system", "human": "user", "ai": "assistant"}
 # The old layer's finish reasons in Gemini's words, so the chat helper maps them back.

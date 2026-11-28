@@ -8,9 +8,9 @@ from .tracing import Tracer
 from .transcriber import Transcriber
 
 
-def get_chat_model(request: Request) -> ChatModel | None:
-    """The LangChain chat model, built once at startup; None when LLM is off or the lifespan didn't run."""
-    return getattr(request.app.state, "chat_model", None)
+def get_chat_model(request: Request) -> ChatModel:
+    """The provider chain, built once at startup (app lifespan). Tests override this dependency."""
+    return request.app.state.chat_model
 
 
 def get_tracer(request: Request) -> Tracer:

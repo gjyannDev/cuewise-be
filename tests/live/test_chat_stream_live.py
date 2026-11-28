@@ -22,8 +22,8 @@ from app.core.ai.factory import build_chat_model
 from app.core.config import settings
 
 pytestmark = pytest.mark.skipif(
-    os.getenv("LLM_LIVE_TEST") != "1" or not settings.llm_configured,
-    reason="real LLM call: set LLM_LIVE_TEST=1 and configure LLM_PROVIDERS + its LLM_<VENDOR>_* settings",
+    os.getenv("LLM_LIVE_TEST") != "1",
+    reason="real LLM call: set LLM_LIVE_TEST=1 (LLM_PROVIDERS + its LLM_<VENDOR>_* settings come from the environment)",
 )
 
 SHORT = [
@@ -37,8 +37,7 @@ LONG = [
 
 
 def _model(**update):
-    model = build_chat_model(settings)
-    assert model is not None
+    model = build_chat_model(settings).members[0][1]
     return model.model_copy(update=update)
 
 

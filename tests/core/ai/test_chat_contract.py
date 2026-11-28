@@ -42,10 +42,8 @@ def _gemini(outcomes: list[Outcome]):
         llm_providers=["google"],
         llm_google_api_key="k",  # pyright: ignore[reportArgumentType]
         llm_google_model="gemini-contract",
-        llm_google_base_url="https://x.test/",
     )
-    model = build_chat_model(settings)
-    assert model is not None
+    model = build_chat_model(settings).members[0][1]
     client = _ScriptedClient(*[o if isinstance(o, Exception) else _response(o[0], prompt=o[1], candidates=o[2]) for o in outcomes])
     object.__setattr__(model, "client", client)
     return model, lambda: client.calls

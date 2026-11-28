@@ -1,4 +1,4 @@
-"""The embedding contract features code against, separate from the chat `LLMProvider`.
+"""The embedding contract features code against, separate from the chat model.
 
 An embedding turns a text into a list of numbers (a vector) such that texts with similar meaning get vectors that
 point in similar directions. Comparing two vectors (cosine similarity: 1 = same direction, 0 = unrelated) then

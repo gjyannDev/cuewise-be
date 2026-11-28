@@ -8,14 +8,16 @@ from pathlib import Path
 # Tests must not depend on a developer's .env; engine creation doesn't connect.
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@localhost:5432/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-" + "x" * 64)
-# Nor on their real LLM config (from the shell or .env): an env var beats .env, so blank ones switch it off. Live tests
+# Nor on their real LLM config (from the shell or .env): an env var beats .env, so these set a dummy Google provider
+# (the app refuses to start without one; no call is made with it: tests use the fake chat model). Live tests
 # (LLM_LIVE_TEST=1) keep the configured provider list.
 for _name in ("OPENROUTER_API_KEY", "LLM_MODEL", "LLM_BASE_URL"):
     os.environ[_name] = ""
 if os.getenv("LLM_LIVE_TEST") != "1":
-    os.environ["LLM_PROVIDERS"] = ""
-    # The same key turns embeddings on: tests use the fake embedder, never the real one.
-    os.environ["LLM_GOOGLE_API_KEY"] = ""
+    os.environ["LLM_PROVIDERS"] = "google"
+    os.environ["LLM_GOOGLE_API_KEY"] = "test-key-not-real"
+    os.environ["LLM_GOOGLE_MODEL"] = "gemini-test"
+    os.environ["LLM_GOOGLE_THINKING_BUDGET"] = ""
 # Same for speech (to text and to speech): tests never call the real Deepgram API, except the opt-in live speech tests
 # (SPEECH_LIVE_TEST=1), which keep the configured key.
 if os.getenv("SPEECH_LIVE_TEST") != "1":
@@ -30,6 +32,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app.core.ai.chat_fake import FakeChatModel
+from app.core.ai.dependencies import get_chat_model
 from app.core.config import settings
 from app.core.errors import ConflictError, TokenExpiredError
 from app.core.logging import RECORD_KEYS, setup_logging
@@ -79,6 +83,14 @@ setup_logging(settings.debug, log_file=TEST_LOG_FILE)
 @pytest.fixture
 def client():
     return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture(autouse=True)
+def default_chat_model():
+    """The app has no LLM-off mode: every request gets a chat model. Tests that script the LLM override this."""
+    app.dependency_overrides[get_chat_model] = lambda: FakeChatModel()
+    yield
+    app.dependency_overrides.pop(get_chat_model, None)
 
 
 @pytest.fixture

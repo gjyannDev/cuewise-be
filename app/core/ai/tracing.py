@@ -1,23 +1,21 @@
-"""Langfuse tracing behind the LLMProvider contract: nothing outside `core/ai/` imports the SDK.
+"""Langfuse tracing: nothing outside `core/ai/` imports the SDK.
 
-Two pieces:
-- `Tracer`: the one object that talks to Langfuse. Every SDK call is guarded, so a Langfuse outage, a wrong key or an
-  SDK bug is logged (class name only, never content) and the request carries on. Without keys it is a no-op.
-- `TracingProvider`: wraps any LLMProvider and records one *generation* per `complete()` / `stream()` call. A call that
-  retried is still one generation (attempts is metadata), which keeps Hobby-plan usage low.
+`Tracer` is the one object that talks to Langfuse. Every SDK call is guarded, so a Langfuse outage, a wrong key or an
+SDK bug is logged (class name only, never content) and the request carries on. Without keys it is a no-op.
 
-Why a wrapper: the provider speaks plain httpx, so Langfuse's OpenAI drop-in cannot see it; and a wrapper traces any
-future provider (or fallback chain) without touching its code.
+A traced LLM call is one *generation* (`Generation`), opened and closed by the call helpers in `chat.py` /
+`chat_stream.py` through `chat_tracing.py`. A call that retried or switched provider is still one generation (attempts
+and the provider are metadata), which keeps Hobby-plan usage low.
 Full prompt and reply text is sent on purpose (owner's decision, see docs/features/langfuse-tracing/spec.md).
 """
 
-from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, ExitStack, aclosing, contextmanager
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from typing import Any, NamedTuple
 
 from app.core.logging import get_logger
 
-from .provider import ChatMessage, LLMError, LLMProvider, LLMResult, ReasoningEffort
+from .provider import ChatMessage, LLMError, LLMResult
 
 logger = get_logger("app.llm")
 
@@ -86,7 +84,8 @@ class Generation:
                 "attempts": result.attempts,
                 "finish_reason": result.finish_reason,
                 "latency_ms": result.latency_ms,
-            },
+            }
+            | ({"provider": result.provider} if result.provider else {}),
         }
         usage = _usage_details(result)
         if usage:
@@ -405,92 +404,3 @@ def build_tracer(settings: Any, *, environment: str | None = None) -> Tracer:
         logger.warning("langfuse_failed", action="client setup", error=type(exc).__name__, outcome="tracing_off")
         return Tracer(None)
     return Tracer(client)
-
-
-class TracingProvider:
-    def __init__(self, inner: LLMProvider, tracer: Tracer):
-        self._inner = inner
-        self._tracer = tracer
-
-    def complete(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float | None = None,
-        budget_seconds: float | None = None,
-        reasoning_effort: ReasoningEffort | None = None,
-        trace_labels: TraceLabels | None = None,
-    ) -> LLMResult:
-        generation = self._tracer.start_generation(
-            messages, trace_labels or {}, _model_parameters(max_tokens, temperature)
-        )
-        try:
-            result = self._inner.complete(
-                messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                budget_seconds=budget_seconds,
-                reasoning_effort=reasoning_effort,
-                trace_labels=trace_labels,  # the adapter labels its retry events with the task
-            )
-        except LLMError as exc:
-            generation.fail(exc)
-            raise
-        except BaseException:
-            generation.cancel("")
-            raise
-        generation.succeed(result)
-        return result
-
-    async def stream(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        max_tokens: int,
-        temperature: float | None = None,
-        budget_seconds: float | None = None,
-        reasoning_effort: ReasoningEffort | None = None,
-        trace_labels: TraceLabels | None = None,
-    ) -> AsyncGenerator[str | LLMResult]:
-        generation = self._tracer.start_generation(
-            messages, trace_labels or {}, _model_parameters(max_tokens, temperature)
-        )
-        parts: list[str] = []
-        inner = self._inner.stream(
-            messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            budget_seconds=budget_seconds,
-            reasoning_effort=reasoning_effort,
-            trace_labels=trace_labels,
-        )
-        try:
-            async with aclosing(inner) as items:
-                async for item in items:
-                    if isinstance(item, LLMResult):
-                        generation.succeed(item)
-                    else:
-                        parts.append(item)
-                    yield item
-        except LLMError as exc:
-            generation.fail(exc, "".join(parts))
-            raise
-        finally:
-            # No-op after succeed()/fail(); otherwise the consumer closed us (client left, deadline) mid-stream.
-            generation.cancel("".join(parts))
-
-    def close(self) -> None:
-        self._inner.close()
-
-    async def aclose(self) -> None:
-        await self._inner.aclose()
-
-
-def _model_parameters(
-    max_tokens: int, temperature: float | None
-) -> dict[str, int | float]:
-    """What the call asked the model for, shown on the generation. A temperature only when one was sent."""
-    return {"max_tokens": max_tokens} | (
-        {} if temperature is None else {"temperature": temperature}
-    )

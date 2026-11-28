@@ -10,14 +10,13 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-# Vendors the app knows, each with an `LLM_<NAME>_API_KEY / _MODEL / _BASE_URL` block below. All speak OpenAI-compatible
-# chat completions. Adding one = its name here plus its three fields.
+# Vendors the app knows, each with an `LLM_<NAME>_API_KEY / _MODEL` block below. Adding one = its name here, its two
+# fields, and a chat-model builder in `core/ai/factory.py`.
 LLM_VENDORS = ("google",)
-_VENDOR_FIELDS = ("api_key", "model", "base_url")
+_VENDOR_FIELDS = ("api_key", "model")
 # Per vendor, the chat-model settings LangChain doesn't unify across vendors (reasoning/thinking), each read from
 # `llm_<vendor>_<param>` when set. The LangChain factory passes them to that vendor's chat model; unset = the vendor's
-# default, as the OpenAI-compatible calls get today. Google: only `thinking_budget` (the bundled SDK has no
-# `thinking_level` yet; test_langchain_behaviour.py).
+# default. Google: only `thinking_budget` (the bundled SDK has no `thinking_level` yet; test_langchain_behaviour.py).
 LLM_VENDOR_CHAT_PARAMS: dict[str, tuple[str, ...]] = {"google": ("thinking_budget",)}
 # Replaced by LLM_PROVIDERS + the vendor blocks; still read only so a stale .env fails loudly instead of running
 # without the LLM.
@@ -32,7 +31,6 @@ class ProviderConfig(BaseModel):
     name: str
     api_key: SecretStr
     model: str
-    base_url: str
 
 
 # Aura output encodings the app can serve (each maps to a media type in `core/ai/deepgram.py`).
@@ -82,11 +80,10 @@ class Settings(BaseSettings):
     jwt_audience: str = "cuewise-client"
     access_token_expire_minutes: int = Field(default=60, gt=0)
 
-    # LLM providers in order, primary first (later ones become the fallback chain). Empty = LLM off: bank only.
+    # LLM providers in order, primary first; the later ones are the fallback chain. Required (at least one).
     llm_providers: Annotated[list[str], NoDecode] = Field(default_factory=list)
     llm_google_api_key: SecretStr | None = None
     llm_google_model: str | None = None
-    llm_google_base_url: str | None = None
     # Gemini's thinking token budget for the LangChain chat model (0 = off, -1 = dynamic); unset = the model default.
     llm_google_thinking_budget: int | None = Field(default=None, ge=-1)
     llm_timeout_seconds: float = Field(default=15, gt=0)
@@ -153,7 +150,6 @@ class Settings(BaseSettings):
     @field_validator(
         "llm_google_api_key",
         "llm_google_model",
-        "llm_google_base_url",
         "llm_google_thinking_budget",
         "deepgram_api_key",
         "langfuse_public_key",
@@ -185,6 +181,8 @@ class Settings(BaseSettings):
                 f"{', '.join(removed)} no longer exist: set LLM_PROVIDERS (e.g. google) and that vendor's "
                 "LLM_<VENDOR>_API_KEY, LLM_<VENDOR>_MODEL and LLM_<VENDOR>_BASE_URL instead"
             )
+        if not self.llm_providers:
+            raise ValueError("LLM_PROVIDERS is empty: list at least one provider (e.g. LLM_PROVIDERS=google)")
         unknown = [name for name in self.llm_providers if name not in LLM_VENDORS]
         if unknown:
             raise ValueError(f"LLM_PROVIDERS has unknown names {unknown}; known: {', '.join(LLM_VENDORS)}")
@@ -197,7 +195,7 @@ class Settings(BaseSettings):
             if getattr(self, f"llm_{name}_{field}") is None
         ]
         if missing:
-            # Half a config would silently run on bank questions only; fail at startup instead.
+            # Half a config would leave the interviewer without a model; fail at startup instead.
             raise ValueError(f"LLM_PROVIDERS lists a provider whose settings are missing: {', '.join(missing)}")
         return self
 
@@ -216,10 +214,6 @@ class Settings(BaseSettings):
     @property
     def langfuse_enabled(self) -> bool:
         return self.langfuse_public_key is not None and self.langfuse_secret_key is not None
-
-    @property
-    def llm_configured(self) -> bool:
-        return bool(self.llm_providers)
 
     @property
     def transcription_configured(self) -> bool:

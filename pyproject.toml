@@ -15,7 +15,6 @@ dependencies = [
     "langchain-google-genai>=3.2.0",
     "langchain-text-splitters>=1.2.0",
     "langfuse>=5.1.0",
-    "openai>=3.42.1",
     "pdfplumber>=0.11.10",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.6",

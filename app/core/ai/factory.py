@@ -1,64 +1,36 @@
+from langchain_core.language_models import BaseChatModel
+
 from app.core.config import ProviderConfig, Settings
 from app.core.logging import get_logger
 
-from .chat import ChatModel
+from .chat_chain import ChatChain
 from .chat_tracing import TracerHandle
 from .deepgram import DeepgramSynthesizer, DeepgramTranscriber
 from .google_embedder import GoogleEmbedder
-from .openai_compatible import OpenAICompatibleProvider
-from .provider import LLMProvider
-from .tracing import Tracer, TracingProvider
+from .tracing import Tracer
 
-logger = get_logger("app.llm")
 stt_logger = get_logger("app.stt")
 tts_logger = get_logger("app.tts")
 rag_logger = get_logger("app.rag")
 
 
-def build_provider(settings: Settings, *, model: str | None = None, tracer: Tracer | None = None) -> LLMProvider | None:
-    """The one place that picks the implementation; swapping vendor or model is a config change.
+def build_chat_model(settings: Settings, *, model: str | None = None, tracer: Tracer | None = None) -> ChatChain:
+    """The provider chain: one LangChain chat model per entry of `LLM_PROVIDERS`, in order, primary first.
 
-    Only the primary (first listed) provider is built for now. The later ones in LLM_PROVIDERS are meant as a fallback
-    chain, which comes with the multi-provider work. `model` overrides the primary's model (the eval runner's --model).
-    With an enabled `tracer` the provider is wrapped so every call is recorded in Langfuse.
+    Retries belong to `RetryPolicy` in the call helpers (`chat.py`), so the vendor SDK's own are off. With an enabled
+    `tracer`, every model carries it (`TracerHandle`) and the helper records one generation per call. `model`
+    overrides the primary's model (the eval runner's --model). `Settings` guarantees at least one provider.
     """
-    configs = settings.llm_provider_configs
-    if not configs:
-        logger.warning("LLM disabled (LLM_PROVIDERS is empty): questions will come from the question bank")
-        return None
-    primary = configs[0]
-    provider = OpenAICompatibleProvider(
-        api_key=primary.api_key.get_secret_value(),
-        model=model or primary.model,
-        base_url=primary.base_url,
-        timeout_seconds=settings.llm_timeout_seconds,
-        max_retries=settings.llm_max_retries,
-        total_budget_seconds=settings.llm_total_budget_seconds,
-    )
-    return TracingProvider(provider, tracer) if tracer is not None and tracer.enabled else provider
+    members = []
+    for index, config in enumerate(settings.llm_provider_configs):
+        chat_model = _CHAT_MODELS[config.name](config, settings, (model if index == 0 else None) or config.model)
+        if tracer is not None and tracer.enabled:
+            chat_model.callbacks = [TracerHandle(tracer)]
+        members.append((config.name, chat_model))
+    return ChatChain(tuple(members))
 
 
-def build_chat_model(
-    settings: Settings, *, model: str | None = None, tracer: Tracer | None = None
-) -> ChatModel | None:
-    """The LangChain chat model for the primary provider (the tasks migrated in U3a use it); None when LLM is off.
-
-    Retries belong to `RetryPolicy` in the call helper (`chat.py`), so the vendor SDK's own are off. With an enabled
-    `tracer`, the model carries it (`TracerHandle`) and the helper records one generation per call. `model` overrides
-    the primary's model (the eval runner's --model).
-    """
-    configs = settings.llm_provider_configs
-    if not configs:
-        logger.warning("LLM disabled (LLM_PROVIDERS is empty): the LangChain chat model is not built")
-        return None
-    primary = configs[0]
-    chat_model = _CHAT_MODELS[primary.name](primary, settings, model or primary.model)
-    if tracer is not None and tracer.enabled:
-        chat_model.callbacks = [TracerHandle(tracer)]
-    return chat_model
-
-
-def _google_chat_model(config: ProviderConfig, settings: Settings, model: str) -> ChatModel:
+def _google_chat_model(config: ProviderConfig, settings: Settings, model: str) -> BaseChatModel:
     # Imported here: the vendor SDK (gRPC and all) loads only when Gemini is the configured provider.
     from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -68,7 +40,6 @@ def _google_chat_model(config: ProviderConfig, settings: Settings, model: str) -
         timeout=settings.llm_timeout_seconds,
         # The SDK counts attempts, so 1 is a single call: RetryPolicy is the only retry owner.
         max_retries=1,
-        # `config.base_url` is the OpenAI-compatible endpoint of the old provider; the native client uses its own.
         **settings.llm_chat_params(config.name),  # pyright: ignore[reportArgumentType]
     )
 

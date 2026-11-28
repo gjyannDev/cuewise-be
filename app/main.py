@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Before anything else: a missing or broken routed prompt stops startup instead of failing mid-interview.
     check_prompts()
     tracer = build_tracer(settings)
-    # The LangChain chat model every LLM task runs on (U3a, U3b1), shared by all requests; None when LLM is off.
+    # The provider chain every LLM task runs on (U3a, U3b1, U3c), shared by all requests.
     chat_model = build_chat_model(settings, tracer=tracer)
     transcriber = build_transcriber(settings)
     synthesizer = build_synthesizer(settings)

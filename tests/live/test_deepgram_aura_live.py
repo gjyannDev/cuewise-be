@@ -3,7 +3,7 @@ never runs by default.
 
 Run it with:  SPEECH_LIVE_TEST=1 uv run pytest tests/live/test_deepgram_aura_live.py -q -s
 (needs DEEPGRAM_API_KEY in .env). It confirms the voice, the encoding and its Content-Type, and prints the latency and
-size of a short reaction, a typical question and the longest bank question, for the record in task.md.
+size of a short reaction, a typical question and the longest question, for the record in task.md.
 """
 
 import os
@@ -14,7 +14,16 @@ from app.core.ai.deepgram import SPEAK_CONTENT_TYPES
 from app.core.ai.factory import build_synthesizer
 from app.core.config import settings
 from app.modules.interviews.constants.interviews_constants import REACTION_POOLS
-from app.modules.interviews.utils.interviews_utils import QUESTION_BANK
+
+# Two sample interviewer questions, a short one and a long one (the old bank file is gone).
+SAMPLE_QUESTIONS = [
+    "Tell me about a time you disagreed with a teammate.",
+    (
+        "Walk me through how you would design a rate limiter for a public API that serves several thousand clients, "
+        "including how you would store the counters, what happens when the store is unavailable, and how you would "
+        "test it."
+    ),
+]
 
 pytestmark = [
     pytest.mark.anyio,
@@ -32,7 +41,7 @@ def anyio_backend():
 
 def _lines() -> dict[str, str]:
     reaction = next(iter(REACTION_POOLS.values()))[0]
-    questions = sorted((q.text for q in QUESTION_BANK), key=len)
+    questions = sorted(SAMPLE_QUESTIONS, key=len)
     return {"reaction": reaction, "typical question": questions[len(questions) // 2], "longest question": questions[-1]}
 
 

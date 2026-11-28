@@ -1,5 +1,5 @@
 """The LangChain tracing callback (spec FR5, AC8, EC14, EC15): one Langfuse generation per call, through our Tracer,
-with the same labels, redaction and usage as `TracingProvider`. A fake chat model and a recording Langfuse client; no
+with its labels, redaction and usage. A fake chat model and a recording Langfuse client; no
 network."""
 
 from app.core.ai.chat_fake import FakeChatModel
@@ -53,7 +53,7 @@ def test_a_call_records_one_generation_with_its_messages_labels_and_usage():
     assert final["metadata"]["latency_ms"] == 850 and generation.ended == 1
 
 
-def test_retried_attempts_are_still_one_generation_with_the_attempt_count():  # like TracingProvider
+def test_retried_attempts_are_still_one_generation_with_the_attempt_count():
     client = FakeClient()
     traced_call(client, attempts=3).succeed(result(attempts=3))
 

@@ -1,4 +1,4 @@
-"""The speech-to-text contract features code against, separate from the text-only `LLMProvider`.
+"""The speech-to-text contract features code against, separate from the text-only chat model.
 
 Failures raise the `LLMError` subclasses from `provider.py`: despite the name they describe any vendor call (timeout,
 rate limit, server, rejected request, unusable response), and reusing them keeps one set of retry rules (`retry.py`).

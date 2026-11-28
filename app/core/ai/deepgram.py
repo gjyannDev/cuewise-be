@@ -1,7 +1,7 @@
 """Deepgram over plain httpx: pre-recorded speech-to-text (`POST /v1/listen`, Nova models) and Aura text-to-speech
 (`POST /v1/speak`).
 
-Deliberately no SDK, like `openai_compatible.py`: the requests and the response fields read here are all visible. For
+Deliberately no SDK: the requests and the response fields read here are all visible. For
 speech-to-text the audio is sent exactly as recorded; Deepgram detects the container (WebM, OGG, MP4, WAV), so no
 `encoding` is passed. Both adapters only build their request and parse their response; the attempt loop is the
 adapter's `RetryPolicy`.
