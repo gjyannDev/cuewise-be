@@ -26,6 +26,7 @@ from app.core.ai.provider import LLMError, LLMRateLimitError, LLMTimeoutError
 from app.core.ai.tracing import Step, Tracer
 from app.core.logging import bind_log_context
 
+from ..ai.interviews_retrieve import nearest
 from ..ai.interviews_turn_log import log_embedding_call, log_retrieval
 from ..constants.interviews_constants import (
     KNOWLEDGE_VECTOR_SIZE,
@@ -107,9 +108,15 @@ class RetrievalService:
         if not self.llm_on:
             # Nothing is read or embedded, so there is nothing to trace; the log line still says why there are no notes.
             return self._finish(_skipped(RetrievalSkip.llm_off), start, None)
-        with self.tracer.step(RETRIEVAL_PURPOSE, metadata={"role": role, "level": level}) as step:
+        with self.tracer.step(
+            RETRIEVAL_PURPOSE, metadata={"role": role, "level": level}
+        ) as step:
             query = query_text(summary, job_description)
-            return self._finish(self._retrieve(session_id, role, level, query, profile_query), start, step)
+            return self._finish(
+                self._retrieve(session_id, role, level, query, profile_query),
+                start,
+                step,
+            )
 
     def _finish(self, result: Retrieval, start: float, step: Step | None) -> Retrieval:
         scores = [note.score for note in result.notes]
@@ -136,7 +143,12 @@ class RetrievalService:
         return result
 
     def _retrieve(
-        self, session_id: uuid.UUID, role: str, level: str, query: str | None, profile_query: str | None
+        self,
+        session_id: uuid.UUID,
+        role: str,
+        level: str,
+        query: str | None,
+        profile_query: str | None,
     ) -> Retrieval:
         try:
             eligible = self.repo.eligible_chunks(role, level)
@@ -156,29 +168,50 @@ class RetrievalService:
             return self._filter(eligible, session_id, f"retrieval_degraded:{degraded}")
         assert vectors is not None and self.embedder is not None
         try:
-            rankings = [self._ranked(role, level, self.embedder.model, vector) for vector in vectors]
+            rankings = [
+                self._ranked(role, level, self.embedder.model, vector)
+                for vector in vectors
+            ]
         except SQLAlchemyError:
             self.repo.release()
             return _skipped(RetrievalSkip.db_error)
         # The first ranking leads: the job description's, or the profile's alone when there is no job description (EC7).
         # If it finds nothing similar enough, filter mode as before: the profile side never takes over (EC16).
         if not rankings[0]:
-            return self._filter(eligible, session_id, f"retrieval_degraded:{RetrievalDegrade.below_threshold}")
+            return self._filter(
+                eligible,
+                session_id,
+                f"retrieval_degraded:{RetrievalDegrade.below_threshold}",
+            )
         if query is None:
-            return Retrieval(RetrievalMode.vector, rankings[0], OK, profile_notes=len(rankings[0]))
+            return Retrieval(
+                RetrievalMode.vector, rankings[0], OK, profile_notes=len(rankings[0])
+            )
         profile_ranked = rankings[1] if profile_query is not None else []
         notes, from_profile = merge_note_rankings(
             rankings[0], profile_ranked, k=self.top_k, profile_slots=self.profile_slots
         )
         return Retrieval(RetrievalMode.vector, notes, OK, profile_notes=from_profile)
 
-    def _ranked(self, role: str, level: str, model: str, vector: list[float]) -> list[ReferenceNote]:
-        """The top-k eligible notes for one query vector that clear the threshold, most similar first."""
-        nearest = self.repo.nearest_chunks(role, level, model, vector, self.top_k)
-        kept = [(chunk, score) for chunk, score in nearest if score >= self.min_similarity]
+    def _ranked(
+        self, role: str, level: str, model: str, vector: list[float]
+    ) -> list[ReferenceNote]:
+        """The top-k eligible notes for one query vector that clear the threshold, most similar first. The search runs
+        through the `ai/` retriever; the floor and the ranks stay here."""
+        found = nearest(
+            lambda v: self.repo.nearest_chunks(role, level, model, v, self.top_k),
+            vector,
+        )
+        kept = [chunk for chunk in found if chunk.score >= self.min_similarity]
         return [
-            ReferenceNote(chunk.id, chunk.competency, chunk.text, rank, round(score, 4))
-            for rank, (chunk, score) in enumerate(kept, start=1)
+            ReferenceNote(
+                chunk.chunk_id,
+                chunk.competency,
+                chunk.text,
+                rank,
+                round(chunk.score, 4),
+            )
+            for rank, chunk in enumerate(kept, start=1)
         ]
 
     def _embed(
@@ -189,7 +222,9 @@ class RetrievalService:
         if self.embedder.dimensions != self.vector_size:
             return None, RetrievalDegrade.size_mismatch
         try:
-            result = self.embedder.embed(queries, kind=EmbeddingKind.query, budget_seconds=self.cap_seconds)
+            result = self.embedder.embed(
+                queries, kind=EmbeddingKind.query, budget_seconds=self.cap_seconds
+            )
         except LLMError as exc:
             log_embedding_call(
                 logging.WARNING,
@@ -215,9 +250,14 @@ class RetrievalService:
             return None, RetrievalDegrade.size_mismatch
         return result.vectors, None
 
-    def _filter(self, eligible: list[EligibleChunk], session_id: uuid.UUID, outcome: str) -> Retrieval:
+    def _filter(
+        self, eligible: list[EligibleChunk], session_id: uuid.UUID, outcome: str
+    ) -> Retrieval:
         picked = pick_filter_notes(eligible, session_id, self.top_k)
-        notes = [ReferenceNote(chunk.id, chunk.competency, chunk.text, rank, None) for rank, chunk in enumerate(picked, start=1)]
+        notes = [
+            ReferenceNote(chunk.id, chunk.competency, chunk.text, rank, None)
+            for rank, chunk in enumerate(picked, start=1)
+        ]
         return Retrieval(RetrievalMode.filter, notes, outcome)
 
 
@@ -227,7 +267,9 @@ def _skipped(reason: RetrievalSkip) -> Retrieval:
 
 def _log_level(outcome: str) -> int:
     # A degrade or a database error is worth a look; no notes because the LLM is off or none match is expected.
-    if outcome.startswith("retrieval_degraded") or outcome.endswith(RetrievalSkip.db_error):
+    if outcome.startswith("retrieval_degraded") or outcome.endswith(
+        RetrievalSkip.db_error
+    ):
         return logging.WARNING
     return logging.INFO
 
