@@ -30,6 +30,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NamedTuple
 
+from ..ai.interviews_split import split_sections
 from ..constants.interviews_constants import (
     GENERAL_ROLE,
     KNOWLEDGE_HEADING_MAX_LENGTH,
@@ -246,29 +247,41 @@ def _listed(file_name: str, values: dict[str, str], key: str) -> tuple[str, ...]
 
 
 def _sections(file_name: str, body: list[str]) -> list[tuple[str, str]]:
-    sections: list[tuple[str, list[str]]] = []
+    # The headings come from this scan (it sees empty and repeated ones); the text from the LangChain splitter.
+    headings: list[list] = []  # [heading, has text]
     for line in body:
         heading = _SECTION.match(line)
         if heading:
-            sections.append((heading.group(1), []))
-        elif sections:
-            sections[-1][1].append(line)
+            headings.append([heading.group(1), False])
+        elif headings:
+            # The splitter strips every line and drops tabs: refuse what it would silently change.
+            if line != line.strip() or "\t" in line:
+                raise CorpusError(
+                    file_name, f"section '{headings[-1][0]}' has a line with leading or trailing whitespace or a tab"
+                )
+            headings[-1][1] = headings[-1][1] or bool(line)
         elif line.strip() and not _TITLE.match(line):
             raise CorpusError(file_name, "text outside a section: every chunk needs a ## heading")
-    if not sections:
+    if not headings:
         raise CorpusError(file_name, "no sections: add at least one ## heading")
+    texts = split_sections("\n".join(body))
     seen: set[str] = set()
     result = []
-    for heading, lines in sections:
-        text = "\n".join(lines).strip()
+    for heading, has_text in headings:
         if not heading:
             raise CorpusError(file_name, "a ## heading is empty")
         if len(heading) > KNOWLEDGE_HEADING_MAX_LENGTH:
             raise CorpusError(file_name, f"heading '{heading[:40]}...' is too long (max {KNOWLEDGE_HEADING_MAX_LENGTH})")
         if heading in seen:
             raise CorpusError(file_name, f"duplicate section heading '{heading}'")
-        if not text:
+        if not has_text:
             raise CorpusError(file_name, f"empty section '{heading}'")
+        text = texts.get(heading)
+        if not text:
+            raise CorpusError(
+                file_name,
+                f"heading '{heading}' is not read as a section: write '## {heading}' with a space, outside a code fence",
+            )
         if len(text) > KNOWLEDGE_SECTION_MAX_LENGTH:
             raise CorpusError(
                 file_name, f"section '{heading}' is too long ({len(text)} characters, max {KNOWLEDGE_SECTION_MAX_LENGTH})"

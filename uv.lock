@@ -395,6 +395,7 @@ dependencies = [
     { name = "httpx" },
     { name = "langchain-core" },
     { name = "langchain-google-genai" },
+    { name = "langchain-text-splitters" },
     { name = "langfuse" },
     { name = "openai" },
     { name = "pdfplumber" },
@@ -425,6 +426,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "langchain-core", specifier = ">=1.8.5" },
     { name = "langchain-google-genai", specifier = ">=3.2.0" },
+    { name = "langchain-text-splitters", specifier = ">=1.2.0" },
     { name = "langfuse", specifier = ">=5.1.0" },
     { name = "openai", specifier = ">=3.42.1" },
     { name = "pdfplumber", specifier = ">=0.11.10" },
@@ -1089,6 +1091,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a2/5c/94ffa0c0b9445ac284bf7c0aebf2fa3a32bdf27c20aaf2f061746375b670/langchain_protocol-0.0.22.tar.gz", hash = "sha256:61267bc9f478c9df35ccdafd9fdf556b2698435232d59def54b3809bb02585bb", size = 6508, upload-time = "2026-11-19T15:47:56.068Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/0a/e96b6ca3b5a7d91af31fd82aee42e65beb6bbe884587e27df5460feee486/langchain_protocol-0.0.22-py3-none-any.whl", hash = "sha256:d264998a507b735320c15a7b366051cbf41e21f771bea1b03a911f2c58af02e7", size = 7579, upload-time = "2026-11-19T15:47:55.109Z" },
+]
+
+[[package]]
+name = "langchain-text-splitters"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "langchain-core" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/90/52/bf954839dd1ed651caaca7bd3f8e855d9cf86adf9e9a3b3d5805c6e1298d/langchain_text_splitters-1.2.0.tar.gz", hash = "sha256:b1910bc42bc4b708411f0df009b7f1b6fdcc96e52f0847f6a5a5c70deec4b91f", size = 270318, upload-time = "2026-11-23T16:11:27.511Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/fa/fe89d3109248e51890bd7839ee24576728b4aed7deb61a9f7afe57d7f381/langchain_text_splitters-1.2.0-py3-none-any.whl", hash = "sha256:be4e5b288ee7cd5c20c47f540cb359732cb2c83980ce4bab34120f63d1e40f76", size = 38211, upload-time = "2026-11-23T16:11:26.483Z" },
 ]
 
 [[package]]

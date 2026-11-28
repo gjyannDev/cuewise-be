@@ -87,6 +87,13 @@ def test_equal_text_under_different_headers_hashes_differently():  # inferred: a
         (header() + "## A\n" + "x" * (KNOWLEDGE_SECTION_MAX_LENGTH + 1) + "\n", "too long"),
         (header() + "## A\nlooks fine" + chr(0x200B) + " but is not\n", "hidden"),  # zero-width space
         (header() + "## A\nright-to-left " + chr(0x202E) + " override\n", "hidden"),  # direction override
+        # U3b2 R1: the splitter strips lines and drops tabs, so these would change silently.
+        (header() + "## A\nx\n  - nested item\n", "whitespace"),
+        (header() + "## A\nx\ty\n", "whitespace"),
+        (header() + "## A\nx  \n", "whitespace"),
+        # U3b2 R2: headings the scan sees but the splitter doesn't.
+        (header() + "## A\nx\n##B\ny\n", "not read as a section"),
+        (header() + "## A\n```\n## inside a fence\n```\n", "not read as a section"),
     ],
 )
 def test_an_invalid_note_fails_with_its_file_name_and_the_reason(text, reason):  # AC4

@@ -13,6 +13,7 @@ dependencies = [
     "httpx>=0.28",
     "langchain-core>=1.8.5",
     "langchain-google-genai>=3.2.0",
+    "langchain-text-splitters>=1.2.0",
     "langfuse>=5.1.0",
     "openai>=3.42.1",
     "pdfplumber>=0.11.10",
