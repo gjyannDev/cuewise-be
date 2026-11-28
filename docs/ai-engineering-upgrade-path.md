@@ -195,6 +195,8 @@ Result (implemented 2026-11-27, `docs/features/u3b2-retrieval/`): `GoogleGenerat
 
 Done when: the first provider timing out makes the second answer and the log says which; a stream failing after its first chunk doesn't switch providers; the layer test fails on a LangChain import outside the AI folders; you can say "provider B scores N/M at X times the cost of A".
 
+Result (built 2026-11-28, `docs/features/u3c-fallback-chain/`; write, stream, decide and feedback evals unchanged, `docs/evals/u3c-chain-vs-baseline.md`): the chain is an explicit loop over a `ChatChain` in the call helpers, not `.with_fallbacks()` (that skips the per-attempt timeout, token cap, error mapping, one Langfuse generation and the retry policy the helpers own). Only timeouts, 429s and 5xx switch provider; a bad key raises at once; an invalid reply stays in the attempt loop; a stream switches only before its first chunk; the turn deadline bounds the whole chain; the answering provider is in the result, the trace metadata and the `llm_call` log. `LLM_PROVIDERS` is required (no LLM-off mode), the question bank is gone, and a turn that cannot write (a failed decide included) ends in one retryable 503 `INTERVIEWER_UNAVAILABLE` with nothing saved. Old `bank` rows became `stored` by migration. The old layer is deleted (`LLMProvider`, `OpenAICompatibleProvider`, `TracingProvider`, `build_provider`, the `openai` dependency); `json_reply.py` stays in `core/ai` (the profile feature uses it), and `FakeProvider` moved to `tests/provider_fakes.py` until its 22 test files are ported to `FakeChatModel`. `tests/test_layers.py` now bans `langchain*` and vendor SDKs outside `core/ai` and feature `ai/` folders, and bans `utils/` importing `ai/`. No second real vendor was added, so "provider B scores N/M at X times the cost of A" waits for a later slice.
+
 **You learn:**
 - what LangChain's abstraction gives you and what it hides, compared with the layer you built
 - Runnables and LCEL: composing `prompt | model | parser`, `.with_retry()`, `.with_fallbacks()`, callbacks
@@ -387,7 +389,7 @@ Same habit as the first path: each slice gets `docs/features/<slice>/` with `spe
   - [x] U3a: Foundation + first chains (JD summary, profile extraction)
   - [x] U3b1: Interview calls (write/stream, decide, feedback) - implemented 2026-11-27, reviewed
   - [x] U3b2: Retrieval (embeddings, retriever, splitter) - implemented 2026-11-27, reviewed (low)
-  - [ ] U3c: Fallback chain + remove the old layer
+  - [x] U3c: Fallback chain + remove the old layer - implemented 2026-11-28, evals unchanged (`docs/evals/u3c-chain-vs-baseline.md`), review pending
 - [ ] U4: Prompt templates + Langfuse Prompt Management
 - [ ] U5: Expand the knowledge corpus
 - [ ] U6: Advanced RAG (hybrid → rerank → query rewriting)
