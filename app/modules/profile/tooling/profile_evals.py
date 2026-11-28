@@ -178,15 +178,11 @@ def main(
     from app.core.ai.tracing import build_tracer
     from app.core.config import settings
 
-    configs = settings.llm_provider_configs
-    model = args.model or (configs[0].model if configs else None)
+    model = args.model or settings.llm_provider_configs[0].model
     if chat_model is None:
-        # The app's own chat model (U3a: extraction runs on LangChain), traced like the app's.
+        # The app's own provider chain (U3a: extraction runs on LangChain), traced like the app's.
         tracer = tracer or build_tracer(settings, environment="eval")
         chat_model = build_chat_model(settings, model=args.model, tracer=tracer)
-        if chat_model is None:
-            print("LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first.")
-            return 1
     tracer = tracer or Tracer(None)
     cases = load_cases()
     print(f"model={model} prompt={PROFILE_PROMPT_VERSION} cases={len(cases)} repeat={args.repeat}\n")

@@ -17,7 +17,6 @@ from app.core.ai.provider import LLMResult
 from app.core.errors import (
     ProfileExtractionFailedError,
     ProfileNotFoundError,
-    ProfileUnavailableError,
     ResumeTooLargeError,
     ResumeUnreadableError,
     ResumeUnsupportedError,
@@ -31,7 +30,6 @@ from ..constants.profile_constants import (
     PROFILE_EXTRACTION_FAILED_MESSAGE,
     PROFILE_NOT_FOUND_MESSAGE,
     PROFILE_PROMPT_VERSION,
-    PROFILE_UNAVAILABLE_MESSAGE,
     RESUME_TOO_LARGE_MESSAGE,
     RESUME_UNREADABLE_MESSAGE,
     RESUME_UNSUPPORTED_MESSAGE,
@@ -71,8 +69,8 @@ class ProfileService:
     def __init__(
         self,
         repo: ProfileRepository,
-        # The LangChain chat model (U3a); None = LLM off, uploads are unavailable.
-        chat_model: ChatModel | None,
+        # The provider chain (U3a, U3c).
+        chat_model: ChatModel,
         *,
         max_tokens: int,
         clock: Callable[[], float],
@@ -117,10 +115,6 @@ class ProfileService:
         def done(outcome: str, level: int = logging.INFO) -> None:
             log["latency_ms"] = round((self.clock() - start) * 1000)
             profile_logger.log(level, "resume_upload", outcome=outcome, **log)
-
-        if self.chat_model is None:
-            done("unavailable", logging.WARNING)
-            raise ProfileUnavailableError(PROFILE_UNAVAILABLE_MESSAGE)
 
         try:
             resume: ResumeText = read_resume(data)

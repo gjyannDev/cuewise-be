@@ -36,7 +36,6 @@ router = APIRouter(
         415: {"model": ErrorResponse},
         429: {"model": ErrorResponse},
         502: {"model": ErrorResponse},
-        503: {"model": ErrorResponse},
     },
 )
 async def upload_resume(
@@ -48,7 +47,7 @@ async def upload_resume(
     replacing any previous one; the response is what was understood. The file and its text are never stored.
 
     413 `RESUME_TOO_LARGE`, 415 `RESUME_UNSUPPORTED`, 422 `RESUME_UNREADABLE` (encrypted, scanned, no résumé in it),
-    502 `PROFILE_EXTRACTION_FAILED` (try again), 503 `PROFILE_UNAVAILABLE`. A failed upload keeps the old profile."""
+    502 `PROFILE_EXTRACTION_FAILED` (try again). A failed upload keeps the old profile."""
     # One byte past the cap is enough to know it's too large, and the rest is never held in memory.
     data = await form.file.read(RESUME_MAX_BYTES + 1)
     if not data:

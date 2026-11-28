@@ -56,7 +56,7 @@ def limit_resume_uploads(user: ProfileUser, limiter: Annotated[RateLimiter, Depe
 
 def get_profile_service(
     db: Annotated[Session, Depends(get_db)],
-    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
+    chat_model: Annotated[ChatModel, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_profile_clock)],
     now: Annotated[Callable[[], datetime], Depends(get_profile_now)],
 ) -> ProfileService:

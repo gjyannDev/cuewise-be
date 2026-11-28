@@ -56,5 +56,4 @@ RESUME_UNREADABLE_MESSAGE = (
     "(not a scan or a password-protected file)."
 )
 PROFILE_EXTRACTION_FAILED_MESSAGE = "We couldn't read your résumé right now. Please try again in a moment."
-PROFILE_UNAVAILABLE_MESSAGE = "The résumé feature isn't available right now. Please try again later."
-PROFILE_NOT_FOUND_MESSAGE = "You haven't uploaded a résumé yet. Upload one to create your profile."
+PROFILE_NOT_FOUND_MESSAGE ="You haven't uploaded a résumé yet. Upload one to create your profile."

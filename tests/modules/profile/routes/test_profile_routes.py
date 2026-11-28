@@ -5,10 +5,8 @@ import logging
 
 import pytest
 
-from app.core.ai.dependencies import get_chat_model
 from app.core.ai.provider import LLMServerError, LLMTimeoutError
 from app.core.ai.tracing import REDACTED
-from app.main import app
 from app.modules.profile.constants.profile_constants import (
     PROFILE_INPUT_MAX_CHARS,
     PROFILE_PROMPT_VERSION,
@@ -245,16 +243,6 @@ def test_a_provider_error_or_timeout_is_a_502(make_user, upload, profile_llm, er
 
     assert response.status_code == 502 and response.json()["error"]["code"] == "PROFILE_EXTRACTION_FAILED"
     assert f"extraction_failed:{type(error).__name__}" in app_logs.text
-
-
-def test_no_llm_configured_is_a_503(make_user, upload):  # EC22; U3a EC1
-    app.dependency_overrides[get_chat_model] = lambda: None
-    try:
-        response = upload(make_user(), resume_pdf())
-    finally:
-        app.dependency_overrides.pop(get_chat_model, None)
-
-    assert response.status_code == 503 and response.json()["error"]["code"] == "PROFILE_UNAVAILABLE"
 
 
 # --- get, delete, ownership, auth, limits, validation (AC9, AC10) ----------------------------------------------------

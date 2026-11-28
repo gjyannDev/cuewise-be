@@ -25,10 +25,9 @@ from ..constants.profile_constants import (
     TITLE_MAX_LENGTH,
 )
 from ..schemas.profile_schema import CandidateProfile, Project, Role
-
-
-class EmptyProfileError(Exception):
-    """No skills and no roles: not a résumé we can use (refused as unreadable, nothing stored)."""
+from ..utils.profile_utils import (
+    EmptyProfileError,  # raised here and by the grounding step, so it lives below ai/
+)
 
 
 # The raw shapes: types and known fields only. Lengths and counts are cut afterwards, not refused (spec EC19).

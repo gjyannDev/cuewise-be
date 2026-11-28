@@ -2,8 +2,12 @@
 
 import re
 
-from ..ai.profile_reply import EmptyProfileError
 from ..schemas.profile_schema import CandidateProfile
+
+
+class EmptyProfileError(Exception):
+    """No skills and no roles: not a résumé we can use (refused as unreadable, nothing stored)."""
+
 
 # Local part, @, a domain with at least one dot. Broad on purpose: a false positive costs a word, a miss leaks PII.
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
