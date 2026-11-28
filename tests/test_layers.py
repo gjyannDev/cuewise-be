@@ -69,10 +69,12 @@ _FORBIDDEN = {
     "controllers": {"repositories"},
     "services": {"controllers", "routes"},
     "repositories": {"services", "controllers", "routes"},
+    # Pure helpers sit below the feature's ai/ functions (which may use them), never above.
+    "utils": {"ai"},
 }
 
 # LangChain and the vendor SDKs belong in app/core/ai and the feature ai/ folders only (CLAUDE.md, "Provider
-# abstraction"): the four layers reach a model through the feature's ai/ functions and the core `ChatModel` alias.
+# abstraction"): everything else reaches a model through the feature's ai/ functions and the core `ChatModel` alias.
 _VENDOR_SDKS = ("google.api_core", "google.ai", "google.genai", "google.generativeai")
 
 
@@ -80,15 +82,39 @@ def _is_llm_library(module: str) -> bool:
     return module.split(".")[0].startswith("langchain") or module.startswith(_VENDOR_SDKS)
 
 
+def _may_import_llm_libraries(parts: list[str]) -> bool:
+    """app/core/ai/** and app/modules/<feature>/ai/**."""
+    return parts[:3] == ["app", "core", "ai"] or (parts[:2] == ["app", "modules"] and len(parts) > 4 and parts[3] == "ai")
+
+
+def check_sdks(files: Mapping[str, str]) -> list[str]:
+    """Every import of LangChain or a vendor SDK in an `app/` file outside `app/core/ai/` and a feature's `ai/` folder."""
+    violations: list[str] = []
+    for path, source in sorted(files.items()):
+        parts = path.removesuffix(".py").split("/")
+        if parts[0] != "app" or _may_import_llm_libraries(parts):
+            continue
+        violations.extend(
+            f"{path}: imports {module} (LangChain or a vendor SDK is allowed only in app/core/ai and a feature's ai/)"
+            for module, _ in _imports(source, parts[:-1])
+            if _is_llm_library(module)
+        )
+    return violations
+
+
 def _violation(feature: str, layer: str | None, module: str, names: list[str]) -> str | None:
-    kind = {"routes": "route", "controllers": "controller", "services": "service", "repositories": "repository"}
+    kind = {
+        "routes": "route",
+        "controllers": "controller",
+        "services": "service",
+        "repositories": "repository",
+        "utils": "utils",
+    }
     target = module.split(".")
     target_feature = target[2] if target[:2] == ["app", "modules"] and len(target) > 3 else None
     target_folder = target[3] if target_feature else None
     if layer in _FORBIDDEN and target_folder in _FORBIDDEN[layer]:
         return f"{kind[layer]} imports {module}"
-    if layer in _FORBIDDEN and _is_llm_library(module):
-        return f"{kind[layer]} imports {module} (LangChain or a vendor SDK: use the feature's ai/ functions)"
     if layer == "controllers" and module.startswith(("app.core.ai", "app.db.session")):
         return f"controller imports {module}"
     if layer == "services" and target_folder == "schemas":
@@ -138,7 +164,7 @@ def test_controller_importing_a_repository_the_llm_or_the_db_session_is_reported
     assert _one(path, "from ..repositories.auth_repository import AuthRepository\n") == [
         f"{path}: controller imports app.modules.auth.repositories.auth_repository"
     ]
-    assert _one(path, "from app.core.ai.provider import LLMProvider\n") == [
+    assert _one(path, "from app.core.ai.provider import LLMResult\n") == [
         f"{path}: controller imports app.core.ai.provider"
     ]
     assert _one(path, "from app.db.session import get_db\n") == [f"{path}: controller imports app.db.session"]
@@ -188,8 +214,8 @@ def test_a_layer_file_left_at_a_module_root_is_reported():
 
 
 @pytest.mark.parametrize(
-    ("folder", "kind"),
-    [("routes", "route"), ("controllers", "controller"), ("services", "service"), ("repositories", "repository")],
+    "folder",
+    ["routes", "controllers", "services", "repositories", "dependencies", "utils", "tooling", "schemas", "constants"],
 )
 @pytest.mark.parametrize(
     "statement",
@@ -201,20 +227,36 @@ def test_a_layer_file_left_at_a_module_root_is_reported():
         "from google.ai import generativelanguage\n",
     ],
 )
-def test_a_layer_importing_langchain_or_a_vendor_sdk_is_reported(folder, kind, statement):  # U3a AC11
+def test_a_feature_folder_importing_langchain_or_a_vendor_sdk_is_reported(folder, statement):  # U3c AC11
     path = f"{AUTH}/{folder}/auth_{folder}.py"
-    [violation] = _one(path, statement)
-    assert violation.startswith(f"{path}: {kind} imports ") and "LangChain or a vendor SDK" in violation
+    [violation] = check_sdks({path: statement})
+    assert violation.startswith(f"{path}: imports ") and "LangChain or a vendor SDK" in violation
 
 
-def test_a_feature_ai_folder_may_import_langchain():  # U3a: chains live in the feature's ai/ folder
-    path = "app/modules/interviews/ai/interviews_summary.py"
-    assert _one(path, "from langchain_core.prompts import ChatPromptTemplate\n") == []
+@pytest.mark.parametrize("path", ["app/core/config.py", "app/core/speech/gateway.py", "app/db/session.py", "app/main.py"])
+def test_core_outside_ai_and_the_app_root_may_not_import_langchain_either(path):  # U3c AC11
+    assert len(check_sdks({path: "from langchain_core.messages import AIMessage\n"})) == 1
+
+
+@pytest.mark.parametrize(
+    "path", ["app/core/ai/chat.py", "app/core/ai/factory.py", "app/modules/interviews/ai/interviews_summary.py"]
+)
+def test_core_ai_and_a_feature_ai_folder_may_import_langchain_and_vendor_sdks(path):  # U3c AC11
+    assert check_sdks({path: "from langchain_core.prompts import ChatPromptTemplate\nfrom google.api_core import exceptions\n"}) == []
 
 
 def test_a_service_may_use_the_core_chat_model_alias():  # the alias keeps services free of langchain imports
     path = f"{AUTH}/services/auth_service.py"
+    assert check_sdks({path: "from app.core.ai.chat import ChatModel\n"}) == []
     assert _one(path, "from app.core.ai.chat import ChatModel\n") == []
+
+
+def test_utils_importing_an_ai_folder_is_reported():  # U3c R3: pure helpers sit below the ai/ functions
+    path = "app/modules/interviews/utils/interviews_knowledge_utils.py"
+    assert _one(path, "from ..ai.interviews_split import split_sections\n") == [
+        f"{path}: utils imports app.modules.interviews.ai.interviews_split"
+    ]
+    assert _one(path, "from app.modules.interviews.constants.interviews_constants import JobRole\n") == []
 
 
 def test_a_core_file_importing_only_core_and_libraries_is_clean():
@@ -246,3 +288,9 @@ def test_the_real_tree_follows_the_layer_rules():
         for p in (root / "app" / "modules" / m).rglob("*.py")
     }
     assert check_layers(files, MIGRATED) == []
+
+
+def test_the_real_tree_imports_langchain_and_vendor_sdks_only_in_core_ai_and_feature_ai_folders():  # U3c AC11
+    root = Path(__file__).resolve().parents[1]
+    files = {p.relative_to(root).as_posix(): p.read_text(encoding="utf-8") for p in (root / "app").rglob("*.py")}
+    assert check_sdks(files) == []
