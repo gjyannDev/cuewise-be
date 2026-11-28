@@ -61,10 +61,10 @@ class MessageRole(StrEnum):
 
 
 class QuestionSource(StrEnum):
-    """Who wrote a stored question: the LLM, or the hand-written bank (fallback and pre-slice-2 sessions)."""
+    """Who wrote a stored question: the LLM, or (older sessions, whose questions were all stored up front) nobody."""
 
     llm = "llm"
-    bank = "bank"
+    stored = "stored"
 
 
 class QuestionKind(StrEnum):
@@ -169,7 +169,7 @@ MIN_SECONDS_FOR_RETRY = 5.0
 MAX_FOLLOW_UPS = 2
 # The decide call never runs longer than this, so a slow one can't eat the time of the question the user sees.
 DECIDE_MAX_SECONDS = 10.0
-# Below this much time left on the turn, no write call is started: the bank asks instead.
+# Below this much time left on the turn, no write call is started: the turn ends in the retryable error.
 MIN_SECONDS_FOR_WRITE = 5.0
 # Kept back from the decide call for the write call that follows it.
 WRITE_RESERVE_SECONDS = MIN_SECONDS_FOR_WRITE
@@ -225,6 +225,8 @@ JOB_TERMS = (
     "developer",
 )
 JOB_TERMS_MIN_HITS = 3
+# The one text of the retryable error (start, answer, streamed answer): generic, no vendor or provider named.
+INTERVIEWER_UNAVAILABLE_MESSAGE = "The interviewer couldn't write the next question right now. Please try again."
 JOB_URL_UNREACHABLE_MESSAGE = "We couldn't open that link. Please paste the job description instead."
 JOB_URL_UNREADABLE_MESSAGE = "We couldn't read a job description from that page. Please paste the job description instead."
 # Paste fallback for sites that block our fetch: the candidate copies the whole page from their own browser. A page's
@@ -422,9 +424,8 @@ ROLE_KEYTERMS: dict[JobRole, tuple[str, ...]] = {
     role: SHARED_KEYTERMS + terms for role, terms in _ROLE_ONLY_KEYTERMS.items()
 }
 
-# The interviews module root: data/, prompts/ and templates/ live there, next to the layer folders.
+# The interviews module root: prompts/ and templates/ live there, next to the layer folders.
 MODULE_DIR = Path(__file__).resolve().parents[1]
-QUESTION_BANK_PATH = MODULE_DIR / "data" / "questions.json"
 
 PROMPTS_DIR = MODULE_DIR / "prompts"
 # Prompt versions, their history and which task sends which: interviews_prompt_registry.py. The *_PROMPT_VERSION names
@@ -680,7 +681,6 @@ class RetrievalDegrade(StrEnum):
 class RetrievalSkip(StrEnum):
     """Why an interview has no reference notes at all (logged as retrieval_skipped:<reason>); it runs as before."""
 
-    llm_off = "llm_off"
     no_match = "no_match"
     db_error = "db_error"
 

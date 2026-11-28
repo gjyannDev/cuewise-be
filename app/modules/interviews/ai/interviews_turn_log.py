@@ -31,6 +31,8 @@ def log_llm_call(
     task: str,
     prompt_version: str | None = None,
     model: str = "-",
+    # The provider of the chain that answered (`LLM_PROVIDERS` name), when the call went through the chain.
+    provider: str | None = None,
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     # Part of prompt_tokens served from the provider's prompt cache / part of completion_tokens spent on hidden
@@ -51,6 +53,7 @@ def log_llm_call(
         level,
         "llm_call",
         task=task,
+        provider=provider or "-",
         model=model,
         prompt_version=prompt_version or "-",
         prompt_tokens=prompt_tokens,
@@ -80,6 +83,7 @@ def log_result(
         outcome,
         task=task,
         prompt_version=prompt_version,
+        provider=result.provider,
         model=result.model,
         prompt_tokens=result.prompt_tokens,
         completion_tokens=result.completion_tokens,
@@ -119,7 +123,7 @@ def log_turn_summary(
     fallback: str | None = None,
     llm_ms: int = 0,
 ) -> None:
-    """Why the turn ended as it did: the only place an overridden follow-up or a bank fallback is explained."""
+    """Why the turn ended as it did: the only place an overridden follow-up or a failed turn is explained."""
     llm_logger.info(
         "turn_summary",
         decision=decision,

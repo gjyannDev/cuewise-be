@@ -19,7 +19,6 @@ from app.core.errors import (
     FeedbackFailedError,
     FeedbackInProgressError,
     FeedbackNotFoundError,
-    FeedbackUnavailableError,
     InterviewNotCompletedError,
 )
 from app.core.logging import bind_log_context
@@ -94,7 +93,7 @@ class FeedbackService:
     def __init__(
         self,
         repo: InterviewsRepository,
-        chat_model: ChatModel | None,
+        chat_model: ChatModel,
         *,
         context: ContextManager,
         clock: Callable[[], float],
@@ -113,19 +112,14 @@ class FeedbackService:
         self.tracer = tracer or Tracer(None)
         self.budget_seconds = budget_seconds
         self.stale_margin_seconds = stale_margin_seconds
-        # None = LLM off: POST answers 503, GET still works. On the LangChain chat model since U3b1.
-        self.generator = (
-            None
-            if chat_model is None
-            else FeedbackGenerator(
-                chat_model,
-                context,
-                score_max_tokens=score_max_tokens,
-                write_max_tokens=write_max_tokens,
-                score_temperature=score_temperature,
-                clock=clock,
-                tracer=self.tracer,
-            )
+        self.generator = FeedbackGenerator(
+            chat_model,
+            context,
+            score_max_tokens=score_max_tokens,
+            write_max_tokens=write_max_tokens,
+            score_temperature=score_temperature,
+            clock=clock,
+            tracer=self.tracer,
         )
 
     def get(self, user: User, session_id: uuid.UUID) -> InterviewFeedback:
@@ -136,8 +130,8 @@ class FeedbackService:
         return feedback
 
     def generate(self, user: User, session_id: uuid.UUID) -> tuple[InterviewFeedback, bool]:
-        """The feedback, generated now (True) or already stored (False). Checks run in this order so a stored result
-        is returned even when the LLM is off, and nothing is claimed for a request that can't run."""
+        """The feedback, generated now (True) or already stored (False). A stored result is returned before anything is
+        claimed."""
         bind_log_context(session=str(session_id))
         session = owned_session(self.repo, user, session_id)
         if session.status != SessionStatus.completed:
@@ -153,8 +147,6 @@ class FeedbackService:
         existing = self.repo.get_feedback(session.id)
         if existing is not None and existing.status == FeedbackStatus.generated:
             return existing, False
-        if self.generator is None:
-            raise FeedbackUnavailableError("Feedback is not available right now. Try again later.")
 
         claim = self._claim(interview.session_id, existing)
         threads = build_threads(
@@ -211,7 +203,6 @@ class FeedbackService:
         return _Claim(feedback_id, started_at, stored)
 
     def _run(self, interview: _Interview, threads: list[FeedbackThread], claim: _Claim) -> _Outcome:
-        assert self.generator is not None
         session_id = interview.session_id
         deadline = self.generator.deadline(self.budget_seconds)
         stored = claim.stored

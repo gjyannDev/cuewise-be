@@ -31,8 +31,8 @@ from app.modules.interviews.tooling.interviews_rag_evals import (
     GENERATION_KEYWORDS_PATH,
     run_generation,
 )
-from app.modules.interviews.utils.interviews_knowledge_utils import parse_note
 from tests.fake_langfuse import FakeLangfuse
+from tests.note_parsing import parse_note
 from tests.provider_chat import ProviderChatModel
 
 SETUPS = json.loads(GENERATION_KEYWORDS_PATH.read_text(encoding="utf-8"))["setups"]

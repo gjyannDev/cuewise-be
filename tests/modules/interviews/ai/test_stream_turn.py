@@ -6,7 +6,6 @@ import uuid
 
 import pytest
 
-from app.core.ai.fake import FakeStream
 from app.core.ai.provider import LLMServerError
 from app.core.config import settings
 from app.modules.interviews.ai.interviews_context import (
@@ -17,6 +16,7 @@ from app.modules.interviews.ai.interviews_turn import Interviewer
 from app.modules.interviews.ai.interviews_turn_types import (
     ActionKnown,
     Delta,
+    InterviewerFailedError,
     PhaseChanged,
     Reset,
     Settled,
@@ -31,6 +31,7 @@ from app.modules.interviews.constants.interviews_constants import (
 )
 from app.modules.interviews.utils.interviews_utils import QuestionTurn
 from tests.provider_chat import closed_soon
+from tests.provider_fakes import FakeStream
 
 pytestmark = pytest.mark.anyio
 
@@ -56,6 +57,15 @@ def inputs(*turns: QuestionTurn) -> InterviewerInputs:
 
 async def collect(interviewer: Interviewer, *, last_main: bool = False) -> list:
     return [event async for event in interviewer.stream_turn(SESSION, inputs(), last_main=last_main)]
+
+
+async def collect_failed(interviewer: Interviewer) -> tuple[list, InterviewerFailedError]:
+    """The events a turn yielded before it ended in `InterviewerFailedError`, and the error."""
+    events: list = []
+    with pytest.raises(InterviewerFailedError) as info:
+        async for event in interviewer.stream_turn(SESSION, inputs(), last_main=False):
+            events.append(event)
+    return events, info.value
 
 
 def kinds(events: list) -> list[str]:
@@ -107,15 +117,14 @@ async def test_a_follow_up_is_reported_only_after_its_write_succeeds(llm, clock,
     assert events[-1].outcome.written.reply.question == "What was the result for the team?"
 
 
-async def test_a_follow_up_whose_write_fails_moves_on_instead(llm, clock, decision_json):  # EC14
+async def test_a_follow_up_whose_write_fails_ends_the_turn(llm, clock, decision_json):  # EC3, EC14
     llm.script_decide(decision_json("follow_up", "missing_result"))
     llm.script('{"broken": ', '{"still broken": ')
 
-    events = await collect(make_interviewer(llm, clock))
+    events, error = await collect_failed(make_interviewer(llm, clock))
 
-    assert kinds(events)[-2:] == ["action:next_question", "Settled"]
-    assert TurnPhase.writing in kinds(events)
-    assert events[-1].outcome.written is None
+    assert TurnPhase.writing in kinds(events) and not any(isinstance(e, Settled) for e in events)
+    assert error.reason == "write_failed"
 
 
 async def test_the_last_threads_end_completes_without_writing(llm, clock):  # EC15
@@ -126,8 +135,17 @@ async def test_the_last_threads_end_completes_without_writing(llm, clock):  # EC
     assert llm.fake.calls == []
 
 
-async def test_a_failed_decide_call_falls_back_to_the_next_question(llm, clock):  # EC12
-    llm.script_decide(LLMServerError("provider down"))
+async def test_a_failed_decide_call_ends_the_turn_before_any_write(llm, clock):  # EC3b
+    llm.script_decide(*[LLMServerError("provider down")] * (1 + settings.llm_max_retries))
+
+    events, error = await collect_failed(make_interviewer(llm, clock))
+
+    assert kinds(events) == [TurnPhase.deciding]
+    assert error.reason == "decide_failed" and llm.fake.calls == []
+
+
+async def test_a_decide_call_that_recovers_inside_the_call_layer_does_not_fail_the_turn(llm, clock):  # EC12
+    llm.script_decide(LLMServerError("provider down"))  # one failure: the call layer retries it
 
     events = await collect(make_interviewer(llm, clock))
 
@@ -140,7 +158,6 @@ async def test_a_failed_decide_call_falls_back_to_the_next_question(llm, clock):
     [
         (("next_question",), ("{q}",), False),
         (("follow_up", "no_example"), ("{f}",), False),
-        (("follow_up", "no_example"), ("{bad}", "{bad}"), False),
         (("next_question",), (), True),
     ],
 )
@@ -152,8 +169,6 @@ async def test_the_streamed_outcome_equals_the_json_turns(
         replies = {
             "{q}": reply_json("Describe a project you led?", "behavioral"),
             "{f}": follow_up_json(),
-            # Invalid in both formats (two questions), so both turns fall back the same way.
-            "{bad}": follow_up_json("What did you do? And why?"),
         }
         llm.script(*[replies[w] for w in writes])
 
@@ -199,14 +214,13 @@ async def test_an_invalid_draft_with_time_left_is_taken_back_and_retried(llm, cl
     assert events[-1].outcome.written.reply.question == GOOD.split("\n", 1)[1]
 
 
-async def test_an_invalid_draft_with_no_time_left_is_taken_back_and_the_bank_asks(llm, clock):  # EC8
+async def test_an_invalid_draft_with_no_time_left_is_taken_back_and_the_turn_fails(llm, clock):  # EC8
     llm.script("CATEGORY: behavioral\nWhat did you build? And why?", GOOD, on_call=lambda: clock.advance(26))
 
-    events = await collect(make_interviewer(llm, clock))
+    events, error = await collect_failed(make_interviewer(llm, clock))
 
-    assert kinds(events)[-3:] == ["Delta", "Reset", "Settled"]
-    assert events[-1].outcome.written is None
-    assert len(llm.fake.calls) == 1
+    assert kinds(events)[-2:] == ["Delta", "Reset"]
+    assert error.reason == "write_failed" and len(llm.fake.calls) == 1
 
 
 async def test_a_provider_failure_mid_question_is_taken_back_and_retried(llm, clock):  # EC9
@@ -218,24 +232,24 @@ async def test_a_provider_failure_mid_question_is_taken_back_and_retried(llm, cl
     assert events[-1].outcome.written.reply is not None
 
 
-async def test_the_deadline_running_out_mid_question_takes_it_back_and_the_bank_asks(llm, clock):  # EC9
+async def test_the_deadline_running_out_mid_question_takes_it_back_and_the_turn_fails(llm, clock):  # EC9
     # The clock jumps past the deadline as the call starts; the first chunk already carries visible text.
     llm.script(FakeStream(["CATEGORY: behavioral\nTell me ", "about it?"]), on_call=lambda: clock.advance(31))
 
-    events = await collect(make_interviewer(llm, clock))
+    events, error = await collect_failed(make_interviewer(llm, clock))
 
-    assert kinds(events)[-3:] == ["Delta", "Reset", "Settled"]
-    assert events[-1].outcome.written is None
+    assert kinds(events)[-2:] == ["Delta", "Reset"]
+    assert error.reason == "write_failed"
 
 
 async def test_a_failure_before_any_text_needs_no_reset(llm, clock):  # EC10
     # A 503 is retried by the call layer before the first chunk (U3b1), so it fails every attempt.
     llm.script(*[LLMServerError("provider down")] * (1 + settings.llm_max_retries))
 
-    events = await collect(make_interviewer(llm, clock))
+    events, error = await collect_failed(make_interviewer(llm, clock))
 
     assert not any(isinstance(e, Delta | Reset) for e in events)
-    assert events[-1].outcome.written is None
+    assert error.reason == "write_failed"
 
 
 async def test_a_reply_without_a_category_line_streams_nothing_for_that_attempt(llm, clock):  # EC11

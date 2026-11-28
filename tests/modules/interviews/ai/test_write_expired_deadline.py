@@ -2,7 +2,7 @@
 
 Before U2 these two loops always made their first call, even at zero time left (with a timeout of zero or less).
 The shared `ReplyAttempts` header now stops before it, like decide and the feedback turn already did, and the turn
-falls back to the question bank.
+ends in the retryable error (U3c).
 """
 
 import json
@@ -11,7 +11,6 @@ import uuid
 import pytest
 
 from app.core.ai.chat_fake import FakeChatModel
-from app.core.ai.fake import FakeProvider
 from app.modules.interviews.ai.interviews_context import (
     CONTEXT_MANAGER,
     InterviewerInputs,
@@ -26,6 +25,7 @@ from app.modules.interviews.constants.interviews_constants import (
     Level,
 )
 from app.modules.interviews.utils.interviews_utils import QuestionTurn
+from tests.provider_fakes import FakeProvider
 
 QUESTION = "How would you make a payment retry safe to repeat?"
 

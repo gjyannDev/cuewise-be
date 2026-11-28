@@ -3,8 +3,9 @@
 The model suggests and the code enforces: the follow-up cap, the time checks and a follow-up's category live in code
 (interviews_turn_limits.py), not in a prompt, so no reply (or injected answer) can change them. One deadline is shared
 by every call of the turn; the decide call is capped and leaves the write call a reserve, because the question is what
-the candidate sees. Every failure has a fallback, so a turn never fails because of the LLM: the answer service asks the
-bank instead.
+the candidate sees. A failure that leaves no question (a failed decide, a failed or unusable write, no time left) ends
+the turn with `InterviewerFailedError`: nothing replaces the question, and the answer service saves nothing and
+answers with a retryable error.
 
 This file only orchestrates; each step lives in its own file: interviews_decide.py, interviews_write.py (blocking),
 interviews_write_stream.py (streamed), interviews_turn_limits.py, interviews_turn_types.py and interviews_turn_log.py.
@@ -23,9 +24,10 @@ from app.core.ai.provider import LLMResult
 from ..ai.interviews_context import InterviewerInputs
 from ..ai.interviews_decide import decide
 from ..ai.interviews_reply import Decision
-from ..ai.interviews_turn_limits import Deadline, plan_write, settle
+from ..ai.interviews_turn_limits import Deadline, fail_undecided, plan_write, settle
 from ..ai.interviews_turn_types import (
     ActionKnown,
+    InterviewerFailedError,
     PhaseChanged,
     Settled,
     TurnAction,
@@ -59,12 +61,16 @@ class Interviewer:
     def first_question(
         self, session_id: uuid.UUID, inputs: InterviewerInputs
     ) -> Written:
-        return self._write(
+        """The interview's first question; raises `InterviewerFailedError` when none could be written."""
+        written = self._write(
             session_id,
             inputs,
             Deadline(self.clock, self.budget_seconds),
             follow_up_category=None,
         )
+        if written.reply is None:
+            raise InterviewerFailedError("write_failed")
+        return written
 
     def answer_turn(
         self, session_id: uuid.UUID, inputs: InterviewerInputs, *, last_main: bool
@@ -73,6 +79,8 @@ class Interviewer:
         decision, decide_results, decision_version = self._decide(
             session_id, inputs, deadline
         )
+        if decision is None:
+            fail_undecided(deadline, budget_seconds=self.budget_seconds)
         plan = self.plan_write(decision, inputs, deadline, last_main=last_main)
         written = None
         if plan.write_inputs is not None:
@@ -80,7 +88,7 @@ class Interviewer:
                 session_id, plan.write_inputs, deadline, follow_up_category=plan.follow_up_category
             )
         return self.settle(
-            session_id, plan, decision, decide_results, decision_version, written, deadline, last_main=last_main
+            session_id, plan, decision, decide_results, decision_version, written, deadline
         )
 
     async def stream_turn(
@@ -96,6 +104,8 @@ class Interviewer:
         decision, decide_results, decision_version = await anyio.to_thread.run_sync(
             self._decide, session_id, inputs, deadline, abandon_on_cancel=True
         )
+        if decision is None:
+            fail_undecided(deadline, budget_seconds=self.budget_seconds)
         plan = self.plan_write(decision, inputs, deadline, last_main=last_main)
         if plan.action != TurnAction.follow_up:
             yield ActionKnown(plan.action)
@@ -119,7 +129,7 @@ class Interviewer:
                     else:
                         yield event
         outcome = self.settle(
-            session_id, plan, decision, decide_results, decision_version, written, deadline, last_main=last_main
+            session_id, plan, decision, decide_results, decision_version, written, deadline
         )
         if plan.action == TurnAction.follow_up:
             yield ActionKnown(outcome.action)
@@ -141,8 +151,6 @@ class Interviewer:
         decision_version: str | None,
         written: Written | None,
         deadline: Deadline,
-        *,
-        last_main: bool,
     ) -> TurnOutcome:
         return settle(
             session_id,
@@ -152,7 +160,6 @@ class Interviewer:
             decision_version,
             written,
             deadline,
-            last_main=last_main,
             budget_seconds=self.budget_seconds,
         )
 

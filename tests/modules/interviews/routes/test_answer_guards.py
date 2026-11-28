@@ -23,10 +23,12 @@ def message_count(db) -> int:
 
 
 @pytest.fixture
-def started(make_user, start_interview):
+def started(make_user, start_interview, llm):
     """An owner with a started 3-question interview: (owner, session_id, first question)."""
     owner = make_user(email="owner@example.com")
     created = start_interview(owner, question_count=3).json()
+    llm.script()  # fresh fakes: the tests count only the calls made after the start
+    llm.script_decide()
     return owner, created["session"]["id"], created["current_question"]
 
 
@@ -156,7 +158,7 @@ def test_a_future_question_is_not_current_either(make_user, answer, db):  # EC9
     session = InterviewSession(
         user_id=owner.id, role="backend", level="junior", interview_type="behavioral", question_count=3
     )
-    stored = [InterviewQuestion(position=i, text=f"Q{i}?", category="behavioral", bank_id=f"b{i}") for i in (1, 2, 3)]
+    stored = [InterviewQuestion(position=i, text=f"Q{i}?", category="behavioral", source="stored") for i in (1, 2, 3)]
     InterviewsRepository(db).start(session, stored)
 
     r = answer(owner, session.id, stored[2].id)

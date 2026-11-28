@@ -5,7 +5,6 @@ import pytest
 from sqlalchemy import select
 
 from app.core.ai.context import ContextManager, Task
-from app.core.ai.provider import LLMServerError
 from app.main import app
 from app.modules.interviews.ai.interviews_context import WindowLedger
 from app.modules.interviews.constants.interviews_constants import (
@@ -117,9 +116,9 @@ def test_a_bad_note_is_dropped_the_question_kept_and_nothing_retried(
     assert all("xxxxxxxxxx" not in rec.getMessage() for rec in app_logs.records)
 
 
-def test_no_note_after_a_bank_fallback_or_for_the_final_answer(start_interview, make_user, answer, llm, db):  # EC22
+def test_no_note_without_one_in_the_reply_or_for_the_final_answer(start_interview, make_user, answer, llm, db):  # EC22
     owner = make_user()
-    llm.script(noted("Opening question?"), LLMServerError("503"), LLMServerError("503"))
+    llm.script(noted("Opening question?"))  # no note in any reply; the final answer makes no LLM call at all
     created = start_interview(owner, question_count=2).json()
 
     run(answer, owner, created, 2)
@@ -127,22 +126,15 @@ def test_no_note_after_a_bank_fallback_or_for_the_final_answer(start_interview, 
     assert [m.note for m in candidate_messages(db, created["session"]["id"])] == [None, None]
 
 
-def test_a_too_large_context_uses_the_bank_without_calling_the_llm(
+def test_a_too_large_context_ends_the_start_without_calling_the_llm(
     start_interview, make_user, llm, db, app_logs, tiny_context
-):  # AC7, EC7
+):  # AC7, EC7, EC8
     r = start_interview(make_user(), question_count=3)
 
-    assert r.status_code == 201
+    assert r.status_code == 503 and r.json()["error"]["code"] == "INTERVIEWER_UNAVAILABLE"
     assert llm.fake.calls == []
-    q1 = db.scalars(select(InterviewQuestion)).one()
-    assert q1.source == "bank"
+    assert db.scalars(select(InterviewQuestion)).all() == []
     assert any("outcome=too_large" in rec.getMessage() for rec in app_logs.records if rec.name == "app.llm.context")
-
-
-def test_without_an_llm_no_context_is_built(start_interview, make_user, app_logs):  # EC16
-    start_interview(make_user(), question_count=3)
-
-    assert not [rec for rec in app_logs.records if rec.name == "app.llm.context"]
 
 
 def test_notes_never_appear_in_responses_or_logs(

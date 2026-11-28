@@ -12,8 +12,6 @@ import pytest
 from sqlalchemy import func, select, update
 
 from app.core.ai.context import ContextManager, Task
-from app.core.ai.dependencies import get_chat_model
-from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import LLMServerError
 from app.core.ai.tracing import Tracer
 from app.core.config import settings
@@ -52,6 +50,7 @@ from app.modules.interviews.dependencies.models.interviews_model import (
 from app.modules.interviews.repositories.interviews_repository import (
     InterviewsRepository,
 )
+from tests.provider_fakes import FakeProvider
 
 B, T = QuestionCategory.behavioral, QuestionCategory.technical
 QUOTE = "moved the billing retries onto a queue"
@@ -558,22 +557,6 @@ def test_the_rate_limit_answers_429_before_any_llm_call(client, auth_header, own
 
     assert r.status_code == 429 and r.json()["error"]["code"] == "RATE_LIMITED" and "retry-after" in r.headers
     assert rows_of(llm) == 0
-
-
-def test_without_an_llm_post_is_503_and_stores_nothing(client, auth_header, owner, interview, db):  # EC28
-    r = post(client, auth_header, owner, interview(owner))
-
-    assert r.status_code == 503 and r.json()["error"]["code"] == "FEEDBACK_UNAVAILABLE" and rows(db) == 0
-
-
-def test_without_an_llm_a_generated_feedback_is_still_returned(client, auth_header, owner, interview, happy, db):  # EC28
-    session_id = interview(owner)
-    first = post(client, auth_header, owner, session_id).json()
-    app.dependency_overrides.pop(get_chat_model)  # the LLM is switched off
-
-    r = post(client, auth_header, owner, session_id)
-
-    assert r.status_code == 200 and r.json() == first
 
 
 # --- GET (AC16, EC25) ---

@@ -2,7 +2,6 @@
 the transcript. Answer turns are in interviews_answer_service.py, voice answers and speech in interviews_voice_service.py.
 """
 
-import random
 import time
 import uuid
 from collections.abc import Callable, Sequence
@@ -11,7 +10,7 @@ from typing import NamedTuple
 from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
 from app.core.ai.tracing import Tracer
-from app.core.errors import ProfileRequiredError
+from app.core.errors import InterviewerUnavailableError, ProfileRequiredError
 from app.core.logging import bind_log_context
 from app.core.pagination import PageParams
 from app.modules.auth.models.auth_model import User
@@ -20,8 +19,11 @@ from app.modules.profile.services.profile_service import ProfileService
 from ..ai.interviews_context import CONTEXT_MANAGER
 from ..ai.interviews_summary import summarize_job_description
 from ..ai.interviews_turn import Interviewer
+from ..ai.interviews_turn_rows import interviewer_inputs, llm_question
+from ..ai.interviews_turn_types import InterviewerFailedError
 from ..constants.interviews_constants import (
     FIRST_POSITION,
+    INTERVIEWER_UNAVAILABLE_MESSAGE,
     PROFILE_REQUIRED_MESSAGE,
     SUMMARY_THRESHOLD,
     HistorySortColumn,
@@ -35,17 +37,14 @@ from ..dependencies.models.interviews_model import (
     InterviewSession,
 )
 from ..repositories.interviews_repository import InterviewsRepository
-from ..schemas.interviews_schema import BankQuestion, InterviewCreateIn
+from ..schemas.interviews_schema import InterviewCreateIn
 from ..services.interviews_retrieval_service import RetrievalService
 from ..utils.interviews_profile_utils import profile_query_text
 from ..utils.interviews_session_utils import (
     InterviewSetup,
-    bank_question,
-    interviewer_inputs,
-    llm_question,
     owned_session,
 )
-from ..utils.interviews_utils import answered_main_questions, select_questions
+from ..utils.interviews_utils import answered_main_questions
 
 
 class InterviewState(NamedTuple):
@@ -70,11 +69,8 @@ class InterviewsService:
     def __init__(
         self,
         repo: InterviewsRepository,
-        bank: list[BankQuestion],
-        rng: random.Random,
-        # The LangChain chat model: the job-description summary (U3a) and the first question (U3b1). None = LLM off,
-        # every question comes from the bank.
-        chat_model: ChatModel | None = None,
+        # The provider chain: the job-description summary (U3a) and the first question (U3b1, U3c).
+        chat_model: ChatModel,
         llm_max_tokens: int = 800,
         *,
         llm_budget_seconds: float = 30,
@@ -85,8 +81,6 @@ class InterviewsService:
         profiles: ProfileService | None = None,
     ):
         self.repo = repo
-        self.bank = bank
-        self.rng = rng
         self.chat_model = chat_model
         # Picks the interview's reference notes at start (knowledge-base RAG); None = no notes (evals, older tests).
         self.retrieval = retrieval
@@ -98,24 +92,11 @@ class InterviewsService:
         # Decides what each LLM call sends (strategy, trimming); see ai/interviews_context.py.
         self.context = context
         # Writes the first question (ai/interviews_turn.py).
-        self.interviewer = (
-            None
-            if chat_model is None
-            else Interviewer(
-                chat_model, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
-            )
+        self.interviewer = Interviewer(
+            chat_model, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
         )
 
     def start(self, user: User, data: InterviewCreateIn) -> InterviewState:
-        # The bank must be able to back every position (the fallback), and a refused setup costs no LLM call.
-        select_questions(
-            self.bank,
-            data.role,
-            data.level,
-            data.interview_type,
-            data.question_count,
-            self.rng,
-        )
         session = InterviewSession(
             id=uuid.uuid7(), user_id=user.id, **data.model_dump()
         )
@@ -159,13 +140,12 @@ class InterviewsService:
                     InterviewSessionChunk(chunk_id=note.chunk_id, rank=note.rank, score=note.score, mode=retrieval.mode)
                     for note in retrieval.notes
                 ]
-            first = None
-            if self.interviewer is not None:
+            try:
                 written = self.interviewer.first_question(setup.session_id, interviewer_inputs(setup, []))
-                if written.reply is not None:
-                    first = llm_question(written, written.results, FIRST_POSITION, 1)
-            if first is None:
-                first = bank_question(self.bank, self.rng, setup, FIRST_POSITION, 1, set())
+            except InterviewerFailedError as exc:
+                # No interview exists yet: the candidate starts again.
+                raise InterviewerUnavailableError(INTERVIEWER_UNAVAILABLE_MESSAGE) from exc
+            first = llm_question(written, written.results, FIRST_POSITION, 1)
             self.repo.start(session, [first], note_refs)
             return InterviewState(session, first)
 
@@ -201,7 +181,7 @@ class InterviewsService:
         keeps the original text and never blocks the interview.
         """
         original = setup.job_description
-        if self.chat_model is None or not original or len(original) <= SUMMARY_THRESHOLD:
+        if not original or len(original) <= SUMMARY_THRESHOLD:
             return None
         return summarize_job_description(
             self.chat_model, original, max_tokens=self.llm_max_tokens, context=self.context

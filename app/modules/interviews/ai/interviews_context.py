@@ -246,7 +246,7 @@ class WithInterviewData:
     The notes and the profile each get their own token allowance on top of the plain limit. When even that is not
     enough, older history is trimmed first (as always), then the profile block (the unproven personalisation), then
     the notes (their depth guidance is measured, 8a), before the input would count as too large: neither block must
-    ever be the reason a question falls back to the bank.
+    ever be the reason a question cannot be written.
     """
 
     def __init__(
@@ -564,5 +564,5 @@ def build_context_manager(prompts: Mapping[str, str] | None = None) -> ContextMa
     )
 
 
-# Built once at import: prompt files are read at startup, like the question bank.
+# Built once at import: prompt files are read at startup, like the rubric and the reaction pools.
 CONTEXT_MANAGER = build_context_manager()

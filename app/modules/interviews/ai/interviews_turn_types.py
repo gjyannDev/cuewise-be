@@ -27,12 +27,21 @@ class Written(NamedTuple):
 
 class TurnOutcome(NamedTuple):
     action: TurnAction
-    # None: the bank asks the next main question (or nothing, when the turn completes the interview).
+    # The question that was written; None only when the turn completes the interview (no write call runs).
     written: Written | None
     note: str | None
     # Every call of the turn, decide and write.
     results: list[LLMResult]
     decision_prompt_version: str | None
+
+
+class InterviewerFailedError(Exception):
+    """The turn could not produce a question: the decide or the write failed (or the reply stayed unusable), or no time
+    was left. The service maps it to the retryable 503 and saves nothing. `reason` is a short code for the logs."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 class WritePlan(NamedTuple):
@@ -73,7 +82,7 @@ class Delta(NamedTuple):
 
 
 class Reset(NamedTuple):
-    """The question text streamed so far is taken back: that draft failed, another one (or the bank's) follows."""
+    """The question text streamed so far is taken back: that draft failed, another one follows (or the turn fails)."""
 
 
 TurnEvent = PhaseChanged | ActionKnown | Delta | Reset | Settled

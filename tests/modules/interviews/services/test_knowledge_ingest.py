@@ -24,8 +24,8 @@ from app.modules.interviews.services.interviews_knowledge_service import (
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import (
     NoteChunk,
-    parse_note,
 )
+from tests.note_parsing import parse_note
 
 HEADER = "---\nroles: backend, general\nlevels: mid\nsource: user\n---\n"
 NOTE = HEADER + "## Error handling\nStatus codes and retries.\n## API design\nVersioning.\n"

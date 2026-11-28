@@ -32,9 +32,9 @@ from app.modules.interviews.tooling.interviews_rag_evals import (
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import (
     embedding_text,
-    parse_note,
 )
 from tests.fake_langfuse import FakeLangfuse
+from tests.note_parsing import parse_note
 
 
 def vec(*head: float) -> list[float]:
@@ -213,7 +213,7 @@ def test_run_rag_task_passes_the_note_and_ignores_repeat_for_retrieval(db, corpu
 
     monkeypatch.setattr(rag_module, "run_retrieval", fake_run_retrieval)
     monkeypatch.setattr(rag_module, "_session", lambda: nullcontext(db))
-    settings = SimpleNamespace(llm_provider_configs=[], embedding_configured=True)
+    settings = SimpleNamespace(llm_provider_configs=[SimpleNamespace(model="gemini-test")], embedding_configured=True)
     monkeypatch.setattr("app.core.ai.factory.build_embedder", lambda _settings: embedder(corpus))
     args = SimpleNamespace(task="retrieval", model=None, repeat=3, note="why", pause_seconds=0.0)
 

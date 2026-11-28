@@ -10,7 +10,6 @@ import uuid
 import pytest
 from sqlalchemy import func, select
 
-from app.core.ai.fake import FakeStream
 from app.main import app
 from app.modules.interviews.ai.interviews_turn import Interviewer
 from app.modules.interviews.constants.interviews_constants import (
@@ -26,6 +25,7 @@ from app.modules.interviews.repositories.interviews_repository import (
 )
 from app.modules.interviews.routes import interviews_route
 from app.modules.interviews.schemas.interviews_schema import AnswerOut
+from tests.provider_fakes import FakeStream
 
 STREAM_PATH = "/api/v1/interviews/{session_id}/messages/stream"
 TERMINAL = {"done", "error"}
@@ -40,10 +40,12 @@ def follow_up_json(question="What was the outcome for your team?") -> str:
 
 
 @pytest.fixture
-def started(make_user, start_interview):
+def started(make_user, start_interview, llm):
     """An owner with a started 3-question behavioral interview: (owner, session_id, first question)."""
     owner = make_user(email="owner@example.com")
     created = start_interview(owner, question_count=3).json()
+    llm.script()  # fresh fakes: the tests count only the calls made after the start
+    llm.script_decide()
     return owner, created["session"]["id"], created["current_question"]
 
 
@@ -180,7 +182,7 @@ def test_a_move_on_turn_streams_progress_the_reaction_and_done(
 
     turn = stream_answer(owner, session_id, q1["id"])
 
-    assert turn.flow() == ["status", "status", "reaction", "status", "question.delta", "done"]
+    assert turn.flow() == ["status", "status", "status", "reaction", "question.delta", "done"]
     assert [d["phase"] for d in turn.data("status")] == [
         "received",
         "deciding",
@@ -277,20 +279,19 @@ def test_a_follow_up_streams_no_reaction(
     assert done["current_question"]["question_kind"] == "follow_up"
 
 
-def test_a_follow_up_that_falls_back_sends_its_reaction_only_in_done(
+def test_a_follow_up_that_cannot_be_written_ends_the_turn_in_an_error(
     stream_answer, started, db, llm, decision_json
-):  # EC14
+):  # EC3, EC14: no fallback question is asked any more
     owner, session_id, q1 = started
     llm.script_decide(decision_json("follow_up", "missing_result"))
-    # Invalid in both formats (two questions): both drafts are taken back and the bank asks the next main question.
+    # Invalid in both formats (two questions): both drafts are taken back, then the turn fails.
     llm.script(follow_up_json("What happened? And why?"), follow_up_json("What did you do? And then?"))
 
     turn = stream_answer(owner, session_id, q1["id"])
 
-    assert "reaction" not in turn.names()
-    [done] = turn.data("done")
-    assert done["reaction"] is not None
-    assert done["current_question"]["question_kind"] == "main"
+    assert "reaction" not in turn.names() and "done" not in turn.names()
+    assert turn.names()[-1] == "error" and turn.data("error")[0]["code"] == "INTERVIEWER_UNAVAILABLE"
+    assert message_count(db) == 0
 
 
 def test_the_last_thread_completes_with_a_final_reaction_and_no_writing(
@@ -310,18 +311,6 @@ def test_the_last_thread_completes_with_a_final_reaction_and_no_writing(
     assert done["session"]["status"] == "completed"
 
 
-def test_without_an_llm_the_stream_is_received_reaction_done(
-    stream_answer, started, db
-):  # EC16
-    owner, session_id, q1 = started
-
-    turn = stream_answer(owner, session_id, q1["id"])
-
-    assert turn.names() == ["status", "reaction", "done"]
-    assert turn.data("status") == [{"phase": "received"}]
-    assert turn.data("done")[0]["current_question"]["text"].startswith("Question ")  # the fixture bank's
-
-
 def test_a_session_with_stored_questions_streams_without_the_llm(
     stream_answer, make_user, db, llm
 ):  # EC16
@@ -335,7 +324,7 @@ def test_a_session_with_stored_questions_streams_without_the_llm(
     )
     stored = [
         InterviewQuestion(
-            position=i, text=f"Q{i}?", category="behavioral", bank_id=f"b{i}"
+            position=i, text=f"Q{i}?", category="behavioral", source="stored"
         )
         for i in (1, 2, 3)
     ]
@@ -443,7 +432,7 @@ def test_a_long_wait_sends_heartbeat_comments_and_no_extra_events(
     turn = stream_answer(owner, session_id, q1["id"])
 
     assert turn.comments >= 1
-    assert turn.flow() == ["status", "status", "reaction", "status", "question.delta", "done"]
+    assert turn.flow() == ["status", "status", "status", "reaction", "question.delta", "done"]
 
 
 # --- AC13, AC14 (Phase B): the question streams as it is written ---

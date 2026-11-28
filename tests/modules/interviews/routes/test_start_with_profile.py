@@ -161,20 +161,6 @@ def test_each_interview_gets_only_its_owners_profile(start_interview, make_user,
     assert "ZZBOB" in sent([bob_call]) and "ZZALICE" not in sent([bob_call])
 
 
-def test_with_the_llm_off_the_bank_asks_and_nothing_of_the_profile_is_stored(
-    start_interview, make_user, store_profile, db
-):  # EC9 (no llm fixture: the LLM is off)
-    user = make_user()
-    store_profile(user, profile_of("ZZALPHA"))
-
-    r = start_interview(user, use_profile=True)
-
-    assert r.status_code == 201
-    question = first_question(db, r)
-    assert question.source == "bank" and question.prompt_version is None
-    assert "ZZALPHA" not in question.text
-
-
 def test_no_profile_content_in_logs_or_the_response(
     start_interview, make_user, store_profile, llm, app_logs
 ):  # AC10

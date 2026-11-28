@@ -47,24 +47,19 @@ def llm_lines(app_logs):
     return [r.getMessage() for r in app_logs.records if r.name == "app.llm"]
 
 
-def test_a_decide_call_that_never_answers_is_capped_and_the_write_call_keeps_its_time(
+def test_a_decide_call_that_never_answers_is_capped_and_then_ends_the_turn(
     start_interview, make_user, answer, llm, clock, budget, app_logs
-):  # AC18, EC20
+):  # AC18, EC20, EC3b
     owner, session_id, q1 = start(start_interview, make_user)
     llm.script_decide(LLMTimeoutError("no answer"), on_call=lambda: clock.advance(DECIDE_MAX_SECONDS))
 
-    body = answer(owner, session_id, q1).json()
+    r = answer(owner, session_id, q1)
 
     assert llm.decide.budgets == [DECIDE_MAX_SECONDS]
-    left = 30.0 - DECIDE_MAX_SECONDS
-    assert left >= WRITE_RESERVE_SECONDS
-    # The write call starts with all the time left (its log line), its attempt capped by LLM_TIMEOUT_SECONDS (U3b1).
-    assert llm.fake.budgets[-1] == min(left, settings.llm_timeout_seconds)
-    write_line = [line for line in llm_lines(app_logs) if "task=interviewer_turn" in line][-1]
-    assert f"budget_left_ms={round(left * 1000)}" in write_line
-    assert body["current_question"]["question_kind"] == "main"
+    assert r.status_code == 503 and r.json()["error"]["code"] == "INTERVIEWER_UNAVAILABLE"
+    assert len(llm.fake.calls) == 1  # only the opening question: no write call starts after a failed decide
     [summary] = [line for line in llm_lines(app_logs) if line.startswith("turn_summary")]
-    assert "decision=none" in summary and "source=llm" in summary
+    assert "decision=none" in summary and "fallback=decide_failed" in summary and "source=-" in summary
 
 
 def test_the_decide_budget_shrinks_so_the_write_reserve_is_never_used(
@@ -84,13 +79,13 @@ def test_a_failed_decide_call_is_not_retried_with_the_last_seconds(
     owner, session_id, q1 = start(start_interview, make_user)
     llm.script_decide("not json", on_call=lambda: clock.advance(DECIDE_MAX_SECONDS - 3))
 
-    body = answer(owner, session_id, q1).json()
+    r = answer(owner, session_id, q1)
 
     assert len(llm.decide.calls) == 1
-    assert body["current_question"]["question_kind"] == "main" and len(llm.fake.calls) == 2
+    assert r.status_code == 503 and len(llm.fake.calls) == 1
 
 
-def test_no_write_call_starts_below_its_minimum_and_the_bank_asks(
+def test_no_write_call_starts_below_its_minimum_and_the_turn_ends(
     start_interview, make_user, answer, llm, clock, budget, decision_json, app_logs, db
 ):  # AC13, AC20, EC6
     owner, session_id, q1 = start(start_interview, make_user)
@@ -98,12 +93,12 @@ def test_no_write_call_starts_below_its_minimum_and_the_bank_asks(
         decision_json("follow_up", "no_how"), on_call=lambda: clock.advance(30.0 - MIN_SECONDS_FOR_WRITE + 1)
     )
 
-    body = answer(owner, session_id, q1).json()
+    r = answer(owner, session_id, q1)
 
     assert len(llm.fake.calls) == 1  # only the opening question
-    assert body["reaction"] is not None and body["current_question"]["question_kind"] == "main"
+    assert r.status_code == 503
     [summary] = [line for line in llm_lines(app_logs) if line.startswith("turn_summary")]
-    assert "override=no_time" in summary and "source=bank" in summary and "fallback=no_time" in summary
+    assert "override=no_time" in summary and "source=-" in summary and "fallback=no_time" in summary
 
 
 def test_a_write_retry_is_skipped_below_the_retry_minimum(
@@ -112,10 +107,10 @@ def test_a_write_retry_is_skipped_below_the_retry_minimum(
     llm.script(reply_json("Opening?", "behavioral"), "not json", on_call=lambda: clock.advance(26))
     owner, session_id, q1 = start(start_interview, make_user)
 
-    body = answer(owner, session_id, q1).json()
+    r = answer(owner, session_id, q1)
 
     assert len(llm.fake.calls) == 2
-    assert body["current_question"]["text"].startswith("Question b")  # from the fixture bank
+    assert r.status_code == 503
 
 
 def test_usage_of_both_calls_is_summed_and_every_call_logs_metadata_only(

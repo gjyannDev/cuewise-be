@@ -34,10 +34,6 @@ class ConflictError(AppError):
     status_code, code = 409, "CONFLICT"
 
 
-class NotEnoughQuestionsError(ConflictError):
-    code = "NOT_ENOUGH_QUESTIONS"
-
-
 class ProfileRequiredError(ConflictError):
     """An interview asked to use the candidate's profile, and there is none to use (resume-aware-interview)."""
 
@@ -70,8 +66,11 @@ class FeedbackFailedError(AppError):
     status_code, code = 502, "FEEDBACK_FAILED"
 
 
-class FeedbackUnavailableError(AppError):
-    status_code, code = 503, "FEEDBACK_UNAVAILABLE"
+class InterviewerUnavailableError(AppError):
+    """Every LLM provider failed (or the reply was unusable) before a question could be written: nothing was saved,
+    the candidate may send the same request again."""
+
+    status_code, code = 503, "INTERVIEWER_UNAVAILABLE"
 
 
 class AudioTooLargeError(AppError):
@@ -146,10 +145,6 @@ class ProfileExtractionFailedError(AppError):
     """The model gave no valid profile after the retry, timed out, or the provider failed."""
 
     status_code, code = 502, "PROFILE_EXTRACTION_FAILED"
-
-
-class ProfileUnavailableError(AppError):
-    status_code, code = 503, "PROFILE_UNAVAILABLE"
 
 
 class ProfileNotFoundError(AppError):

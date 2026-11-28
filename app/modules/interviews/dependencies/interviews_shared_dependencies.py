@@ -15,13 +15,6 @@ from app.core.ai.dependencies import (  # noqa: F401
 from app.core.ai.embedder import Embedder
 
 from ..ai.interviews_context import CONTEXT_MANAGER
-from ..schemas.interviews_schema import BankQuestion
-from ..utils.interviews_utils import QUESTION_BANK
-
-
-def get_bank() -> list[BankQuestion]:
-    """The question source; tests override it with a fixture bank."""
-    return QUESTION_BANK
 
 
 def get_embedder(request: Request) -> Embedder | None:

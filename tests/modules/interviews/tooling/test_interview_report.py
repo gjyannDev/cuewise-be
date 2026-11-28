@@ -354,12 +354,12 @@ def test_a_healthy_interview_has_nothing_to_flag(app_logs):
 
 
 def test_watch_explains_an_override_a_fallback_and_a_turn_near_the_deadline(app_logs):
-    emit_answer_turn(decision="follow_up:no_tradeoff", override="no_time", source="bank", fallback="no_time", llm_ms=25000)
+    emit_answer_turn(decision="follow_up:no_tradeoff", override="no_time", source="-", fallback="no_time", llm_ms=25000)
 
     report = report_for(app_logs, [question(1), question(2)])
 
     assert "turn 1: LLM time 25000 ms is 83% of the 30s turn deadline" in report
-    assert "turn 1: override=no_time fallback=no_time source=bank" in report
+    assert "turn 1: override=no_time fallback=no_time source=-" in report
     assert "overrides no_time=1" in report
     assert "fallbacks no_time=1" in report
 
@@ -412,12 +412,12 @@ def test_every_check_passes_for_a_consistent_follow_up_interview(app_logs):
 def test_the_log_and_the_database_disagreeing_is_caught(app_logs):
     emit_start()
     emit_follow_up_turn()
-    stored_as_main = [question(1, prompt=824, completion=38), question(2, prompt=100, completion=10, source="bank")]
+    stored_as_main = [question(1, prompt=824, completion=38), question(2, prompt=100, completion=10, source="stored")]
 
     report = report_for(app_logs, stored_as_main)
 
     assert "FAIL log action matches the stored question kind: turn 1: log says follow_up, stored main" in report
-    assert "FAIL log source matches the stored question source: turn 1: log says llm, stored bank" in report
+    assert "FAIL log source matches the stored question source: turn 1: log says llm, stored stored" in report
 
 
 def test_a_token_mismatch_between_the_log_and_the_stored_usage_is_caught(app_logs):
@@ -602,11 +602,11 @@ def test_failed_checks_show_an_icon_a_word_and_what_was_found(app_logs):
     emit_start()
     emit_follow_up_turn()
 
-    page = html_for(app_logs, [question(1, prompt=824, completion=38), question(2, prompt=100, completion=10, source="bank")])
+    page = html_for(app_logs, [question(1, prompt=824, completion=38), question(2, prompt=100, completion=10, source="stored")])
 
     assert '<i class="icon bad">×</i>' in page
     assert '<span class="sr">Failed: </span>log source matches the stored question source' in page
-    assert '<span class="problems">turn 1: log says llm, stored bank</span>' in page
+    assert '<span class="problems">turn 1: log says llm, stored stored</span>' in page
     assert '<i class="icon ok">✓</i>' in page
 
 

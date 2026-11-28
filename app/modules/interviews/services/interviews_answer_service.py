@@ -1,4 +1,4 @@
-"""One answer turn: the checks and reads, the LLM interviewer (or the bank), and the save of the whole turn.
+"""One answer turn: the checks and reads, the LLM interviewer, and the save of the whole turn.
 
 The streamed turn yields domain events (the ai module's PhaseChanged, Delta and Reset, plus the ones below); the answer
 controller turns them into SSE frames. Errors, the trace and the stream summary log stay here, so a stream logs the
@@ -17,7 +17,11 @@ import anyio
 from app.core.ai.chat import ChatModel
 from app.core.ai.context import ContextManager
 from app.core.ai.tracing import Tracer
-from app.core.errors import QuestionNotCurrentError, SessionNotInProgressError
+from app.core.errors import (
+    InterviewerUnavailableError,
+    QuestionNotCurrentError,
+    SessionNotInProgressError,
+)
 from app.core.logging import bind_log_context, get_logger
 from app.modules.auth.models.auth_model import User
 from app.modules.profile.services.profile_service import ProfileService
@@ -25,9 +29,11 @@ from app.modules.profile.services.profile_service import ProfileService
 from ..ai.interviews_context import CONTEXT_MANAGER, InterviewerInputs
 from ..ai.interviews_turn import Interviewer
 from ..ai.interviews_turn_log import log_stream_summary, log_turn_summary
+from ..ai.interviews_turn_rows import interviewer_inputs, llm_question
 from ..ai.interviews_turn_types import (
     ActionKnown,
     Delta,
+    InterviewerFailedError,
     PhaseChanged,
     Reset,
     Settled,
@@ -35,6 +41,7 @@ from ..ai.interviews_turn_types import (
     TurnOutcome,
 )
 from ..constants.interviews_constants import (
+    INTERVIEWER_UNAVAILABLE_MESSAGE,
     InterviewType,
     JobRole,
     Level,
@@ -50,13 +57,10 @@ from ..dependencies.models.interviews_model import (
     InterviewSession,
 )
 from ..repositories.interviews_repository import InterviewsRepository
-from ..schemas.interviews_schema import AnswerIn, BankQuestion
+from ..schemas.interviews_schema import AnswerIn
 from ..utils.interviews_session_utils import (
     InterviewSetup,
     Thread,
-    bank_question,
-    interviewer_inputs,
-    llm_question,
     owned_session,
 )
 from ..utils.interviews_utils import QuestionTurn, interviewer_history, pick_reaction
@@ -76,7 +80,6 @@ class TurnContext(NamedTuple):
     history: list[QuestionTurn]
     thread: Thread
     last_main: bool
-    used_bank_ids: set[str]
     stored_next: InterviewQuestion | None
     previous_reaction: str | None
     # The candidate's answer, saved with the rest of the turn (its note is filled in by the decide call).
@@ -127,10 +130,9 @@ class AnswerService:
     def __init__(
         self,
         repo: InterviewsRepository,
-        bank: list[BankQuestion],
         rng: random.Random,
-        # The LangChain chat model every call of the turn runs on (U3b1); None = LLM off.
-        chat_model: ChatModel | None = None,
+        # The provider chain every call of the turn runs on (U3b1, U3c).
+        chat_model: ChatModel,
         llm_max_tokens: int = 800,
         *,
         llm_budget_seconds: float = 30,
@@ -140,19 +142,14 @@ class AnswerService:
         profiles: ProfileService | None = None,
     ):
         self.repo = repo
-        self.bank = bank
         self.rng = rng
         # The candidate profiles (8c), read live each turn of an interview that opted in. None = no profile exists.
         self.profiles = profiles
         # Langfuse traces (one per request that can call the LLM); a disabled tracer costs nothing.
         self.tracer = tracer or Tracer(None)
-        # Decide, limits, write: one answer turn of the LLM interviewer (ai/interviews_turn.py). None = LLM off.
-        self.interviewer = (
-            None
-            if chat_model is None
-            else Interviewer(
-                chat_model, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
-            )
+        # Decide, limits, write: one answer turn of the LLM interviewer (ai/interviews_turn.py).
+        self.interviewer = Interviewer(
+            chat_model, context, max_tokens=llm_max_tokens, budget_seconds=llm_budget_seconds, clock=clock
         )
 
     def answer(self, user: User, session_id: uuid.UUID, data: AnswerIn) -> TurnResult:
@@ -160,10 +157,13 @@ class AnswerService:
         outcome = None
         with self._answer_trace(ctx):
             if self.uses_interviewer(ctx):
-                assert self.interviewer is not None
-                outcome = self.interviewer.answer_turn(
-                    ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
-                )
+                try:
+                    outcome = self.interviewer.answer_turn(
+                        ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
+                    )
+                except InterviewerFailedError as exc:
+                    # Nothing is saved: the candidate sends the same answer again.
+                    raise InterviewerUnavailableError(INTERVIEWER_UNAVAILABLE_MESSAGE) from exc
         return self.finish_answer(ctx, outcome)
 
     def _answer_trace(self, ctx: TurnContext):
@@ -224,7 +224,6 @@ class AnswerService:
             history=history,
             thread=thread,
             last_main=thread.main_number == setup.question_count,
-            used_bank_ids={q.bank_id for q in asked if q.bank_id},
             # Pre-slice-2 sessions stored every question up front: no LLM, no follow-ups, the stored order.
             stored_next=self.repo.get_question(session.id, position + 1),
             previous_reaction=next(
@@ -243,8 +242,8 @@ class AnswerService:
         return ctx
 
     def uses_interviewer(self, ctx: TurnContext) -> bool:
-        """False when the LLM is off or the session's questions were all stored up front: no decide, no write."""
-        return self.interviewer is not None and ctx.stored_next is None
+        """False when the session's questions were all stored up front (older sessions): no decide, no write."""
+        return ctx.stored_next is None
 
     def turn_inputs(self, ctx: TurnContext) -> InterviewerInputs:
         return interviewer_inputs(ctx.setup, ctx.history)
@@ -277,16 +276,8 @@ class AnswerService:
         if ctx.stored_next is not None:
             completes = False
             log_turn_summary(decision="skipped", action=TurnAction.next_question, source="stored")
-        elif outcome is None:
-            completes = ctx.last_main
-            if not completes:
-                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, ctx.used_bank_ids)
-            log_turn_summary(
-                decision="skipped",
-                action=TurnAction.complete if completes else TurnAction.next_question,
-                source="-" if completes else "bank",
-            )
         else:
+            assert outcome is not None  # only a session with stored questions turns without the interviewer
             answer.note = outcome.note
             completes = outcome.action == TurnAction.complete
             if outcome.action == TurnAction.follow_up and outcome.written is not None:
@@ -307,8 +298,6 @@ class AnswerService:
                     thread.main_number + 1,
                     decision_version=outcome.decision_prompt_version,
                 )
-            elif outcome.action == TurnAction.next_question:
-                new_question = self._bank_question(setup, position + 1, thread.main_number + 1, ctx.used_bank_ids)
 
         follows_up = new_question is not None and new_question.kind == QuestionKind.follow_up
         # A follow-up comes straight after the answer; moving on or completing gets the predefined acknowledgement.
@@ -352,8 +341,10 @@ class AnswerService:
                 yield PhaseChanged(TurnPhase.received)
                 first_event_ms = _elapsed_ms(started_at)
                 reaction, outcome = None, None
+                # Picked as soon as the action is known, but shown with the first question text (or at the end when
+                # nothing is written): a write that fails first leaves no acknowledgement shown for a failed turn.
+                pending: Reaction | None = None
                 if self.uses_interviewer(ctx):
-                    assert self.interviewer is not None
                     turn = self.interviewer.stream_turn(
                         ctx.setup.session_id, self.turn_inputs(ctx), last_main=ctx.last_main
                     )
@@ -364,12 +355,14 @@ class AnswerService:
                                     if phase == TurnPhase.writing:
                                         writing_at = time.perf_counter()
                                     yield event
-                                # A reaction is shown before the question it introduces, so only when the action was
-                                # known before writing; a follow-up that fell back gets its reaction in `done` instead.
+                                # A reaction introduces the question, so only when the action was known before
+                                # writing; a follow-up that fell back gets its reaction in `done` instead.
                                 case ActionKnown(action=action) if action != TurnAction.follow_up and writing_at is None:
-                                    reaction = self.choose_reaction(ctx, completes=action == TurnAction.complete)
-                                    yield ReactionChosen(reaction)
+                                    reaction = pending = self.choose_reaction(ctx, completes=action == TurnAction.complete)
                                 case Delta():
+                                    if pending is not None:
+                                        yield ReactionChosen(pending)
+                                        pending = None
                                     if first_token_ms is None and writing_at is not None:
                                         first_token_ms = _elapsed_ms(writing_at)
                                     yield event
@@ -378,6 +371,9 @@ class AnswerService:
                                     yield event
                                 case Settled(outcome=settled):
                                     outcome = settled
+                                    if pending is not None:
+                                        yield ReactionChosen(pending)
+                                        pending = None
                 else:
                     reaction = self.choose_reaction(ctx, completes=self.completes_without_llm(ctx))
                     yield ReactionChosen(reaction)
@@ -388,6 +384,11 @@ class AnswerService:
                 # Lost the race to another submit of this question: the other one saved the turn.
                 terminal = exc.code
                 yield TurnFailed(exc.code, exc.message)
+            except InterviewerFailedError:
+                # Any draft already shown was taken back (`reset`) by the write step; nothing is saved.
+                error = InterviewerUnavailableError(INTERVIEWER_UNAVAILABLE_MESSAGE)
+                terminal = error.code
+                yield TurnFailed(error.code, error.message)
             except Exception:
                 stream_logger.exception("stream_turn_failed")
                 terminal = "INTERNAL_ERROR"
@@ -405,11 +406,6 @@ class AnswerService:
                     resets=resets,
                     cancelled=cancelled,
                 )
-
-    def _bank_question(
-        self, setup: InterviewSetup, position: int, main_number: int, used_bank_ids: set[str]
-    ) -> InterviewQuestion:
-        return bank_question(self.bank, self.rng, setup, position, main_number, used_bank_ids)
 
 
 def _elapsed_ms(started_at: float) -> int:

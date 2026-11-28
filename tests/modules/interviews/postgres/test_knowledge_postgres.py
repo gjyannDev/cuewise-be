@@ -32,8 +32,8 @@ from app.modules.interviews.repositories.interviews_knowledge_repository import 
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import (
     cosine_similarity,
-    parse_note,
 )
+from tests.note_parsing import parse_note
 
 URL = os.getenv("TEST_POSTGRES_URL", "")
 PREVIOUS_REVISION = "f5c2a9d84b17"

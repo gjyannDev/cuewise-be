@@ -223,7 +223,7 @@ def test_answered_count_of_a_session_with_every_question_stored_up_front(
     db.add(session)
     db.flush()
     db.add_all(
-        InterviewQuestion(session_id=session.id, position=p, text=f"Q{p}?", category="behavioral", bank_id=f"b{p}")
+        InterviewQuestion(session_id=session.id, position=p, text=f"Q{p}?", category="behavioral", source="stored")
         for p in range(1, 5)
     )
     db.commit()

@@ -8,7 +8,6 @@ import uuid
 
 import pytest
 
-from app.core.ai.fake import FakeProvider
 from app.modules.interviews.constants.interviews_constants import (
     InterviewType,
     JobRole,
@@ -39,6 +38,7 @@ from app.modules.interviews.tooling.interviews_rag_evals import (
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import ReferenceNote
 from tests.provider_chat import ProviderChatModel
+from tests.provider_fakes import FakeProvider
 
 
 def simulate_main_questions(llm, **kwargs):

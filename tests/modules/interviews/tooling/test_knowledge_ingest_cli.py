@@ -63,7 +63,9 @@ def test_a_failure_partway_names_the_chunk_and_exits_1(tmp_path, db, capsys):  #
     assert "run it again" in out
 
 
-def test_without_the_google_key_it_says_what_to_set_and_exits_1(tmp_path, db, capsys):  # EC7
+def test_without_the_google_key_it_says_what_to_set_and_exits_1(tmp_path, db, capsys, monkeypatch):  # EC7
+    # The app refuses to start without a google key, but the CLI still guards its own embedder (model_copy skips that).
+    monkeypatch.setattr("app.core.config.settings.llm_google_api_key", None)
     write(tmp_path, "cache.md")
 
     assert main(["--corpus", str(tmp_path)], db=db) == 1

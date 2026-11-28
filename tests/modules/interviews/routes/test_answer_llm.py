@@ -5,8 +5,7 @@ from itertools import pairwise
 
 from sqlalchemy import func, select
 
-from app.core.ai.provider import LLMResult, LLMServerError
-from app.core.config import settings
+from app.core.ai.provider import LLMResult
 from app.modules.interviews.constants.interviews_constants import (
     CLOSING_REACTIONS,
     REACTION_POOLS,
@@ -86,49 +85,6 @@ def test_a_one_question_interview_makes_one_call(start_interview, make_user, ans
 
     assert r.json()["session"]["status"] == "completed"
     assert len(llm.fake.calls) == 1
-
-
-def test_without_an_llm_the_whole_interview_runs_on_the_bank(start_interview, make_user, answer, db):  # EC1, AC8
-    owner = make_user()
-    created = start_interview(owner, interview_type="technical", question_count=5).json()
-
-    responses = run_interview(answer, owner, created)
-
-    stored = questions(db, created["session"]["id"])
-    assert [q.source for q in stored] == ["bank"] * 5
-    assert len({q.bank_id for q in stored}) == 5  # never the same bank question twice
-    assert all(r.json()["reaction"] for r in responses)
-    assert responses[-1].json()["session"]["status"] == "completed"
-
-
-def test_a_mixed_bank_only_interview_alternates_behavioral_first(start_interview, make_user, answer, db):  # AC8
-    owner = make_user()
-    created = start_interview(owner, interview_type="mixed", question_count=5).json()
-
-    run_interview(answer, owner, created)
-
-    assert [q.category for q in questions(db, created["session"]["id"])] == [
-        "behavioral",
-        "technical",
-        "behavioral",
-        "technical",
-        "behavioral",
-    ]
-
-
-def test_llm_failure_mid_interview_falls_back_to_an_unused_bank_question(
-    start_interview, make_user, answer, llm, db
-):  # EC4, EC24
-    owner = make_user()
-    # Both writes fail after the call layer's retries (U3b1: 1 + LLM_MAX_RETRIES calls each).
-    llm.script(*[LLMServerError("503")] * 2 * (1 + settings.llm_max_retries))
-    created = start_interview(owner, question_count=3).json()
-
-    r = answer(owner, created["session"]["id"], created["current_question"]["id"])
-
-    assert r.status_code == 201 and r.json()["reaction"]["text"] in ALL_REACTIONS
-    q1, q2 = questions(db, created["session"]["id"])
-    assert (q1.source, q2.source) == ("bank", "bank") and q1.bank_id != q2.bank_id
 
 
 def test_each_turn_resends_the_conversation_without_reactions(
@@ -287,7 +243,7 @@ def test_a_legacy_session_uses_its_stored_questions_and_no_llm(make_user, answer
         current_position=2,
     )
     stored = [
-        InterviewQuestion(position=i, text=f"Legacy {i}?", category="behavioral", bank_id=f"b{i}") for i in (1, 2, 3)
+        InterviewQuestion(position=i, text=f"Legacy {i}?", category="behavioral", source="stored") for i in (1, 2, 3)
     ]
     InterviewsRepository(db).start(session, stored)
     # Slice 1 left an answer and an LLM-written reaction on question 1.

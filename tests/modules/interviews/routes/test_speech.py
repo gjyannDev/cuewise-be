@@ -148,7 +148,7 @@ def test_a_question_not_shown_yet_is_not_found(speak, started, tts, db):
     # questions are ever stored ahead (pre-generated), or the endpoint would leak them.
     owner, session_id, _ = started
     upcoming = InterviewQuestion(
-        session_id=uuid.UUID(session_id), position=2, text="SECRET upcoming question?", category="behavioral", source="bank"
+        session_id=uuid.UUID(session_id), position=2, text="SECRET upcoming question?", category="behavioral", source="stored"
     )
     db.add(upcoming)
     db.commit()

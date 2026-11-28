@@ -10,7 +10,6 @@ import uuid
 import pytest
 
 from app.core.ai.context import ContextManager, Task
-from app.core.ai.fake import FakeStream
 from app.core.ai.provider import LLMServerError
 from app.modules.interviews.ai.interviews_context import (
     CONTEXT_MANAGER,
@@ -45,6 +44,7 @@ from app.modules.interviews.utils.interviews_utils import (
     load_prompt,
     render_interviewer_v2_prompt,
 )
+from tests.provider_fakes import FakeStream
 
 SECTIONS = ["# Role", "# Task", "# Input", "# Output", "# Constraints", "# Capabilities"]
 NOTES = (

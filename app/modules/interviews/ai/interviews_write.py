@@ -37,7 +37,7 @@ def write(
     try:
         built = context.build(INTERVIEWER_TASK, inputs)
     except ContextTooLargeError:
-        # Even trimmed, the input is over the limit: the bank asks this one (the manager logged the sizes).
+        # Even trimmed, the input is over the limit: the turn ends in the retryable error (the manager logged the sizes).
         log_llm_call(
             logging.WARNING,
             "context_too_large",

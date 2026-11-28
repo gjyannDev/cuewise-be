@@ -187,7 +187,7 @@ class RankingReport(NamedTuple):
 
 
 class WrittenQuestion(NamedTuple):
-    # None when the reply broke the format or rules (the live app would ask the bank instead).
+    # None when the reply broke the format or rules (the live app would fail the turn).
     question: str | None
     prompt_tokens: int | None
 
@@ -656,8 +656,7 @@ def run_rag_task(
     from app.core.ai.factory import build_chat_model, build_embedder
     from app.core.ai.tracing import build_tracer
 
-    configs = settings.llm_provider_configs
-    model = args.model or (configs[0].model if configs else None)
+    model = args.model or settings.llm_provider_configs[0].model
     # Both record their runs in Langfuse (no-op without keys): retrieval as an experiment run, generation as traces.
     tracer = tracer or build_tracer(settings, environment="eval")
     if args.task == "generation" and chat_model is None:
@@ -681,11 +680,7 @@ def run_rag_task(
                     pause=args.pause_seconds,
                     note=args.note,
                 )
-            if chat_model is None:
-                print(
-                    "LLM is not configured: set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* settings in .env first."
-                )
-                return 1
+            assert chat_model is not None  # built above: only the generation task gets here
             return run_generation(
                 args,
                 chat_model,
@@ -1240,7 +1235,7 @@ def _arm_notes(
     description. E: the quota merge of the job description's and the profile's rankings, as the app does."""
     if arm == "A":
         return (), 0.0, 0
-    service = RetrievalService(repo, embedder, llm_on=True, tracer=tracer)
+    service = RetrievalService(repo, embedder, tracer=tracer)
     start = time.monotonic()
     found = service.retrieve(
         session_id,

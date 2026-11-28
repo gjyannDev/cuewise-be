@@ -10,9 +10,9 @@ def test_reports_stored_questions_grouped_by_interview(db):
     first, second = uuid.uuid7(), uuid.uuid7()
     db.add_all(
         [
-            InterviewQuestion(session_id=second, position=1, text="Q?", category="technical", prompt_tokens=5),
-            InterviewQuestion(session_id=first, position=2, text="Q?", category="technical", prompt_tokens=7),
-            InterviewQuestion(session_id=first, position=1, text="Q?", category="technical", prompt_tokens=3),
+            InterviewQuestion(session_id=second, position=1, text="Q?", category="technical", source="stored", prompt_tokens=5),
+            InterviewQuestion(session_id=first, position=2, text="Q?", category="technical", source="stored", prompt_tokens=7),
+            InterviewQuestion(session_id=first, position=1, text="Q?", category="technical", source="stored", prompt_tokens=3),
         ]
     )
     db.commit()

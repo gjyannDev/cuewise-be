@@ -16,20 +16,17 @@ from app.modules.profile.services.profile_service import ProfileService
 
 from ..controllers.interviews_answer_controller import AnswerController
 from ..dependencies.interviews_shared_dependencies import (
-    get_bank,
     get_clock,
     get_context_manager,
     get_tracer,
 )
 from ..repositories.interviews_repository import InterviewsRepository
-from ..schemas.interviews_schema import BankQuestion
 from ..services.interviews_answer_service import AnswerService
 
 
 def get_answer_service(
     db: Annotated[Session, Depends(get_db)],
-    bank: Annotated[list[BankQuestion], Depends(get_bank)],
-    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
+    chat_model: Annotated[ChatModel, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     context: Annotated[ContextManager, Depends(get_context_manager)],
     tracer: Annotated[Tracer, Depends(get_tracer)],
@@ -37,7 +34,6 @@ def get_answer_service(
 ) -> AnswerService:
     return AnswerService(
         InterviewsRepository(db),
-        bank,
         random.Random(),
         chat_model,
         settings.llm_max_tokens,

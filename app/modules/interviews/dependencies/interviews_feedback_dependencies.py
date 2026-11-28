@@ -51,7 +51,7 @@ def limit_feedback(
 
 def get_feedback_service(
     db: Annotated[Session, Depends(get_db)],
-    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
+    chat_model: Annotated[ChatModel, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     now: Annotated[Callable[[], datetime], Depends(get_now)],
     context: Annotated[ContextManager, Depends(get_context_manager)],

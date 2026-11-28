@@ -678,7 +678,7 @@ def _consistency(b: Bundle) -> list[tuple[str, list[str]]]:
             expected_kind = QuestionKind.follow_up if action == "follow_up" else QuestionKind.main
             if asked.kind != expected_kind:
                 kinds.append(f"turn {turn.label}: log says {action}, stored {asked.kind}")
-            if source in {QuestionSource.llm, QuestionSource.bank} and asked.source != source:
+            if source in {QuestionSource.llm, QuestionSource.stored} and asked.source != source:
                 sources.append(f"turn {turn.label}: log says {source}, stored {asked.source}")
         counted = [c for c in turn.calls if c.task != SUMMARY_TASK]
         if asked.source == QuestionSource.llm and counted:

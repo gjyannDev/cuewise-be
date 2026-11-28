@@ -69,8 +69,6 @@ class RetrievalService:
         repo: KnowledgeRepository,
         embedder: Embedder | None,
         *,
-        # False = the LLM is off and the bank asks every question: notes would never be read.
-        llm_on: bool,
         tracer: Tracer | None = None,
         clock: Callable[[], float] = time.monotonic,
         cap_seconds: float = RETRIEVAL_TIME_CAP_SECONDS,
@@ -81,7 +79,6 @@ class RetrievalService:
     ):
         self.repo = repo
         self.embedder = embedder
-        self.llm_on = llm_on
         self.tracer = tracer or Tracer(None)
         self.clock = clock
         self.cap_seconds = cap_seconds
@@ -105,9 +102,6 @@ class RetrievalService:
         # Already bound by a start request; the RAG evals call this directly, so bind it here as well.
         bind_log_context(session=str(session_id))
         start = self.clock()
-        if not self.llm_on:
-            # Nothing is read or embedded, so there is nothing to trace; the log line still says why there are no notes.
-            return self._finish(_skipped(RetrievalSkip.llm_off), start, None)
         with self.tracer.step(
             RETRIEVAL_PURPOSE, metadata={"role": role, "level": level}
         ) as step:
@@ -118,7 +112,7 @@ class RetrievalService:
                 step,
             )
 
-    def _finish(self, result: Retrieval, start: float, step: Step | None) -> Retrieval:
+    def _finish(self, result: Retrieval, start: float, step: Step) -> Retrieval:
         scores = [note.score for note in result.notes]
         log_retrieval(
             _log_level(result.outcome),
@@ -128,18 +122,17 @@ class RetrievalService:
             latency_ms=round((self.clock() - start) * 1000),
             profile_notes=result.profile_notes,
         )
-        if step is not None:
-            # Ids, counts, scores and codes only: the job description and the profile are personal data.
-            step.finish(
-                output={
-                    "mode": result.mode,
-                    "count": len(result.notes),
-                    "profile_notes": result.profile_notes,
-                    "chunk_ids": [str(note.chunk_id) for note in result.notes],
-                    "scores": scores,
-                    "outcome": result.outcome,
-                }
-            )
+        # Ids, counts, scores and codes only: the job description and the profile are personal data.
+        step.finish(
+            output={
+                "mode": result.mode,
+                "count": len(result.notes),
+                "profile_notes": result.profile_notes,
+                "chunk_ids": [str(note.chunk_id) for note in result.notes],
+                "scores": scores,
+                "outcome": result.outcome,
+            }
+        )
         return result
 
     def _retrieve(
@@ -266,7 +259,7 @@ def _skipped(reason: RetrievalSkip) -> Retrieval:
 
 
 def _log_level(outcome: str) -> int:
-    # A degrade or a database error is worth a look; no notes because the LLM is off or none match is expected.
+    # A degrade or a database error is worth a look; no notes because none match is expected.
     if outcome.startswith("retrieval_degraded") or outcome.endswith(
         RetrievalSkip.db_error
     ):

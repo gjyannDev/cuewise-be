@@ -108,20 +108,19 @@ def test_start_creates_saved_session_and_returns_only_the_first_question(start_i
     assert stored.position == 1
 
     current = body["current_question"]
-    assert set(current) == {"id", "position", "text", "category", "question_kind", "main_number"}  # AC16: no bank_id
+    assert set(current) == {"id", "position", "text", "category", "question_kind", "main_number"}  # AC16: no internal ids
     assert current["position"] == 1
     assert current["id"] == str(stored.id)
     assert current["text"] == stored.text
 
 
-def test_first_bank_question_fits_the_setup(start_interview, make_user, db):  # AC3, EC11 (no LLM configured)
+def test_the_first_question_fits_the_setup(start_interview, make_user, db):  # AC3, EC11
     user = make_user()
     for _ in range(10):
         r = start_interview(user, interview_type="technical", question_count=5)
 
         [stored] = _questions(db, r.json()["session"]["id"])
-        assert stored.bank_id != "frontend-only"
-        assert stored.category == "technical"
+        assert (stored.source, stored.category) == ("llm", "technical")
 
 
 def test_mixed_session_starts_with_a_behavioral_question(start_interview, make_user, db):  # AC4, EC9
@@ -130,32 +129,7 @@ def test_mixed_session_starts_with_a_behavioral_question(start_interview, make_u
     assert [q.category for q in _questions(db, r.json()["session"]["id"])] == ["behavioral"]
 
 
-# --- not enough questions ---
 
-
-def test_not_enough_questions_is_409_and_leaves_existing_session_alone(start_interview, make_user, db):  # AC5, EC8
-    user = make_user()
-    first = start_interview(user).json()["session"]
-
-    r = start_interview(user, question_count=6)  # fixture bank has 5 behavioral
-
-    assert r.status_code == 409
-    error = r.json()["error"]
-    assert error["code"] == "NOT_ENOUGH_QUESTIONS"
-    assert error["details"] == {"requested": 6, "available": 5}
-    [only] = _sessions(db, user)
-    assert str(only.id) == first["id"]
-    assert only.status == "in_progress"
-
-
-def test_mixed_short_on_one_type_is_409(start_interview, make_user, make_bank_question, bank, db):  # AC4, EC10
-    bank[:] = [q for q in bank if q.type == "behavioral"] + [make_bank_question("t0", "technical")]
-
-    r = start_interview(make_user(), interview_type="mixed", question_count=4)
-
-    assert r.status_code == 409
-    assert r.json()["error"]["details"] == {"requested": 4, "available": 3}
-    assert _sessions(db) == []
 
 
 # --- validation ---
@@ -288,23 +262,13 @@ def test_losing_a_concurrent_start_is_409_conflict(start_interview, make_user, d
     assert _question_count(db) == 1
 
 
-# --- snapshot ---
 
-
-def test_editing_the_bank_never_changes_a_saved_session(start_interview, make_user, bank, db):  # AC13, EC16
-    r = start_interview(make_user(), question_count=5)
-    before = [(q.bank_id, q.text) for q in _questions(db, r.json()["session"]["id"])]
-
-    bank[:] = [q.model_copy(update={"text": "Edited later?"}) for q in bank]
-
-    db.expire_all()
-    assert [(q.bank_id, q.text) for q in _questions(db, r.json()["session"]["id"])] == before
 
 
 # --- auth ---
 
 
-def test_start_without_token_is_401(client, db, bank):  # AC12, EC1
+def test_start_without_token_is_401(client, db):  # AC12, EC1
     r = client.post(
         INTERVIEWS, json={"role": "backend", "level": "junior", "interview_type": "mixed", "question_count": 1}
     )
@@ -325,8 +289,8 @@ def test_start_without_permission_is_403(start_interview, make_user, db):  # AC1
 
 @pytest.mark.parametrize("level", ["intern", "senior"])
 @pytest.mark.parametrize("role", ["designer", "qa", "devops"])
-def test_a_new_role_starts_a_technical_interview_from_the_shipped_bank(client, auth_header, make_user, role, level):
-    # No `bank` fixture: the shipped bank must back the role on its own (its own question plus the general ones).
+def test_a_new_role_starts_a_technical_interview(client, auth_header, make_user, role, level):
+    # The role needs no per-role question data: the LLM writes for whichever role the setup names.
     user = make_user()
     body = {"role": role, "level": level, "interview_type": "technical", "question_count": 3}
 

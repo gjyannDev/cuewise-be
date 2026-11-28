@@ -1,4 +1,3 @@
-import random
 from collections.abc import Callable
 from typing import Annotated
 
@@ -17,7 +16,6 @@ from app.modules.profile.services.profile_service import ProfileService
 
 from ..controllers.interviews_controller import InterviewsController
 from ..dependencies.interviews_shared_dependencies import (
-    get_bank,
     get_clock,
     get_context_manager,
     get_embedder,
@@ -25,7 +23,6 @@ from ..dependencies.interviews_shared_dependencies import (
 )
 from ..repositories.interviews_knowledge_repository import KnowledgeRepository
 from ..repositories.interviews_repository import InterviewsRepository
-from ..schemas.interviews_schema import BankQuestion
 from ..services.interviews_retrieval_service import RetrievalService
 from ..services.interviews_service import InterviewsService
 
@@ -33,19 +30,15 @@ from ..services.interviews_service import InterviewsService
 def get_retrieval_service(
     db: Annotated[Session, Depends(get_db)],
     embedder: Annotated[Embedder | None, Depends(get_embedder)],
-    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     tracer: Annotated[Tracer, Depends(get_tracer)],
 ) -> RetrievalService:
-    return RetrievalService(
-        KnowledgeRepository(db), embedder, llm_on=chat_model is not None, tracer=tracer, clock=clock
-    )
+    return RetrievalService(KnowledgeRepository(db), embedder, tracer=tracer, clock=clock)
 
 
 def get_interviews_service(
     db: Annotated[Session, Depends(get_db)],
-    bank: Annotated[list[BankQuestion], Depends(get_bank)],
-    chat_model: Annotated[ChatModel | None, Depends(get_chat_model)],
+    chat_model: Annotated[ChatModel, Depends(get_chat_model)],
     clock: Annotated[Callable[[], float], Depends(get_clock)],
     context: Annotated[ContextManager, Depends(get_context_manager)],
     tracer: Annotated[Tracer, Depends(get_tracer)],
@@ -54,8 +47,6 @@ def get_interviews_service(
 ) -> InterviewsService:
     return InterviewsService(
         InterviewsRepository(db),
-        bank,
-        random.Random(),
         chat_model,
         settings.llm_max_tokens,
         llm_budget_seconds=settings.llm_total_budget_seconds,

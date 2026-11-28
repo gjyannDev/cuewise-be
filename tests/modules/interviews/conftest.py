@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
@@ -10,7 +11,7 @@ from sqlalchemy import delete
 
 from app.core.ai.chat_fake import FakeChatModel
 from app.core.ai.dependencies import get_chat_model
-from app.core.ai.fake import FakeProvider, FakeSynthesizer, FakeTranscriber
+from app.core.ai.fake import FakeSynthesizer, FakeTranscriber
 from app.core.rate_limit import RateLimiter
 from app.core.speech.limits import SPEECH_PER_MINUTE, TRANSCRIPTIONS_PER_MINUTE
 from app.main import app
@@ -19,11 +20,8 @@ from app.modules.interviews.constants.interviews_constants import (
     FEEDBACK_SCORE_PROMPT_VERSION,
     FEEDBACK_WRITE_PROMPT_VERSION,
     SUMMARY_PROMPT_VERSION,
-    Level,
-    QuestionCategory,
 )
 from app.modules.interviews.dependencies.interviews_shared_dependencies import (
-    get_bank,
     get_clock,
     get_synthesizer,
     get_transcriber,
@@ -32,27 +30,12 @@ from app.modules.interviews.dependencies.interviews_voice_dependencies import (
     get_speech_limiter,
     get_transcription_limiter,
 )
-from app.modules.interviews.schemas.interviews_schema import BankQuestion
 from app.modules.interviews.utils.interviews_utils import load_prompt
 from app.modules.profile.constants.profile_constants import PROFILE_PROMPT_VERSION
 from app.modules.profile.models.profile_model import CandidateProfileRow
 from app.modules.profile.schemas.profile_schema import CandidateProfile
 from tests.provider_chat import ProviderChatModel
-
-
-def _bank_question(qid, category="behavioral", roles=("general",), levels=tuple(Level)):
-    return BankQuestion(
-        id=qid,
-        text=f"Question {qid}?",
-        type=QuestionCategory(category),
-        roles=list(roles),
-        levels=list(levels),
-    )
-
-
-@pytest.fixture
-def make_bank_question():
-    return _bank_question
+from tests.provider_fakes import FakeProvider
 
 
 @pytest.fixture
@@ -85,20 +68,7 @@ def delete_profile(db):
 
 
 @pytest.fixture
-def bank():
-    """Small fixture bank wired into the app instead of the shipped mock file; mutable for snapshot tests."""
-    questions = (
-        [_bank_question(f"b{i}") for i in range(5)]
-        + [_bank_question(f"t{i}", "technical") for i in range(5)]
-        + [_bank_question("frontend-only", "technical", roles=["frontend"])]
-    )
-    app.dependency_overrides[get_bank] = lambda: questions
-    yield questions
-    app.dependency_overrides.pop(get_bank, None)
-
-
-@pytest.fixture
-def start_interview(client, auth_header, bank):
+def start_interview(client, auth_header):
     """POST a setup for `user`; any field can be overridden, or dropped by passing None."""
 
     def _start(user, **overrides):
@@ -222,20 +192,31 @@ def llm():
     def unique_question() -> str:
         return _reply_json(f"Generated question number {next(counter)}?", "behavioral")
 
+    class _TypedWriter(FakeProvider):
+        """Unscripted, it writes a valid question for the interview's own type (the write prompt names it)."""
+
+        def _next(self, messages, budget_seconds, reasoning_effort):
+            match = re.search(r"mock (\w+) interview", messages[0].content if messages else "")
+            category = "technical" if match and match.group(1) == "technical" else "behavioral"
+            self._default = lambda: _reply_json(f"Generated question number {next(counter)}?", category)
+            return super()._next(messages, budget_seconds, reasoning_effort)
+
     class _LLM:
-        fake = FakeProvider(default=unique_question, stream_format=as_v5_text)
+        fake = _TypedWriter(default=unique_question, stream_format=as_v5_text)
         decide = FakeProvider(default=_decision_json())
         # End-of-interview feedback: unscripted, both reply with text that breaks their contract.
         score = FakeProvider()
         write = FakeProvider()
         summary = FakeChatModel()
+        # The chat model the app gets (set below, once the handle exists: it routes each call through `route`).
+        chat: _RoutedChatModel
 
         def script_summary(self, *replies):
             self.summary = FakeChatModel(replies)
             return self.summary
 
         def script(self, *replies, on_call=None):
-            self.fake = FakeProvider(replies, on_call=on_call, default=unique_question, stream_format=as_v5_text)
+            self.fake = _TypedWriter(replies, on_call=on_call, default=unique_question, stream_format=as_v5_text)
             return self.fake
 
         def script_decide(self, *replies, on_call=None, default=None):
@@ -260,11 +241,17 @@ def llm():
             return self.decide if _DECISION_MARKER in system else self.fake
 
     handle = _LLM()
-    handle.chat = _RoutedChatModel(handle.route)
+    handle.chat = _RoutedChatModel(handle.route)  # pyright: ignore[reportCallIssue]  (its __init__ takes the route)
     handle.chat._handle = handle
     app.dependency_overrides[get_chat_model] = lambda: handle.chat
     yield handle
     app.dependency_overrides.pop(get_chat_model, None)
+
+
+@pytest.fixture(autouse=True)
+def _llm_by_default(llm):
+    """There is no LLM-off mode: every interviews test has the scripted LLM, which writes valid questions unless the
+    test scripts a failure."""
 
 
 # A phrase only the decide prompt has (its role line, before the first placeholder), read from the prompt file.

@@ -14,9 +14,9 @@ from app.modules.interviews.constants.interviews_constants import (
     Level,
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import (
-    load_corpus,
     source_share_problem,
 )
+from tests.note_parsing import load_corpus
 
 CORPUS = load_corpus(KNOWLEDGE_DIR)
 

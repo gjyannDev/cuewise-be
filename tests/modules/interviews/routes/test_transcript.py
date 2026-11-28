@@ -3,6 +3,7 @@ import uuid
 import pytest
 
 from app.main import app
+from app.modules.interviews.constants.interviews_constants import REACTION_POOLS
 from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
@@ -14,6 +15,7 @@ from app.modules.interviews.repositories.interviews_repository import (
 from app.modules.interviews.utils.interviews_utils import build_transcript
 
 MESSAGES = "/api/v1/interviews/{}/messages"
+ALL_REACTIONS = {r for pool in REACTION_POOLS.values() for r in pool}
 
 
 @pytest.fixture
@@ -58,7 +60,6 @@ def test_fresh_session_shows_only_the_first_question(transcript, started):  # EC
 
 def test_answered_turns_come_back_in_conversation_order(transcript, answer, started, llm):  # AC23, concept 2
     owner, session_id, q1 = started
-    llm.script("Reaction one.", "Reaction two.")
     q2 = answer(owner, session_id, q1["id"], text="Answer one.").json()["current_question"]
     answer(owner, session_id, q2["id"], text="Answer two.")
 
@@ -74,7 +75,7 @@ def test_answered_turns_come_back_in_conversation_order(transcript, answer, star
         (3, "interviewer", "question"),
     ]
     assert items[1]["text"] == "Answer one."
-    assert items[2]["text"] and "Reaction one." not in str(items)  # predefined reaction, not an LLM one
+    assert items[2]["text"] in ALL_REACTIONS  # a predefined reaction, never LLM-written
     assert all(i["created_at"] for i in items if i["kind"] != "question")
     assert len({i["question_id"] for i in items}) == 3
 
@@ -89,7 +90,7 @@ def test_a_legacy_answer_without_a_reaction_has_no_item(make_user, transcript, d
         question_count=2,
         current_position=2,
     )
-    stored = [InterviewQuestion(position=i, text=f"Q{i}?", category="behavioral", bank_id=f"b{i}") for i in (1, 2)]
+    stored = [InterviewQuestion(position=i, text=f"Q{i}?", category="behavioral", source="stored") for i in (1, 2)]
     InterviewsRepository(db).start(session, stored)
     db.add(InterviewMessage(session_id=session.id, question_id=stored[0].id, role="candidate", content="A1"))
     db.commit()

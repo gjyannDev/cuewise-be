@@ -201,8 +201,3 @@ def test_each_case_records_a_summary_generation_with_its_labels(lf):  # FR5: sam
     assert len(generations) == len(CASES)
     assert all(g["name"] == SUMMARY_TASK and g["metadata"]["prompt_version"] == SUMMARY_VERSION for g in generations)
     assert [g["item"] for g in generations] == [f"summary:{c.id}" for c in CASES]  # each inside its case's trace
-
-
-def test_without_a_chat_model_the_summary_task_stops_with_a_hint(capsys):
-    assert main(["--task", "summary"], tracer=Tracer(None)) == 1
-    assert "LangChain chat model" in capsys.readouterr().out

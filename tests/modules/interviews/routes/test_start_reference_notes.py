@@ -26,10 +26,10 @@ from app.modules.interviews.repositories.interviews_repository import (
 from app.modules.interviews.services.interviews_knowledge_service import ingest_corpus
 from app.modules.interviews.utils.interviews_knowledge_utils import (
     embedding_text,
-    parse_note,
 )
 from app.modules.interviews.utils.interviews_profile_utils import profile_query_text
 from app.modules.profile.schemas.profile_schema import CandidateProfile, Role
+from tests.note_parsing import parse_note
 
 JOB = "We build Python REST APIs and need someone who designs them well."
 
@@ -120,16 +120,6 @@ def test_a_failing_embedder_still_starts_with_filter_notes(
     assert response.status_code == 201
     assert {r.mode for r in stored(db, response)} == {"filter"}
     assert any("outcome=retrieval_degraded:embedder_error" in line for line in retrieval_lines(app_logs))
-
-
-def test_with_the_llm_off_retrieval_is_skipped_and_nothing_is_stored(
-    db, make_user, start_interview, corpus, embedder, app_logs
-):  # AC15, EC9
-    response = start_interview(make_user(), job_description=JOB)
-
-    assert response.status_code == 201
-    assert stored(db, response) == [] and embedder.calls == []
-    assert any("outcome=retrieval_skipped:llm_off" in line for line in retrieval_lines(app_logs))
 
 
 def test_an_empty_corpus_starts_as_before(db, make_user, start_interview, llm, embedder, app_logs):  # AC15, EC8

@@ -7,7 +7,6 @@ import pytest
 
 from app.core.ai.chat_fake import FakeChatModel, fake_reply
 from app.core.ai.context import ContextManager, Task
-from app.core.ai.fake import FakeProvider
 from app.core.ai.provider import (
     LLMBadResponseError,
     LLMRequestError,
@@ -52,6 +51,7 @@ from app.modules.interviews.tooling.interviews_evals import (
 )
 from tests.fake_langfuse import FakeLangfuse, current_item
 from tests.modules.interviews.conftest import _RoutedChatModel
+from tests.provider_fakes import FakeProvider
 
 REQUIRED_KINDS = {"strong", "vague", "off_topic", "near_empty", "injection_answer", "injection_job_description"}
 

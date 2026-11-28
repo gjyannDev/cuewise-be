@@ -551,7 +551,7 @@ def _streamed_question(raw: str) -> str:
 
 
 def _case_inputs(
-    chat_model: ChatModel | None,
+    chat_model: ChatModel,
     case: EvalCase,
     usage: CaseResult,
     context: ContextManager,
@@ -581,16 +581,14 @@ def _case_inputs(
 
 
 def _summarize(
-    chat_model: ChatModel | None,
+    chat_model: ChatModel,
     context: ContextManager,
     job_description: str,
     usage: CaseResult,
     max_tokens: int,
 ) -> str | None:
     """The same one-off condensation the app makes at interview start (`summarize_job_description` on the chat model,
-    U3a); its tokens count towards the case. No chat model = no summary, as in the app with LLM off."""
-    if chat_model is None:
-        return None
+    U3a); its tokens count towards the case."""
     outcome = summarize_job_description(chat_model, job_description, max_tokens=max_tokens, context=context)
     if outcome.result is not None:
         _add_usage(usage, outcome.result)
@@ -887,20 +885,13 @@ def main(
             )
         context = build_context_manager({args.strategy or WINDOW_LEDGER: args.prompt})
 
-    configs = settings.llm_provider_configs
-    model = args.model or (configs[0].model if configs else None)
+    model = args.model or settings.llm_provider_configs[0].model
     # Eval calls go to Langfuse under environment "eval", apart from real traffic (only when keys are configured).
     # A chat model and tracer passed in (tests) are used as they are; without keys this is the no-op tracer.
     if chat_model is None:
         tracer = tracer or build_tracer(settings, environment="eval")
-        # Every task runs on the app's LangChain chat model (U3a, U3b1), traced the same way.
+        # Every task runs on the app's provider chain (U3a, U3b1, U3c), traced the same way.
         chat_model = build_chat_model(settings, model=args.model, tracer=tracer)
-        if chat_model is None:
-            print(
-                "LLM is not configured (no LangChain chat model): set LLM_PROVIDERS and that vendor's LLM_<VENDOR>_* "
-                "settings in .env first."
-            )
-            return 1
     tracer = tracer or Tracer(None)
     args.budget_seconds = settings.llm_total_budget_seconds
     print(

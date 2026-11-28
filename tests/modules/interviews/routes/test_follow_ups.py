@@ -16,6 +16,7 @@ from app.modules.interviews.constants.interviews_constants import (
 from app.modules.interviews.dependencies.models.interviews_model import (
     InterviewMessage,
     InterviewQuestion,
+    InterviewSession,
 )
 
 ALL_CLOSINGS = {r for pool in CLOSING_REACTIONS.values() for r in pool}
@@ -51,7 +52,7 @@ def summaries(app_logs):
     return [r.getMessage() for r in app_logs.records if r.getMessage().startswith("turn_summary")]
 
 
-def test_with_the_llm_off_there_are_no_follow_ups_and_every_answer_gets_a_reaction(
+def test_with_the_default_decision_there_are_no_follow_ups_and_every_answer_gets_a_reaction(
     start_interview, make_user, answer, db
 ):  # AC14, EC12
     owner = make_user()
@@ -150,53 +151,51 @@ def test_the_last_main_question_can_be_followed_up_and_completes_when_its_thread
     assert second["reaction"]["text"] in ALL_CLOSINGS
 
 
-def test_a_failed_follow_up_write_falls_back_to_the_next_main_bank_question(
+def test_a_failed_follow_up_write_ends_the_turn_and_saves_nothing(
     start_interview, make_user, answer, llm, reply_json, decision_json, db, app_logs
-):  # AC4, AC20, EC5, EC14
+):  # AC4, AC20, EC3, EC5, EC14
     owner = make_user()
     llm.script(reply_json("Opening?", "behavioral"), "not json", "still not json")
     llm.script_decide(decision_json("follow_up", "missing_result"))
     created = start_interview(owner, question_count=2).json()
 
-    body = answer(owner, created["session"]["id"], created["current_question"]["id"]).json()
+    r = answer(owner, created["session"]["id"], created["current_question"]["id"])
 
-    assert body["reaction"] is not None
-    nxt = rows(db, created["session"]["id"])[1]
-    assert (nxt.kind, nxt.source, nxt.main_number) == ("main", "bank", 2)
+    assert r.status_code == 503 and r.json()["error"]["code"] == "INTERVIEWER_UNAVAILABLE"
+    assert len(rows(db, created["session"]["id"])) == 1 and answers(db, created["session"]["id"]) == []
     [line] = summaries(app_logs)
-    assert "action=next_question" in line and "source=bank" in line and "fallback=write_failed" in line
-    assert len(answers(db, created["session"]["id"])) == 1
+    assert "action=follow_up" in line and "source=-" in line and "fallback=write_failed" in line
 
 
-def test_a_failed_follow_up_write_on_the_last_main_question_completes(
-    start_interview, make_user, answer, llm, reply_json, decision_json
+def test_a_failed_follow_up_write_on_the_last_main_question_does_not_complete(
+    start_interview, make_user, answer, llm, reply_json, decision_json, db
 ):  # AC4, EC5
     owner = make_user()
     llm.script(reply_json("Only question?", "behavioral"), "not json", "still not json")
     llm.script_decide(decision_json("follow_up", "missing_result"))
     created = start_interview(owner, question_count=1).json()
 
-    body = answer(owner, created["session"]["id"], created["current_question"]["id"]).json()
+    r = answer(owner, created["session"]["id"], created["current_question"]["id"])
 
-    assert body["session"]["status"] == "completed" and body["reaction"]["text"] in ALL_CLOSINGS
+    assert r.status_code == 503
+    assert db.get(InterviewSession, uuid.UUID(created["session"]["id"])).status == "in_progress"
 
 
-def test_garbage_or_failing_decisions_never_stop_the_interview(
+def test_garbage_decisions_end_the_turn_and_the_same_answer_can_be_sent_again(
     start_interview, make_user, answer, llm, db, app_logs
-):  # AC3, EC3, EC4
-    from app.core.ai.provider import LLMServerError
-
+):  # AC3, EC3, EC3b
     owner = make_user()
-    llm.script_decide("nope", '{"action": "maybe"}', LLMServerError("503"), default="still garbage")
+    llm.script_decide("nope", '{"action": "maybe"}')  # both decide attempts break the contract; then the default
     created = start_interview(owner, question_count=3).json()
+    session_id, q1 = created["session"]["id"], created["current_question"]["id"]
 
-    bodies = run_to_end(answer, owner, created)
+    failed = answer(owner, session_id, q1)
+    saved_after_failure = len(answers(db, session_id))
+    retried = answer(owner, session_id, q1)
 
-    assert bodies[-1]["session"]["status"] == "completed"
-    assert len(answers(db, created["session"]["id"])) == 3
-    assert [q.kind for q in rows(db, created["session"]["id"])] == ["main"] * 3
-    assert all("decision=none" in line for line in summaries(app_logs))
-    assert all(a.note is None for a in answers(db, created["session"]["id"]))
+    assert failed.status_code == 503 and saved_after_failure == 0
+    assert retried.status_code == 201 and len(answers(db, session_id)) == 1
+    assert "decision=none" in summaries(app_logs)[0] and "fallback=decide_failed" in summaries(app_logs)[0]
 
 
 def test_injected_text_cannot_raise_the_follow_up_cap_or_reach_a_system_prompt(
@@ -247,7 +246,7 @@ def test_a_session_with_stored_questions_makes_no_decide_call(
     session = InterviewSession(
         user_id=owner.id, role="backend", level="junior", interview_type="behavioral", question_count=3
     )
-    stored = [InterviewQuestion(position=i, text=f"Up front {i}?", category="behavioral", bank_id=f"b{i}") for i in (1, 2, 3)]
+    stored = [InterviewQuestion(position=i, text=f"Up front {i}?", category="behavioral", source="stored") for i in (1, 2, 3)]
     InterviewsRepository(db).start(session, stored)
     session_id, q1 = str(session.id), stored[0].id
 

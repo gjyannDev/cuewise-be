@@ -26,11 +26,10 @@ import random
 import re
 import unicodedata
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
-from ..ai.interviews_split import split_sections
 from ..constants.interviews_constants import (
     GENERAL_ROLE,
     KNOWLEDGE_HEADING_MAX_LENGTH,
@@ -51,6 +50,10 @@ _INSTRUCTION_LIKE = re.compile(
     r"|\byou are now\b|\bsystem prompt\b|\bact as\b|\bnew instructions\b",
     re.IGNORECASE,
 )
+
+
+# Cuts a note body into {`##` heading: text}; the real one is `ai/interviews_split.py` (LangChain, so not imported here).
+SectionSplitter = Callable[[str], dict[str, str]]
 
 
 class CorpusError(Exception):
@@ -131,14 +134,16 @@ def merge_note_rankings(
     return merged, len(profile_part)
 
 
-def parse_note(file_name: str, text: str) -> ParsedNote:
-    """One note file -> its chunks. Raises CorpusError naming the file for anything that can't be ingested."""
+def parse_note(file_name: str, text: str, split: SectionSplitter) -> ParsedNote:
+    """One note file -> its chunks. Raises CorpusError naming the file for anything that can't be ingested.
+
+    `split` cuts the body into its `##` sections: it is passed in so this module stays pure and below `ai/`."""
     _check_hidden(file_name, text)
     lines = text.splitlines()
     roles, levels, source, body = _parse_header(file_name, lines)
     chunks: list[NoteChunk] = []
     warnings: list[str] = []
-    for index, (heading, section) in enumerate(_sections(file_name, body)):
+    for index, (heading, section) in enumerate(_sections(file_name, body, split)):
         key = f"{file_name}#{heading}"
         chunks.append(NoteChunk(key, heading, section, source, roles, levels, _hash(roles, levels, source, heading, section), index))
         if _INSTRUCTION_LIKE.search(section):
@@ -146,9 +151,9 @@ def parse_note(file_name: str, text: str) -> ParsedNote:
     return ParsedNote(file_name, source, chunks, warnings)
 
 
-def load_corpus(directory: Path) -> Corpus:
+def load_corpus(directory: Path, split: SectionSplitter) -> Corpus:
     """Every `*.md` note in the folder, in file-name order; stops at the first invalid one."""
-    notes = [parse_note(path.name, path.read_text(encoding="utf-8")) for path in sorted(directory.glob("*.md"))]
+    notes = [parse_note(path.name, path.read_text(encoding="utf-8"), split) for path in sorted(directory.glob("*.md"))]
     if not notes:
         raise CorpusError("corpus", f"no notes (*.md) in {directory}")
     chunks = [chunk for note in notes for chunk in note.chunks]
@@ -246,7 +251,7 @@ def _listed(file_name: str, values: dict[str, str], key: str) -> tuple[str, ...]
     return items
 
 
-def _sections(file_name: str, body: list[str]) -> list[tuple[str, str]]:
+def _sections(file_name: str, body: list[str], split: SectionSplitter) -> list[tuple[str, str]]:
     # The headings come from this scan (it sees empty and repeated ones); the text from the LangChain splitter.
     headings: list[list] = []  # [heading, has text]
     for line in body:
@@ -264,7 +269,7 @@ def _sections(file_name: str, body: list[str]) -> list[tuple[str, str]]:
             raise CorpusError(file_name, "text outside a section: every chunk needs a ## heading")
     if not headings:
         raise CorpusError(file_name, "no sections: add at least one ## heading")
-    texts = split_sections("\n".join(body))
+    texts = split("\n".join(body))
     seen: set[str] = set()
     result = []
     for heading, has_text in headings:

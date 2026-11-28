@@ -31,9 +31,8 @@ from app.modules.interviews.services.interviews_retrieval_service import (
 )
 from app.modules.interviews.utils.interviews_knowledge_utils import (
     embedding_text,
-    load_corpus,
-    parse_note,
 )
+from tests.note_parsing import load_corpus, parse_note
 
 SESSION = uuid.UUID("01900000-0000-7000-8000-0000000000aa")
 QUERY = "We build REST APIs in Python and need someone who designs them well."
@@ -91,7 +90,6 @@ class Steps:
 
 
 def service(db, embedder=None, **kwargs) -> RetrievalService:
-    kwargs.setdefault("llm_on", True)
     # The shipped threshold is tuned on real embeddings (scores ~0.55-0.72); these fake directions spread over 0-1, so
     # each test states its own threshold and none depends on the tuned value.
     kwargs.setdefault("min_similarity", 0.0)
@@ -216,16 +214,6 @@ def test_a_slow_embedder_is_cut_at_the_cap_and_degrades(db, corpus):  # AC19, EC
 
     assert waited == [RETRIEVAL_TIME_CAP_SECONDS]
     assert result.outcome == "retrieval_degraded:timeout" and len(result.notes) == 4
-
-
-def test_llm_off_skips_without_reading_or_embedding(db, corpus, app_logs):  # AC15, EC9
-    embedder = FakeEmbedder(corpus)
-
-    result = retrieve(service(db, embedder, llm_on=False))
-
-    assert (result.mode, result.notes, result.outcome) == (None, [], "retrieval_skipped:llm_off")
-    assert embedder.calls == []
-    assert any("outcome=retrieval_skipped:llm_off" in r.getMessage() for r in app_logs.records)
 
 
 def test_an_empty_corpus_skips_with_no_match(db):  # AC15, EC8

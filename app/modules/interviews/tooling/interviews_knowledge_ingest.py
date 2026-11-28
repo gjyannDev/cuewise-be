@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.ai.embedder import Embedder
 
+from ..ai.interviews_split import split_sections
 from ..constants.interviews_constants import KNOWLEDGE_DIR
 from ..repositories.interviews_knowledge_repository import KnowledgeRepository
 from ..services.interviews_knowledge_service import IngestError, ingest_corpus
@@ -48,7 +49,7 @@ def main(
 ) -> int:
     args = _parser().parse_args(argv)
     try:
-        corpus = load_corpus(args.corpus)
+        corpus = load_corpus(args.corpus, split_sections)
     except CorpusError as exc:
         print(f"invalid note, nothing was ingested: {exc}")
         return 1

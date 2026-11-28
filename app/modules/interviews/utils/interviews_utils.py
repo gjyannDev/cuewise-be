@@ -2,17 +2,16 @@ import json
 import math
 import random
 import re
-from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import aclosing
-from itertools import chain, groupby, zip_longest
+from itertools import groupby
 from pathlib import Path
 from typing import NamedTuple
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 from app.core.ai.prompts import load_prompt as core_load_prompt
 from app.core.ai.provider import ChatMessage
-from app.core.errors import NotEnoughQuestionsError
 
 from ..constants.interviews_constants import (
     CATEGORY_CRITERIA,
@@ -25,7 +24,6 @@ from ..constants.interviews_constants import (
     FEEDBACK_SUMMARY_MAX_LENGTH,
     FEEDBACK_TONE,
     FEEDBACK_WRITE_PROMPT_VERSION,
-    GENERAL_ROLE,
     IMPROVEMENTS_COUNT,
     INTERVIEWER_PROMPT_VERSION,
     INTERVIEWER_V2_PROMPT_VERSION,
@@ -34,7 +32,6 @@ from ..constants.interviews_constants import (
     MAX_FOLLOW_UPS,
     NEXT_STEPS_COUNT,
     PROMPTS_DIR,
-    QUESTION_BANK_PATH,
     QUOTE_MAX_LENGTH,
     QUOTE_MIN_LENGTH,
     REACTION_POOLS,
@@ -56,67 +53,11 @@ from ..constants.interviews_constants import (
 )
 from ..dependencies.models.interviews_model import InterviewMessage, InterviewQuestion
 from ..schemas.interviews_schema import (
-    BankQuestion,
-    QuestionBank,
     Rubric,
     StreamEventOut,
     TranscriptItemOut,
 )
 from .interviews_knowledge_utils import ReferenceNote
-
-_bank_adapter = TypeAdapter(QuestionBank)
-
-
-def load_bank(path: Path) -> list[BankQuestion]:
-    """Read and validate a question bank file; a bad file fails loudly instead of at request time."""
-    try:
-        return _bank_adapter.validate_json(path.read_bytes())
-    except ValidationError as exc:
-        raise ValueError(f"Invalid question bank {path.name}: {exc}") from exc
-
-
-def select_questions(
-    bank: list[BankQuestion],
-    role: JobRole,
-    level: Level,
-    interview_type: InterviewType,
-    count: int,
-    rng: random.Random,
-) -> list[BankQuestion]:
-    """Pick `count` distinct questions for the setup, in interview order.
-
-    The single seam a later story can wrap or replace with an LLM-driven source.
-    `mixed` is split evenly (extra one behavioral) and interleaved, starting behavioral.
-    Raises NotEnoughQuestionsError rather than returning fewer than asked.
-    """
-
-    def eligible(category: QuestionCategory) -> list[BankQuestion]:
-        return [
-            q for q in bank if q.type == category and level in q.levels and (role in q.roles or GENERAL_ROLE in q.roles)
-        ]
-
-    if interview_type != InterviewType.mixed:
-        pool = eligible(QuestionCategory(interview_type))
-        if len(pool) < count:
-            raise NotEnoughQuestionsError(
-                "Not enough questions for this setup", {"requested": count, "available": len(pool)}
-            )
-        return rng.sample(pool, count)
-
-    behavioral, technical = eligible(QuestionCategory.behavioral), eligible(QuestionCategory.technical)
-    # Largest count whose split (ceil half behavioral, floor half technical) both pools can cover.
-    available = min(2 * len(behavioral), 2 * len(technical) + 1)
-    if count > available:
-        raise NotEnoughQuestionsError(
-            "Not enough questions for this setup", {"requested": count, "available": available}
-        )
-    picked_b = rng.sample(behavioral, (count + 1) // 2)
-    picked_t = rng.sample(technical, count // 2)
-    return [q for q in chain.from_iterable(zip_longest(picked_b, picked_t)) if q is not None]
-
-
-# Loaded once at import so a broken bank stops the app at startup (same idea as `settings`).
-QUESTION_BANK = load_bank(QUESTION_BANK_PATH)
 
 
 def load_prompt(version: str) -> str:
@@ -177,7 +118,7 @@ def neutralize_app_tags(text: str) -> str:
 
 
 def load_rubric(path: Path) -> Rubric:
-    """Read and validate a feedback rubric file; a bad one fails loudly at startup, like the bank."""
+    """Read and validate a feedback rubric file; a bad one fails loudly at startup."""
     try:
         return Rubric.model_validate_json(path.read_bytes())
     except ValidationError as exc:
@@ -434,36 +375,6 @@ def build_interviewer_messages(
     return messages
 
 
-def pick_fallback_question(
-    bank: Sequence[BankQuestion],
-    role: JobRole,
-    level: Level,
-    interview_type: InterviewType,
-    position: int,
-    used_bank_ids: Collection[str],
-    rng: random.Random,
-) -> BankQuestion:
-    """One unused bank question for `position`, used when the LLM is off or its reply is unusable.
-
-    `mixed` alternates by position, behavioral first, matching the split the start-time coverage check guarantees.
-    """
-    if interview_type == InterviewType.mixed:
-        category = QuestionCategory.behavioral if position % 2 else QuestionCategory.technical
-    else:
-        category = QuestionCategory(interview_type)
-    pool = [
-        q
-        for q in bank
-        if q.type == category
-        and level in q.levels
-        and (role in q.roles or GENERAL_ROLE in q.roles)
-        and q.id not in used_bank_ids
-    ]
-    if not pool:
-        raise NotEnoughQuestionsError("Not enough questions for this setup", {"requested": position, "available": 0})
-    return rng.choice(pool)
-
-
 def pick_reaction(
     category: QuestionCategory, level: Level, *, final: bool, previous: str | None, rng: random.Random
 ) -> str:
@@ -476,7 +387,7 @@ def pick_reaction(
 def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
     """Stored LLM usage per interview and question position: numbers and ids only, never question text.
 
-    Expects rows ordered by session, then position. Usage the provider didn't report (or bank questions) shows as
+    Expects rows ordered by session, then position. Usage the provider didn't report (or stored questions) shows as
     `-` and is left out of the sums. A question's usage is its whole turn (the decide call too), so tokens by
     question kind answer "what does a follow-up cost"; decide-only tokens are in the per-call log lines.
     """
@@ -492,7 +403,7 @@ def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
         llm = sum(1 for q in rows if q.source == "llm")
         follow_ups = sum(1 for q in rows if q.kind == QuestionKind.follow_up)
         lines.append(
-            f"interview {session_id} questions={len(rows)} llm={llm} bank={len(rows) - llm} follow_ups={follow_ups}"
+            f"interview {session_id} questions={len(rows)} llm={llm} stored={len(rows) - llm} follow_ups={follow_ups}"
         )
         for q in rows:
             lines.append(
@@ -510,7 +421,7 @@ def build_usage_report(questions: Sequence[InterviewQuestion]) -> str:
     used = len(prompt_sums)
     summary = f"interviews={interviews} llm_interviews={used}"
     if used:
-        # Averaged over interviews that used the LLM: bank-only ones (LLM off) would hide the real cost.
+        # Averaged over interviews that used the LLM: stored-question ones (older sessions) would hide the real cost.
         summary += (
             f" avg_prompt_per_llm_interview={round(sum(prompt_sums) / used)}"
             f" avg_completion_per_llm_interview={round(sum(completion_sums) / used)}"

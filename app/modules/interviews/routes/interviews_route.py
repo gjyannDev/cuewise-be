@@ -65,12 +65,14 @@ STREAM_DESCRIPTION = """\
 Server-Sent Events, one per line pair (`event:` name, `data:` one line of JSON), in this order:
 
 - `status` `{"phase": "received"}` at once, then `{"phase": "deciding"}` and `{"phase": "writing"}` as the turn runs
-- `reaction` (a ReactionOut) before the next question, when the interview moves on or completes
+- `reaction` (a ReactionOut) with the first text of the next question (or at the end when none is written), when the interview moves on or completes
 - `question.delta` `{"text": ...}` chunks of the next question (append them)
 - `reset` `{}`: discard the question text so far; another draft or the final question follows
 - `done` (an AnswerOut, the same body POST /messages returns): the turn is saved
 - `error` `{"code", "message", "request_id"}`: a generic message; nothing was saved
-  (`QUESTION_NOT_CURRENT`: another submit of this question won, reload the interview)
+  (`QUESTION_NOT_CURRENT`: another submit of this question won, reload the interview;
+  `INTERVIEWER_UNAVAILABLE`: the question could not be written, send the same answer again; any text shown was
+  taken back with a `reset` first)
 
 Every stream ends with exactly one `done` or `error`. Comment lines (`: ping`) keep an idle connection open.
 Closing the connection before `done` saves nothing: the same question is still current.
@@ -83,8 +85,12 @@ Errors before the stream opens (401, 403, 404, 409, 422) are plain JSON, like PO
     responses={
         409: {
             "model": ErrorResponse,
-            "description": "NOT_ENOUGH_QUESTIONS, or PROFILE_REQUIRED: use_profile is set and no résumé is stored.",
-        }
+            "description": "PROFILE_REQUIRED: use_profile is set and no résumé is stored.",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "INTERVIEWER_UNAVAILABLE: the first question could not be written; no interview was created, start again.",
+        },
     },
 )
 def start_interview(
@@ -167,7 +173,11 @@ def get_interview(
 @router.post(
     "/{session_id}/messages",
     status_code=status.HTTP_201_CREATED,
-    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse, "description": "INTERVIEWER_UNAVAILABLE: the next question could not be written; nothing was saved, send the same answer again."},
+    },
 )
 def answer_question(
     session_id: uuid.UUID,
@@ -225,7 +235,6 @@ def get_transcript(
         409: {"model": ErrorResponse},
         429: {"model": ErrorResponse},
         502: {"model": ErrorResponse},
-        503: {"model": ErrorResponse},
     },
 )
 def generate_feedback(
@@ -238,7 +247,7 @@ def generate_feedback(
 
     201: generated now (or too few answers to assess: `enough_evidence` false, no scores). 200: already generated,
     the same body. 409 `INTERVIEW_NOT_COMPLETED` or `FEEDBACK_IN_PROGRESS`. 502 `FEEDBACK_FAILED`: no scores could be
-    produced, POST again to retry. 503 `FEEDBACK_UNAVAILABLE`: the LLM is off."""
+    produced, POST again to retry."""
     feedback, created = ctrl.generate(user, session_id)
     if not created:
         response.status_code = status.HTTP_200_OK

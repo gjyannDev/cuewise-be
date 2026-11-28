@@ -16,12 +16,11 @@ from app.modules.interviews.constants.interviews_constants import (
 from app.modules.interviews.utils.interviews_knowledge_utils import (
     CorpusError,
     cosine_similarity,
-    load_corpus,
-    parse_note,
     pick_filter_notes,
     query_text,
     source_share_problem,
 )
+from tests.note_parsing import load_corpus, parse_note
 
 VALID = """---
 roles: backend, general

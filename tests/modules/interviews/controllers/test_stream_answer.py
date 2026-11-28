@@ -9,7 +9,6 @@ import anyio
 import pytest
 from sqlalchemy import func, select
 
-from app.core.ai.fake import FakeStream
 from app.modules.interviews.controllers.interviews_answer_controller import (
     AnswerController,
 )
@@ -23,6 +22,7 @@ from app.modules.interviews.repositories.interviews_repository import (
 from app.modules.interviews.schemas.interviews_schema import AnswerIn
 from app.modules.interviews.services.interviews_answer_service import AnswerService
 from tests.provider_chat import closed_soon
+from tests.provider_fakes import FakeStream
 
 pytestmark = pytest.mark.anyio
 
@@ -30,14 +30,14 @@ ANSWER = "My private answer about the payments outage."
 
 
 @pytest.fixture
-def turn(make_user, start_interview, db, bank, llm, clock):
+def turn(make_user, start_interview, db, llm, clock):
     """A started interview and a controller wired like the app's: returns (controller, prepared turn, session id)."""
     owner = make_user(email="owner@example.com")
     created = start_interview(owner, question_count=3).json()
     session_id = uuid.UUID(created["session"]["id"])
     controller = AnswerController(
         AnswerService(
-            InterviewsRepository(db), bank, random.Random(0), llm.chat, 800, llm_budget_seconds=30, clock=clock
+            InterviewsRepository(db), random.Random(0), llm.chat, 800, llm_budget_seconds=30, clock=clock
         )
     )
     ctx = controller.prepare_answer(
@@ -92,10 +92,10 @@ async def test_closing_the_stream_mid_turn_saves_nothing(turn, llm, db, app_logs
     controller, ctx, session_id = turn
     events = controller.stream_answer(ctx, started_at=time.perf_counter())
 
-    names = [(await anext(events)).event for _ in range(3)]
+    names = [(await anext(events)).event for _ in range(4)]
     await events.aclose()
 
-    assert names == ["status", "status", "reaction"]
+    assert names == ["status", "status", "status", "reaction"]  # the reaction comes with the first question text
     assert saved_answers(db) == 0
     assert db.get(InterviewSession, session_id).current_position == 1
     assert "cancelled=true" in summaries(app_logs)[0]

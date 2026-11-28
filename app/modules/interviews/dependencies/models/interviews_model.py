@@ -70,7 +70,7 @@ class InterviewSession(UUIDPrimaryKeyMixin, Base):
 
 
 class InterviewQuestion(UUIDPrimaryKeyMixin, Base):
-    """A question as it was shown: written by the LLM, or snapshotted from the bank (so bank edits never change it)."""
+    """A question as it was shown: written by the LLM, or (older sessions) stored up front."""
 
     __tablename__ = "interview_questions"
     __table_args__ = (UniqueConstraint("session_id", "position"),)
@@ -79,12 +79,10 @@ class InterviewQuestion(UUIDPrimaryKeyMixin, Base):
     position: Mapped[int]
     text: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(32))
-    # Set only for bank questions; it also keeps the fallback from repeating a bank question in one session.
-    bank_id: Mapped[str | None] = mapped_column(String(64))
     source: Mapped[str] = mapped_column(
-        String(16), default=QuestionSource.bank, server_default=QuestionSource.bank.value
+        String(16), default=QuestionSource.llm, server_default=QuestionSource.llm.value
     )
-    # Usage of the LLM turn that produced this question (summed over its calls); null for bank questions.
+    # Usage of the LLM turn that produced this question (summed over its calls); null for stored questions.
     model: Mapped[str | None] = mapped_column(String(128))
     prompt_version: Mapped[str | None] = mapped_column(String(64))
     prompt_tokens: Mapped[int | None]

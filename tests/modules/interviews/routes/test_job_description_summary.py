@@ -106,9 +106,3 @@ def test_summary_usage_is_logged_with_its_own_prompt_version(start_interview, ma
     [line] = [r.getMessage() for r in app_logs.records if r.name == "app.llm" and "outcome=summary" in r.getMessage()]
     assert "prompt_version=job_description_summary_v2" in line and "prompt_tokens=420" in line
     assert "outcome=summary_ok" in line
-
-
-def test_without_an_llm_no_summary_is_made(start_interview, make_user, db):  # EC16; U3a EC1
-    created = start_interview(make_user(), job_description=LONG_JD).json()
-
-    assert stored_session(db, created["session"]["id"]).job_description_summary is None

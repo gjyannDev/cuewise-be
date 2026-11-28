@@ -46,8 +46,7 @@ def test_start_opens_one_trace_with_user_session_and_setup(start_interview, make
 
     created = start_interview(owner).json()
 
-    [span] = traces.spans
-    assert span["name"] == "start-interview"
+    [span] = [s for s in traces.spans if s["name"] == "start-interview"]  # the retrieval step is a span of its own
     assert span["input"]["role"] == "backend"
     assert traces.attrs == [{"user_id": str(owner.id), "session_id": created["session"]["id"]}]
 

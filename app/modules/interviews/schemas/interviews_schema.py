@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Literal, NamedTuple, Self
+from typing import Annotated, NamedTuple, Self
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -41,29 +41,6 @@ from ..constants.interviews_constants import (
 )
 
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-
-
-class BankQuestion(BaseModel):
-    """One entry of the hand-written question bank file."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    id: NonBlankStr
-    text: NonBlankStr
-    type: QuestionCategory
-    roles: list[JobRole | Literal["general"]] = Field(min_length=1)
-    levels: list[Level] = Field(min_length=1)
-
-
-def _unique_ids(bank: list[BankQuestion]) -> list[BankQuestion]:
-    ids = [q.id for q in bank]
-    duplicates = sorted({i for i in ids if ids.count(i) > 1})
-    if duplicates:
-        raise ValueError(f"duplicate question ids: {duplicates}")
-    return bank
-
-
-QuestionBank = Annotated[list[BankQuestion], Field(min_length=1), AfterValidator(_unique_ids)]
 
 
 class RubricCriterion(BaseModel):
@@ -336,7 +313,7 @@ class QuestionDeltaOut(_StreamEventData):
 
 
 class ResetOut(_StreamEventData):
-    """Discard the question text streamed so far: that draft failed and another one (or a bank question) follows."""
+    """Discard the question text streamed so far: that draft failed and another one follows (or the turn fails)."""
 
 
 class StreamErrorOut(_StreamEventData):

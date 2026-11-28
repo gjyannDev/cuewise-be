@@ -5,13 +5,20 @@ The model suggests and the code enforces, so no reply (or injected answer) can c
 
 import uuid
 from collections.abc import Callable
+from typing import NoReturn
 
 from app.core.ai.provider import LLMResult
 
 from ..ai.interviews_context import InterviewerInputs
 from ..ai.interviews_reply import Decision
 from ..ai.interviews_turn_log import log_turn_summary
-from ..ai.interviews_turn_types import TurnAction, TurnOutcome, WritePlan, Written
+from ..ai.interviews_turn_types import (
+    InterviewerFailedError,
+    TurnAction,
+    TurnOutcome,
+    WritePlan,
+    Written,
+)
 from ..constants.interviews_constants import (
     MAX_FOLLOW_UPS,
     MIN_SECONDS_FOR_WRITE,
@@ -84,30 +91,27 @@ def settle(
     written: Written | None,
     deadline: Deadline,
     *,
-    last_main: bool,
     budget_seconds: float,
 ) -> TurnOutcome:
-    """The write's result decides the outcome: a failed follow-up moves on, and the turn's summary line is logged.
-    `budget_seconds` is the turn's whole budget, so the summary can say how much of it the LLM calls used."""
-    action, fallback = plan.action, plan.fallback
+    """The write's result decides the outcome, and the turn's summary line is logged. A write that failed (or had no
+    time to start) ends the turn: the question is the one thing the candidate needs, and nothing replaces it, so
+    this raises `InterviewerFailedError` and the service saves nothing. `budget_seconds` is the turn's whole budget,
+    so the summary can say how much of it the LLM calls used."""
+    action, failure = plan.action, plan.fallback
     if written is not None and written.reply is None:
-        fallback = "write_failed"
-    if fallback and action == TurnAction.follow_up:
-        # No follow-up after all: move on as if the model had said so.
-        action = TurnAction.complete if last_main else TurnAction.next_question
+        failure = "write_failed"
 
     results = decide_results + (written.results if written else [])
-    source = (
-        "-" if action == TurnAction.complete else ("bank" if fallback else "llm")
-    )
     log_turn_summary(
         decision="none" if decision is None else _decision_label(decision),
         action=action,
         override=plan.override,
-        source=source,
-        fallback=fallback,
+        source="-" if action == TurnAction.complete or failure else "llm",
+        fallback=failure,
         llm_ms=round((budget_seconds - deadline.remaining()) * 1000),
     )
+    if failure:
+        raise InterviewerFailedError(failure)
     note = decision.note if decision else None
     if note is None and written and written.reply:
         note = (
@@ -115,11 +119,23 @@ def settle(
         )  # older prompts (v3 ablations) still write the note themselves
     return TurnOutcome(
         action,
-        written if fallback is None else None,
+        written,
         note,
         results,
         decision_version,
     )
+
+
+def fail_undecided(deadline: Deadline, *, budget_seconds: float) -> NoReturn:
+    """The decide call gave no usable decision: the turn ends here, before a write call spends more of the budget."""
+    log_turn_summary(
+        decision="none",
+        action=TurnAction.next_question,
+        source="-",
+        fallback="decide_failed",
+        llm_ms=round((budget_seconds - deadline.remaining()) * 1000),
+    )
+    raise InterviewerFailedError("decide_failed")
 
 
 def _decision_label(decision: Decision) -> str:
