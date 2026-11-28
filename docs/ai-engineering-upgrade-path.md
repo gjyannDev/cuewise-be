@@ -178,13 +178,15 @@ With every step, the eval tooling (`interviews_evals.py`, `interviews_feedback_e
 
 Done when: write, write-stream, decide and feedback match U0 within the noise margin; SSE events are unchanged; a stream failing after its first chunk is never retried; the worst-case call budget (`tests/core/ai/test_retry_budget.py`) still holds on the LangChain path.
 
-Result (implemented 2026-11-27, `docs/features/u3b1-interview-calls/`): all four calls run on the chat model, and `get_llm_provider` and the app's `LLMProvider` are gone from the app's wiring (the old classes stay for U3c to delete). Evals against the U3b1 baselines: write and generation no change; decide better (0.933 x 3 vs 0.800 / 0.867, the new decide baseline row); write-stream no change in quality and ~300-600 ms faster to the first token (native Gemini streaming); feedback no change, with Gemini taking the nested score schema. Comparison files: `docs/evals/u3b1-*-vs-baseline.md`. Review (`/review-feature`) pending.
+Result (implemented 2026-11-27, `docs/features/u3b1-interview-calls/`): all four calls run on the chat model, and `get_llm_provider` and the app's `LLMProvider` are gone from the app's wiring (the old classes stay for U3c to delete). Evals against the U3b1 baselines: write and generation no change; decide better (0.933 x 3 vs 0.800 / 0.867, the new decide baseline row); write-stream no change in quality and ~300-600 ms faster to the first token (native Gemini streaming); feedback no change, with Gemini taking the nested score schema. Comparison files: `docs/evals/u3b1-*-vs-baseline.md`. Reviewed (`/review-feature`) and committed.
 
 **U3b2: Retrieval** (step 7; needs U3a, best after U3b1)
 
 7. **Embeddings and retrieval**: spike first. Compare `GoogleGenerativeAIEmbeddings` vectors (`gemini-embedding-001`, 768 dimensions, `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`, both set per call) with the stored ones. If they match, use it, with its errors mapped (it wraps them as `GoogleGenerativeAIError`, the Google error is `__cause__`) and retries owned by `RetryPolicy`. If not, a thin `Embeddings` adapter over `GoogleEmbedder`, with no re-embedding. Then the vector `BaseRetriever` over `KnowledgeRepository`; the time cap, degrade reasons, similarity floor and ranking merge stay in `RetrievalService`. `MarkdownHeaderTextSplitter` only if it reproduces today's chunks and hashes; it lives in `langchain-text-splitters`, which isn't installed, so it needs a dependency justification, and any chunk difference means re-embedding everything.
 
 Done when: retrieval evals match U0 (recall@5, MRR); stored vectors and the model name are unchanged; the embedder call-count test in `test_retry_budget.py` is ported and still holds.
+
+Result (implemented 2026-11-27, `docs/features/u3b2-retrieval/`): `GoogleGenerativeAIEmbeddings` was not used: it sends no per-call timeout (its `request_options` is never passed) and its Google client retries 503s on its own for up to 60 s, so the time cap and retry budget couldn't hold. Instead `GoogleEmbedder` became a LangChain `Embeddings` itself (same request code, so no spike and no port of the call-count test were needed; it still holds). The vector search runs through a `BaseRetriever` bound to the already-computed vector (`interviews_retrieve.py`), keeping one batched embed call. `MarkdownHeaderTextSplitter` reproduced all 75 chunks and hashes and was adopted (`langchain-text-splitters`, approved), for section text only: it drops empty sections and merges repeated headings, so the ingestion checks keep their own heading scan. Retrieval eval: no change (26 of 26 cases with the same notes, order and scores; recall@5 1.00, MRR 0.909), `docs/evals/u3b2-embeddings-vs-baseline.md`. Reviewed (`/review-feature low`, 2026-11-27): two should-fix findings on the splitter fixed (indented lines and heading-format mismatches are now refused); two nits left open (see the feature's `task.md`).
 
 **U3c: Fallback chain + remove the old layer** (steps 8-9; needs U3b1 and U3b2)
 
@@ -383,8 +385,8 @@ Same habit as the first path: each slice gets `docs/features/<slice>/` with `spe
 - [ ] U2: tenacity
 - [ ] U3: Migrate to LangChain + provider fallback chain
   - [x] U3a: Foundation + first chains (JD summary, profile extraction)
-  - [x] U3b1: Interview calls (write/stream, decide, feedback) - implemented 2026-11-27, review pending
-  - [ ] U3b2: Retrieval (embeddings, retriever, splitter)
+  - [x] U3b1: Interview calls (write/stream, decide, feedback) - implemented 2026-11-27, reviewed
+  - [x] U3b2: Retrieval (embeddings, retriever, splitter) - implemented 2026-11-27, reviewed (low)
   - [ ] U3c: Fallback chain + remove the old layer
 - [ ] U4: Prompt templates + Langfuse Prompt Management
 - [ ] U5: Expand the knowledge corpus

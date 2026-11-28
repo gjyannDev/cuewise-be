@@ -138,9 +138,9 @@
     "semantic_hash": ""
   },
   "pyproject.toml": {
-    "mtime": 1795689420.978587,
-    "seen": 1795690133.4078045,
-    "ast_hash": "4ca19f40823692e4bbc7df88d3bcfc93",
+    "mtime": 1795782091.1156087,
+    "seen": 1795782389.5710254,
+    "ast_hash": "edd58bd138defd51902d9fa603409bd8",
     "semantic_hash": ""
   },
   "tests/conftest.py": {
@@ -1680,9 +1680,9 @@
     "semantic_hash": ""
   },
   "app/core/ai/google_embedder.py": {
-    "mtime": 1795688162.974482,
-    "seen": 1795690133.4075754,
-    "ast_hash": "f3ade6a352e14b7c7f0de1626448a90b",
+    "mtime": 1795780724.210367,
+    "seen": 1795781083.426059,
+    "ast_hash": "112a34f7963ae98934e5fd1c2849b3da",
     "semantic_hash": ""
   },
   "app/db/types.py": {
@@ -1728,9 +1728,9 @@
     "semantic_hash": ""
   },
   "app/modules/interviews/services/interviews_retrieval_service.py": {
-    "mtime": 1795688162.9916754,
-    "seen": 1795690133.4077144,
-    "ast_hash": "64eee9e0e5461be140ed0affa9723cf1",
+    "mtime": 1795781193.8370092,
+    "seen": 1795782389.5709338,
+    "ast_hash": "55e8137a00a93c8c4fa03302600ba602",
     "semantic_hash": ""
   },
   "app/modules/interviews/tooling/interviews_knowledge_ingest.py": {
@@ -1740,21 +1740,21 @@
     "semantic_hash": ""
   },
   "app/modules/interviews/tooling/interviews_rag_evals.py": {
-    "mtime": 1795758776.872575,
-    "seen": 1795758994.5538046,
-    "ast_hash": "126831bc51dc831fe1bada9669cc31a0",
+    "mtime": 1795781186.1186275,
+    "seen": 1795782389.5709476,
+    "ast_hash": "a3533acfa68be385561445fdbbda5d3c",
     "semantic_hash": ""
   },
   "app/modules/interviews/utils/interviews_knowledge_utils.py": {
-    "mtime": 1794835585.7028098,
-    "seen": 1795659309.7022865,
-    "ast_hash": "2b52f32c5756973c4160ec9cdbb02466",
+    "mtime": 1795784398.7802255,
+    "seen": 1795784621.6137779,
+    "ast_hash": "f139d2c25b12fc9ec02b51b837d7f056",
     "semantic_hash": ""
   },
   "tests/core/ai/test_google_embedder.py": {
-    "mtime": 1795688163.203974,
-    "seen": 1795690133.4078112,
-    "ast_hash": "dd67c9fc0ee1323f02a18367b59d696a",
+    "mtime": 1795780700.170116,
+    "seen": 1795781083.4263492,
+    "ast_hash": "7812d93b580c454a1074b071da68d2f7",
     "semantic_hash": ""
   },
   "tests/modules/interviews/ai/test_reference_note_context.py": {
@@ -1806,9 +1806,9 @@
     "semantic_hash": ""
   },
   "tests/modules/interviews/utils/test_knowledge_utils.py": {
-    "mtime": 1794835586.2555828,
-    "seen": 1795659309.7024937,
-    "ast_hash": "3c5df140f41ace0465669cd5dc0b46a9",
+    "mtime": 1795784371.3242815,
+    "seen": 1795784621.6139941,
+    "ast_hash": "bd3a0754bb4384bd33340e5965fc8d8a",
     "semantic_hash": ""
   },
   "tests/modules/interviews/utils/test_shipped_corpus.py": {
@@ -2874,9 +2874,9 @@
     "semantic_hash": ""
   },
   "docs/ai-engineering-upgrade-path.md": {
-    "mtime": 1795774943.9100063,
-    "seen": 1795775146.7442305,
-    "ast_hash": "4a0c5951d5db7e78d51bb4895b1d618b",
+    "mtime": 1795783974.6697178,
+    "seen": 1795784103.8620713,
+    "ast_hash": "4f56e8628601d5de594fba186998b38f",
     "semantic_hash": ""
   },
   "docs/evals/baselines.md": {
@@ -3219,6 +3219,60 @@
     "mtime": 1795772117.5664945,
     "seen": 1795775146.7442367,
     "ast_hash": "283a194e756ee95a48f2f22ef384726d",
+    "semantic_hash": ""
+  },
+  "app/modules/interviews/ai/interviews_retrieve.py": {
+    "mtime": 1795784399.327905,
+    "seen": 1795784621.6136901,
+    "ast_hash": "5a8279cadc5229c29c98d77a0899c241",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/ai/test_retrieve.py": {
+    "mtime": 1795780852.6140542,
+    "seen": 1795781083.4264057,
+    "ast_hash": "97cfb4338fbad6fb9d2f92acaf7d0516",
+    "semantic_hash": ""
+  },
+  "docs/features/u3b2-retrieval/learnings.md": {
+    "mtime": 1795784606.0448236,
+    "seen": 1795784621.614266,
+    "ast_hash": "9ca6eadb73c17498bf7918939b16bbe7",
+    "semantic_hash": ""
+  },
+  "docs/features/u3b2-retrieval/plan.md": {
+    "mtime": 1795780674.1595101,
+    "seen": 1795781083.4267547,
+    "ast_hash": "fcfb9de208a2e023ea0d632f08764523",
+    "semantic_hash": ""
+  },
+  "docs/features/u3b2-retrieval/spec.md": {
+    "mtime": 1795779139.3595355,
+    "seen": 1795781083.426756,
+    "ast_hash": "25cc9bb78e9cf26c678c0efa1a696a8a",
+    "semantic_hash": ""
+  },
+  "docs/features/u3b2-retrieval/task.md": {
+    "mtime": 1795784605.8664103,
+    "seen": 1795784621.6142697,
+    "ast_hash": "8cde15448528e23780e34c30cc3a9cf8",
+    "semantic_hash": ""
+  },
+  "app/modules/interviews/ai/interviews_split.py": {
+    "mtime": 1795782222.3100145,
+    "seen": 1795782389.5708687,
+    "ast_hash": "09f67cea15e957ddb959a77ae547f8b1",
+    "semantic_hash": ""
+  },
+  "tests/modules/interviews/ai/test_split.py": {
+    "mtime": 1795782102.6543958,
+    "seen": 1795782389.5710967,
+    "ast_hash": "412fdd4ac08727d4f6373679c04e0012",
+    "semantic_hash": ""
+  },
+  "docs/evals/u3b2-embeddings-vs-baseline.md": {
+    "mtime": 1795783951.765742,
+    "seen": 1795784103.8620837,
+    "ast_hash": "089ef04d290877887e45b7a5a71c5f7e",
     "semantic_hash": ""
   }
 }
